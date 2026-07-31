@@ -2,74 +2,74 @@
 
 Commands are a user interface over the core object model. Keep command classes small: parse arguments, resolve a bench, and call a core object or task.
 
-Use `bench --help` and `bench <command> --help` for exact flags.
+Use `pilot --help` and `pilot <command> --help` for exact flags.
 
 ## Bench Commands
 
-- `bench new NAME`: create a new bench.
-- `bench init`: initialize a bench from `bench.toml`.
-- `bench ls`: list benches in the fixed benches directory.
-- `bench drop --bench NAME`: remove a bench.
+- `pilot new NAME`: create a new bench.
+- `pilot init`: initialize a bench from `bench.toml`.
+- `pilot ls`: list benches in the fixed benches directory.
+- `pilot drop --bench NAME`: remove a bench.
 
 Bench commands with `--bench NAME` can run from outside the bench directory. `Bench("name")` resolves the same fixed benches directory in Python code.
 
 ## Runtime Commands
 
-- `bench start`: start bench processes.
-- `bench stop`: stop bench processes.
-- `bench restart`: restart the production workload.
-- `bench build`: build assets or download prebuilt assets when available.
-- `bench frappe -- ...`: pass through to Frappe's bench helper.
+- `pilot start`: start bench processes.
+- `pilot stop`: stop bench processes.
+- `pilot restart`: restart the production workload.
+- `pilot build`: build assets or download prebuilt assets when available.
+- `pilot frappe -- ...`: pass through to Frappe's bench helper.
 
 Some runtime commands support all benches when invoked with the CLI option for all-bench execution.
 
 ## App Commands
 
-- `bench new-app APP`: scaffold a new Frappe app under `apps/` and install it. Prompts for title, description, publisher, email, license, GitHub workflow, and branch; pass any of `--title/--description/--publisher/--email/--license/--branch/--github-workflow` to skip prompts (branch defaults to `develop`).
-- `bench get-app REPO_OR_NAME`: clone and install an app into the bench.
-- `bench list-apps`: list apps present in the bench.
-- `bench install-app APP --site SITE`: install apps on a site.
-- `bench uninstall-app APP --site SITE`: uninstall apps from a site.
-- `bench remove-app APP`: remove an app from the bench when no site needs it.
+- `pilot new-app APP`: scaffold a new Frappe app under `apps/` and install it. Prompts for title, description, publisher, email, license, GitHub workflow, and branch; pass any of `--title/--description/--publisher/--email/--license/--branch/--github-workflow` to skip prompts (branch defaults to `develop`).
+- `pilot get-app REPO_OR_NAME`: clone and install an app into the bench.
+- `pilot list-apps`: list apps present in the bench.
+- `pilot install-app APP --site SITE`: install apps on a site.
+- `pilot uninstall-app APP --site SITE`: uninstall apps from a site.
+- `pilot remove-app APP`: remove an app from the bench when no site needs it.
 
 Long app operations should use task classes from `pilot.tasks`.
 
 ## Site Commands
 
-- `bench new-site SITE`: create a site and add it to bench config.
-- `bench rename-site OLD NEW`: rename a site.
-- `bench list-site-apps SITE`: list apps installed on a site.
-- `bench set-admin-password SITE`: update the site Administrator password.
+- `pilot new-site SITE`: create a site and add it to bench config.
+- `pilot rename-site OLD NEW`: rename a site.
+- `pilot list-site-apps SITE`: list apps installed on a site.
+- `pilot set-admin-password SITE`: update the site Administrator password.
 
 Site behavior belongs on `Site` or a module under `pilot/core/site`.
 
 ## Setup Commands
 
-- `bench setup requirements`: install Python and JS requirements.
-- `bench setup config`: regenerate config files from `bench.toml`.
-- `bench setup nginx`: render nginx config.
-- `bench setup letsencrypt`: issue or refresh TLS certificates.
-- `bench setup production`: deploy process manager and nginx integration.
-- `bench remove production`: remove production deployment files and services.
+- `pilot setup requirements`: install Python and JS requirements.
+- `pilot setup config`: regenerate config files from `bench.toml`.
+- `pilot setup nginx`: render nginx config.
+- `pilot setup letsencrypt`: issue or refresh TLS certificates.
+- `pilot setup production`: deploy process manager and nginx integration.
+- `pilot remove production`: remove production deployment files and services.
 
 Production setup uses the bench config and system managers. The command should not duplicate nginx, process manager, or certificate logic.
 
 ## Task Worker Commands
 
-- `bench tasks status`: show Admin task worker state.
-- `bench tasks start`: allow queued Admin tasks to run.
-- `bench tasks stop`: drain the worker and leave queued tasks waiting.
+- `pilot tasks status`: show Admin task worker state.
+- `pilot tasks start`: allow queued Admin tasks to run.
+- `pilot tasks stop`: drain the worker and leave queued tasks waiting.
 
 These commands control the task worker, not individual Frappe workers.
 
 ## Admin Commands
 
-- `bench admin build`: rebuild Admin frontend assets from source.
-- `bench admin upgrade`: update bench-cli to the latest version, run pending upgrade patches (pre_update before, post_update after), and restart the admin service.
-- `bench admin enroll`: exchange the bootstrap token for this bench's Central credential.
-- `bench admin set-central-config`: store Central endpoint and Pilot auth token.
-- `bench admin issue-site-token`: issue a scoped site-to-bench API token.
-- `bench admin run-patches [--phase pre_update|post_update|all]`: run pending bench-cli upgrade patches by hand (see [Configuration](configuration.md#common-config)); `bench admin upgrade` already runs both phases automatically.
+- `pilot admin build`: rebuild Admin frontend assets from source.
+- `pilot admin upgrade`: update Pilot to the latest version, run pending upgrade patches (pre_update before, post_update after), and restart the admin service.
+- `pilot admin enroll`: exchange the bootstrap token for this bench's Central credential.
+- `pilot admin set-central-config`: store Central endpoint and Pilot auth token.
+- `pilot admin issue-site-token`: issue a scoped site-to-bench API token.
+- `pilot admin run-patches [--phase pre_update|post_update|all]`: run pending Pilot upgrade patches by hand (see [Configuration](configuration.md#common-config)); `pilot admin upgrade` already runs both phases automatically.
 
 Admin commands live in `pilot/commands/admin`. Backend route behavior lives under `admin/backend/api/v1`.
 

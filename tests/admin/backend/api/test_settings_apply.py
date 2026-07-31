@@ -78,7 +78,7 @@ def test_settings_report_nginx_failure_without_exception_text(tmp_path: Path) ->
         config.production.process_manager = "systemd"
 
     # nginx is only regenerated on a production bench; production is set up out
-    # of band (`bench setup production`), not via the settings patcher.
+    # of band (`pilot setup production`), not via the settings patcher.
     client = _client(tmp_path / "bench", enable_production)
     update = {
         "firewall": {

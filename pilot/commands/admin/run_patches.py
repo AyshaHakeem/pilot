@@ -10,7 +10,7 @@ from pilot.commands import Arg, BenchMode, Command
 class RunPatchesCommand(Command):
     name: ClassVar[str] = "run-patches"
     group: ClassVar[str] = "admin"
-    help: ClassVar[str] = "Run pending bench-cli upgrade patches (see pilot/patches/patches.txt)."
+    help: ClassVar[str] = "Run pending Pilot upgrade patches (see pilot/patches/patches.txt)."
     bench_mode: ClassVar[BenchMode] = BenchMode.NONE
 
     phase: Annotated[

@@ -26,7 +26,7 @@ class NewSiteTask(Task):
     def reload_for_site_apps(self) -> None:
         """Provisioning runs install-app, which enqueues jobs that import the
         site's apps. Always reload: an app already on the bench may still predate
-        the running workers, having arrived through `bench get-app`."""
+        the running workers, having arrived through `pilot get-app`."""
         self.bench.reload_workers()
 
     @on_failure
@@ -55,8 +55,8 @@ class NewSiteTask(Task):
         for app_name in missing:
             resolver = marketplace.find_app(app_name)
             with self.step("fetch", f"Fetch {app_name}"):
-                App.from_repo(self.bench, resolver.repo, resolver.target).install(
-                    install_dependencies=True, on_progress=self.report
+                App.from_repo(self.bench, resolver.repo, resolver.branch).install(
+                    install_dependencies=True, commit=resolver.commit, on_progress=self.report
                 )
 
 

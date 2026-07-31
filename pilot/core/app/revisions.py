@@ -12,9 +12,7 @@ class RevisionPin:
     ref: str
 
     @classmethod
-    def from_marketplace_target(cls, target: dict) -> "RevisionPin | None":
-        """Build a pin from a registry target dict, or None for a branch target."""
-        kind = target.get("target_type")
-        if kind not in ("tag", "commit"):
-            return None
-        return cls(kind=kind, ref=target["target"])
+    def from_marketplace_release(cls, release: dict) -> "RevisionPin | None":
+        """Build a commit pin from a registry release, or None when it advertises no commit."""
+        commit = release.get("commit")
+        return cls(kind="commit", ref=commit) if commit else None

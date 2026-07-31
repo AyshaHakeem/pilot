@@ -55,8 +55,8 @@ curl -fsSL https://raw.githubusercontent.com/frappe/pilot/develop/install.sh | b
 Create a bench and launch the setup wizard:
 
 ```bash
-bench new dev-bench
-bench -b dev-bench start
+pilot new dev-bench
+pilot -b dev-bench start
 ```
 
 The first `start` will print the url to access the admin wizard. The wizard asks for the Admin password, database settings, and Frappe source settings, then initializes the bench with live task progress.
@@ -65,17 +65,17 @@ Common commands:
 
 | Command | Purpose |
 |---|---|
-| `bench new <name>` | Create a bench and `bench.toml` |
-| `bench ls` | List benches, status, production state, and Admin URL |
-| `bench -b <name> init` | Initialize a bench from `bench.toml` |
-| `bench -b <name> start` | Start development processes |
-| `bench -b <name> stop` | Stop development processes |
-| `bench -b <name> get-app <repo>` | Clone and install an app |
-| `bench -b <name> new-site <site>` | Create a site |
-| `bench -b <name> update` | Pull apps, install deps, build assets, and migrate sites |
-| `bench -b <name> setup production` | Configure process manager, nginx, Admin domain, and optional TLS |
-| `bench -b <name> restart` | Restart production processes |
-| `bench -b <name> remove production` | Remove production deployment files and services |
+| `pilot new <name>` | Create a bench and `bench.toml` |
+| `pilot ls` | List benches, status, production state, and Admin URL |
+| `pilot -b <name> init` | Initialize a bench from `bench.toml` |
+| `pilot -b <name> start` | Start development processes |
+| `pilot -b <name> stop` | Stop development processes |
+| `pilot -b <name> get-app <repo>` | Clone and install an app |
+| `pilot -b <name> new-site <site>` | Create a site |
+| `pilot -b <name> update` | Pull apps, install deps, build assets, and migrate sites |
+| `pilot -b <name> setup production` | Configure process manager, nginx, Admin domain, and optional TLS |
+| `pilot -b <name> restart` | Restart production processes |
+| `pilot -b <name> remove production` | Remove production deployment files and services |
 
 For the full command list, see [Commands](docs/commands.md).
 
@@ -122,8 +122,8 @@ Apps and sites also exist on disk under the bench. See [Configuration](docs/conf
 Production setup writes process-manager config, nginx integration, Admin routing, monitoring config, and optional Let's Encrypt certificates.
 
 ```bash
-bench -b main setup production --admin-domain admin.example.com
-bench -b main setup production --admin-domain admin.example.com --tls --letsencrypt-email ops@example.com
+pilot -b main setup production --admin-domain admin.example.com
+pilot -b main setup production --admin-domain admin.example.com --tls --letsencrypt-email ops@example.com
 ```
 
 The Admin domain is required in production. Set `admin.tls = false` when HTTPS terminates at an upstream proxy.
@@ -149,6 +149,7 @@ See [Admin UI](docs/admin-ui.md) and [Admin API](docs/admin-api.md).
 - [Architecture](docs/architecture.md)
 - [Commands](docs/commands.md)
 - [Configuration](docs/configuration.md)
+- [App Dependencies](docs/app-dependencies.md)
 - [Tasks](docs/tasks.md)
 - [Admin API](docs/admin-api.md)
 - [Admin UI](docs/admin-ui.md)
@@ -165,14 +166,14 @@ Use a source checkout when working on Pilot:
 ```bash
 git clone https://github.com/frappe/pilot ~/pilot
 cd ~/pilot
-export PATH="$PWD:$PATH"
+export PATH="$PWD/bin:$PATH"
 ```
 
 Create a development bench:
 
 ```bash
-bench new dev
-bench -b dev start
+pilot new dev
+pilot -b dev start
 ```
 
 Useful development toggles in `bench.toml`:

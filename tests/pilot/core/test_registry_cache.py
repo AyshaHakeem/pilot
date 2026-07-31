@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -11,7 +12,7 @@ from unittest.mock import patch
 import pytest
 
 from pilot.core.registry_cache import RegistryCache
-from pilot.exceptions import BenchError
+from pilot.exceptions import BenchError, RegistryUnavailableError
 
 
 def make_remote(tmp_path: Path, content: str = '{"apps": []}') -> Path:
@@ -52,7 +53,7 @@ def make_cache(tmp_path: Path) -> RegistryCache:
 def test_ensure_fresh_clones_on_first_use(tmp_path: Path) -> None:
     cache = make_cache(tmp_path)
     cache.ensure_fresh()
-    assert cache.apps_json_path.read_text() == '{"apps": []}'
+    assert cache.index_path.read_text() == '{"apps": []}'
 
 
 def test_ensure_fresh_skips_network_within_refresh_window(tmp_path: Path, _point_at_local_remote) -> None:
@@ -64,7 +65,7 @@ def test_ensure_fresh_skips_network_within_refresh_window(tmp_path: Path, _point
         cache.ensure_fresh()
 
     mock_head.assert_not_called()
-    assert cache.apps_json_path.read_text() == '{"apps": []}'  # unchanged - stale check skipped
+    assert cache.index_path.read_text() == '{"apps": []}'  # unchanged - stale check skipped
 
 
 def test_ensure_fresh_pulls_when_refresh_window_elapsed(tmp_path: Path, _point_at_local_remote) -> None:
@@ -75,7 +76,7 @@ def test_ensure_fresh_pulls_when_refresh_window_elapsed(tmp_path: Path, _point_a
 
     cache.ensure_fresh()
 
-    assert cache.apps_json_path.read_text() == '{"apps": ["new"]}'
+    assert cache.index_path.read_text() == '{"apps": ["new"]}'
 
 
 def test_ensure_fresh_raises_on_manual_edit(tmp_path: Path) -> None:
@@ -95,7 +96,7 @@ def test_ensure_fresh_falls_back_to_local_clone_when_offline(tmp_path: Path) -> 
     with patch.object(RegistryCache, "_remote_head_sha", return_value=None):
         cache.ensure_fresh()  # must not raise
 
-    assert cache.apps_json_path.read_text() == '{"apps": []}'
+    assert cache.index_path.read_text() == '{"apps": []}'
 
 
 def test_ensure_fresh_falls_back_when_fetch_fails_mid_refresh(tmp_path: Path, _point_at_local_remote) -> None:
@@ -119,7 +120,7 @@ def test_ensure_fresh_falls_back_when_fetch_fails_mid_refresh(tmp_path: Path, _p
     ):
         cache.ensure_fresh()  # must not raise
 
-    assert cache.apps_json_path.read_text() == '{"apps": []}'
+    assert cache.index_path.read_text() == '{"apps": []}'
 
 
 def test_ensure_fresh_raises_bench_error_when_git_status_fails(tmp_path: Path) -> None:
@@ -161,7 +162,7 @@ def test_ensure_fresh_falls_back_when_rev_parse_fails_mid_refresh(
     ):
         cache.ensure_fresh()  # must not raise
 
-    assert cache.apps_json_path.read_text() == '{"apps": []}'
+    assert cache.index_path.read_text() == '{"apps": []}'
 
 
 def test_first_clone_installs_daily_refresh_cron(tmp_path: Path) -> None:
@@ -202,6 +203,71 @@ def test_subsequent_ensure_fresh_does_not_reinstall_cron(tmp_path: Path) -> None
         cache.ensure_fresh()  # already cloned, within refresh window
 
     mock_cron_cls.assert_not_called()
+
+
+INDEX = [{"name": "helpdesk", "repo": "https://github.com/frappe/helpdesk", "releases": "apps/helpdesk.json"}]
+RELEASES = {"name": "helpdesk", "releases": [{"version": "1.27.0", "branch": "main", "commit": "a" * 40}]}
+
+
+def publish(remote: Path, index: list | dict, releases: dict | None = RELEASES) -> None:
+    """Write an index (and its release file) to the remote and commit it."""
+    (remote / "apps.json").write_text(json.dumps(index))
+    if releases is not None:
+        (remote / "apps").mkdir(exist_ok=True)
+        (remote / "apps" / f"{releases['name']}.json").write_text(json.dumps(releases))
+    _git(remote, "add", "-A")
+    _git(remote, "commit", "-q", "--allow-empty", "-m", "publish")
+
+
+def test_load_inlines_releases_per_app(tmp_path: Path, _point_at_local_remote) -> None:
+    publish(_point_at_local_remote, INDEX)
+    cache = make_cache(tmp_path)
+
+    entries = cache.load()
+
+    assert entries[0]["name"] == "helpdesk"
+    assert entries[0]["releases"] == RELEASES["releases"]
+
+
+def test_load_rejects_releases_pointer_that_is_not_the_apps_path(
+    tmp_path: Path, _point_at_local_remote
+) -> None:
+    index = [{**INDEX[0], "releases": "apps/other.json"}]
+    publish(_point_at_local_remote, index)
+
+    with pytest.raises(RegistryUnavailableError, match="must point 'releases' at"):
+        make_cache(tmp_path).load()
+
+
+def test_load_rejects_traversal_in_app_name(tmp_path: Path, _point_at_local_remote) -> None:
+    index = [{"name": "../../etc/passwd", "repo": "r", "releases": "apps/../../etc/passwd.json"}]
+    publish(_point_at_local_remote, index, releases=None)
+
+    with pytest.raises(RegistryUnavailableError, match="must point 'releases' at"):
+        make_cache(tmp_path).load()
+
+
+def test_load_raises_when_release_file_is_missing(tmp_path: Path, _point_at_local_remote) -> None:
+    publish(_point_at_local_remote, INDEX, releases=None)
+
+    with pytest.raises(RegistryUnavailableError, match="Could not read the marketplace registry"):
+        make_cache(tmp_path).load()
+
+
+def test_load_raises_when_release_file_has_no_releases_list(
+    tmp_path: Path, _point_at_local_remote
+) -> None:
+    publish(_point_at_local_remote, INDEX, releases={"name": "helpdesk"})
+
+    with pytest.raises(RegistryUnavailableError, match="does not hold a 'releases' list"):
+        make_cache(tmp_path).load()
+
+
+def test_load_raises_when_index_is_not_a_list(tmp_path: Path, _point_at_local_remote) -> None:
+    publish(_point_at_local_remote, {"apps": []}, releases=None)
+
+    with pytest.raises(RegistryUnavailableError, match="not a list of apps"):
+        make_cache(tmp_path).load()
 
 
 def _age_last_checked(cache: RegistryCache) -> None:

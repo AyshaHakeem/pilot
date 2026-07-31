@@ -15,8 +15,8 @@ from pilot.managers.processes.local import ProcessDefinition, ProcessManager
 
 
 class UnitGroup(Enum):
-    WORKLOAD = auto()  # web, socketio, workers, redis - what `bench stop` stops
-    ADMIN = auto()  # the control plane - survives `bench stop`
+    WORKLOAD = auto()  # web, socketio, workers, redis - what `pilot stop` stops
+    ADMIN = auto()  # the control plane - survives `pilot stop`
     WEB = auto()  # just web, for reload_workers(web_only=True)
 
 

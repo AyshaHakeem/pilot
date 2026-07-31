@@ -91,15 +91,15 @@ const uninstall = (app) =>
 const updateOne = (app) =>
   runAction(app, "update", () => store.api.updateApps([app.name]));
 
-// An unresolved migration blocks every update: link to the page that clears it
+// An unresolved update operation blocks every update: link to the page that clears it
 // rather than invite a retry that cannot succeed.
 function asBlocker(exception) {
   if (!store.api.isMigrationConflict(exception)) return null;
   const server = store.state.context.server_url;
   return {
     message: store.api.getErrorMessage(exception),
-    actionLabel: server ? __("Open migrations") : "",
-    actionUrl: server ? `${server.replace(/\/$/, "")}/migrations` : "",
+    actionLabel: server ? __("Open updates") : "",
+    actionUrl: server ? `${server.replace(/\/$/, "")}/updates` : "",
   };
 }
 

@@ -18,4 +18,4 @@ class UpdateConfigCommand(Command):
         self.report("Updating common_site_config.json...")
         self.bench.rebuild_runtime_config()
         if self.bench.config.production.enabled:
-            self.report("  Note: run 'bench setup nginx' to reload nginx with the new config.")
+            self.report("  Note: run 'pilot setup nginx' to reload nginx with the new config.")

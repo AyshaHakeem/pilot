@@ -17,14 +17,16 @@ def make_resolver(
     dependencies: dict | None = None,
     is_installable: bool = True,
     repo: str = "https://github.com/frappe/myapp",
-    target: str = "version-15",
-    target_type: str = "branch",
+    branch: str = "version-15",
+    commit: str = "a" * 40,
+    channel: str = "stable",
 ) -> Resolver:
     return Resolver(
         app=app,
         repo=repo,
-        target_type=target_type,
-        target=target,
+        branch=branch,
+        commit=commit,
+        channel=channel,
         version=version,
         frappe_version=frappe_version,
         required_version=required_version,
@@ -61,8 +63,9 @@ def test_to_dict_contains_all_expected_keys():
     keys = {
         "name",
         "repo",
-        "target_type",
-        "target",
+        "branch",
+        "commit",
+        "channel",
         "version",
         "frappe_version",
         "required_version",
@@ -269,17 +272,17 @@ SAMPLE_REGISTRY = [
         "category": "Applications",
         "categories": ["Accounting", "Featured"],
         "stars": 22000,
-        "targets": [
+        "releases": [
             {
-                "target_type": "branch",
-                "target": "version-15",
+                "branch": "version-15",
+                "commit": "1111111111111111111111111111111111111111",
                 "version": "15.0.0",
                 "frappe_core": ">=15.0.0,<16.0.0",
                 "dependencies": {},
             },
             {
-                "target_type": "branch",
-                "target": "version-16",
+                "branch": "version-16",
+                "commit": "2222222222222222222222222222222222222222",
                 "version": "16.0.0",
                 "frappe_core": ">=16.0.0,<17.0.0",
                 "dependencies": {},
@@ -294,10 +297,10 @@ SAMPLE_REGISTRY = [
         "logo_url": "",
         "category": "Applications",
         "stars": None,
-        "targets": [
+        "releases": [
             {
-                "target_type": "branch",
-                "target": "version-15",
+                "branch": "version-15",
+                "commit": "3333333333333333333333333333333333333333",
                 "version": "15.0.0",
                 "frappe_core": ">=15.0.0,<16.0.0",
                 "dependencies": {"erpnext": ">=15.0.0"},
@@ -312,10 +315,10 @@ SAMPLE_REGISTRY = [
         "logo_url": "",
         "category": "Utilities",
         "stars": 10,
-        "targets": [
+        "releases": [
             {
-                "target_type": "branch",
-                "target": "version-14",
+                "branch": "version-14",
+                "commit": "4444444444444444444444444444444444444444",
                 "version": "14.0.0",
                 "frappe_core": ">=14.0.0,<15.0.0",
                 "dependencies": {},
@@ -329,7 +332,7 @@ def make_marketplace(frappe_version: str, registry: list | None = None) -> Marke
     bench = MagicMock()
     bench.env_path = Path("/fake/env")
 
-    import json
+    from copy import deepcopy
 
     with (
         patch(
@@ -337,8 +340,8 @@ def make_marketplace(frappe_version: str, registry: list | None = None) -> Marke
             return_value=frappe_version,
         ),
         patch(
-            "pilot.integrations.marketplace.Marketplace._read_apps_json",
-            return_value=json.dumps(registry or SAMPLE_REGISTRY),
+            "pilot.integrations.marketplace.Marketplace._load_registry",
+            return_value=deepcopy(registry or SAMPLE_REGISTRY),
         ),
     ):
         return Marketplace(bench)
@@ -349,11 +352,11 @@ def test_parse_registry_tolerates_bad_frappe_core():
         {
             "name": "null_spec_app",
             "repo": "https://github.com/frappe/null_spec_app",
-            "targets": [
+            "releases": [
                 {
                     "version": "1.0.0",
-                    "target_type": "branch",
-                    "target": "main",
+                    "branch": "main",
+                    "commit": "5555555555555555555555555555555555555555",
                     "frappe_core": None,
                 },
             ],
@@ -361,11 +364,11 @@ def test_parse_registry_tolerates_bad_frappe_core():
         {
             "name": "garbage_spec_app",
             "repo": "https://github.com/frappe/garbage_spec_app",
-            "targets": [
+            "releases": [
                 {
                     "version": "1.0.0",
-                    "target_type": "branch",
-                    "target": "main",
+                    "branch": "main",
+                    "commit": "6666666666666666666666666666666666666666",
                     "frappe_core": "not-a-spec",
                 },
             ],
@@ -400,19 +403,20 @@ def test_read_all_apps_marks_incompatible_app_as_not_installable():
     assert old_app.is_installable is False
 
 
-def test_read_all_apps_uses_correct_target_for_frappe_version():
+def test_read_all_apps_uses_correct_release_for_frappe_version():
     mp = make_marketplace("16.0.0")
     apps = mp.read_all_apps()
     erpnext = next(a for a in apps if a.app == "erpnext")
-    assert erpnext.target == "version-16"
+    assert erpnext.branch == "version-16"
+    assert erpnext.commit == "2" * 40
     assert erpnext.version == "16.0.0"
 
 
-def test_read_all_apps_uses_first_target_as_display_for_incompatible():
+def test_read_all_apps_uses_newest_release_as_display_for_incompatible():
     mp = make_marketplace("17.0.0")
     apps = mp.read_all_apps()
     old_app = next(a for a in apps if a.app == "old_app")
-    assert old_app.target == "version-14"
+    assert old_app.branch == "version-14"
 
 
 def test_read_all_apps_passes_categories_through():
@@ -484,17 +488,17 @@ def test_read_all_apps_multi_target_registry_has_all_compatible_versions():
             "logo_url": "",
             "category": "Applications",
             "stars": 0,
-            "targets": [
+            "releases": [
                 {
-                    "target_type": "branch",
-                    "target": "version-15",
+                    "branch": "version-15",
+                    "commit": "7777777777777777777777777777777777777777",
                     "version": "15.0.0",
                     "frappe_core": ">=15.0.0,<16.0.0",
                     "dependencies": {},
                 },
                 {
-                    "target_type": "branch",
-                    "target": "version-15-hotfix",
+                    "branch": "version-15-hotfix",
+                    "commit": "8888888888888888888888888888888888888888",
                     "version": "15.1.0",
                     "frappe_core": ">=15.0.0,<16.0.0",
                     "dependencies": {},
@@ -508,7 +512,70 @@ def test_read_all_apps_multi_target_registry_has_all_compatible_versions():
     assert len(reg_entries) == 2
 
 
-def test_read_all_apps_no_targets_produces_non_installable():
+NIGHTLY_REGISTRY = [
+    {
+        "name": "helpdesk",
+        "repo": "https://github.com/frappe/helpdesk",
+        "title": "Helpdesk",
+        "releases": [
+            {
+                "branch": "develop",
+                "commit": "d" * 40,
+                "version": "16.0.0-dev",
+                "frappe_core": ">=16.0.0-dev,<17.0.0",
+                "channel": "nightly",
+                "dependencies": {},
+            },
+            {
+                "branch": "main",
+                "commit": "e" * 40,
+                "version": "1.27.0",
+                "frappe_core": ">=15.0.0,<16.0.0",
+                "channel": "stable",
+                "dependencies": {},
+            },
+        ],
+    }
+]
+
+
+def test_read_all_apps_prefers_stable_over_nightly():
+    mp = make_marketplace("15.80.0", NIGHTLY_REGISTRY)
+    helpdesk = mp.find_app("helpdesk")
+    assert helpdesk.channel == "stable"
+    assert helpdesk.branch == "main"
+    assert helpdesk.commit == "e" * 40
+
+
+def test_read_all_apps_falls_back_to_nightly_when_no_stable_release_fits():
+    mp = make_marketplace("16.0.0-dev", NIGHTLY_REGISTRY)
+    helpdesk = mp.find_app("helpdesk")
+    assert helpdesk.channel == "nightly"
+    assert helpdesk.branch == "develop"
+
+
+def test_read_all_apps_keeps_nightly_out_of_dependency_lookup_when_stable_fits():
+    mp = make_marketplace("15.80.0", NIGHTLY_REGISTRY)
+    apps = mp.read_all_apps()
+    assert [r.channel for r in apps[0]._registry["helpdesk"]] == ["stable"]
+
+
+def test_parse_registry_sorts_releases_newest_first():
+    registry = [
+        {
+            "name": "payments",
+            "repo": "https://github.com/frappe/payments",
+            "releases": [
+                {"version": "1.0.0", "branch": "main", "commit": "a" * 40, "frappe_core": ">=15.0.0"},
+                {"version": "2.0.0", "branch": "main", "commit": "b" * 40, "frappe_core": ">=15.0.0"},
+            ],
+        }
+    ]
+    mp = make_marketplace("15.0.0", registry)
+    assert [r["version"] for r in mp._registry[0]["releases"]] == ["2.0.0", "1.0.0"]
+
+
+def test_read_all_apps_no_releases_produces_non_installable():
     registry = [
         {
             "name": "ghost_app",
@@ -518,7 +585,7 @@ def test_read_all_apps_no_targets_produces_non_installable():
             "logo_url": "",
             "category": "Utilities",
             "stars": 0,
-            "targets": [],
+            "releases": [],
         }
     ]
     mp = make_marketplace("15.0.0", registry)

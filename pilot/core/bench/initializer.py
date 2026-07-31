@@ -31,7 +31,7 @@ class BenchInitializer:
         python_env_manager = PythonEnvManager(self.bench)
 
         # Production deployment (process manager, nginx, TLS) is intentionally
-        # NOT done here - it's a separate `bench setup production` step. bench
+        # NOT done here - it's a separate `pilot setup production` step. Pilot
         # init never needs root: system packages/services are installed once
         # by install.sh, and MariaDB/PostgreSQL run as a rootless per-user
         # server (see MariaDBManager/PostgresManager).
@@ -59,8 +59,8 @@ class BenchInitializer:
             action()
 
         on_progress("\nBench initialised. Next steps:")
-        on_progress("  bench new-site site1.example.com   # create your first site")
-        on_progress("  bench start                        # start all processes")
+        on_progress("  pilot new-site site1.example.com   # create your first site")
+        on_progress("  pilot start                        # start all processes")
 
     def _rollback(self, on_progress: Callable[[str], None]) -> None:
         if not self._rollback_actions:
@@ -175,7 +175,7 @@ class BenchInitializer:
         # frappe imports mysqlclient in its __init__.py for every engine, so the
         # MariaDB client headers are always required; postgres benches additionally
         # need libpq headers for psycopg. install.sh provisions them once for the
-        # whole host, so bench init only ever verifies them.
+        # whole host, so pilot init only ever verifies them.
         from pilot.exceptions import BenchError
         from pilot.managers.platform import is_linux
 

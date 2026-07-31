@@ -34,7 +34,7 @@ def test_install_returns_empty_when_app_not_in_marketplace_and_no_required_apps(
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
     ):
         result = AppDependencyInstaller(bench, app).install()
 
@@ -53,7 +53,7 @@ def test_install_installs_missing_dependency(tmp_path: Path) -> None:
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[helpdesk]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         patch.object(App, "install") as mock_install,
     ):
         result = AppDependencyInstaller(bench, app).install()
@@ -61,7 +61,7 @@ def test_install_installs_missing_dependency(tmp_path: Path) -> None:
     mock_install.assert_called_once()
     _, kwargs = mock_install.call_args
     assert kwargs["install_dependencies"] is False
-    assert kwargs["skip_validations"] is True
+    # A dependency is validated like any other app - nothing installs unvalidated.
     assert result == []  # dep wasn't actually created on disk by the mocked install()
 
 
@@ -79,7 +79,7 @@ def test_install_skips_already_installed_dependency(tmp_path: Path) -> None:
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[helpdesk]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         patch.object(App, "install") as mock_install,
     ):
         result = AppDependencyInstaller(bench, app).install()
@@ -103,7 +103,7 @@ def test_dependency_apps_falls_back_to_direct_deps_on_transitive_conflict(tmp_pa
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[helpdesk]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         patch.object(
             Resolver, "resolve", side_effect=DependencyResolutionError("conflict deep in the graph")
         ),
@@ -123,7 +123,7 @@ def test_install_propagates_registry_unavailable_instead_of_swallowing_as_not_fo
 
     with (
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", side_effect=RegistryUnavailableError("tampered")),
+        patch.object(Marketplace, "_load_registry", side_effect=RegistryUnavailableError("tampered")),
         pytest.raises(RegistryUnavailableError),
     ):
         AppDependencyInstaller(bench, app).install()
@@ -144,7 +144,7 @@ def test_install_raises_when_app_not_in_marketplace_but_requires_missing_apps(
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         pytest.raises(BenchError, match="isn't in the marketplace registry"),
     ):
         AppDependencyInstaller(bench, app).install()

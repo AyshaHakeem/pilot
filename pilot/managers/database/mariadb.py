@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from pilot.config import MariaDBConfig
+from pilot.core.mariadb_memory import MariaDBMemorySizing, calculate_mariadb_memory
+from pilot.exceptions import DatabaseError
 from pilot.managers.database.base import UserOwnedDBManager
 from pilot.managers.platform import is_macos, which
 from pilot.utils import cli_root, run_command
@@ -74,9 +76,9 @@ class MariaDBManager(UserOwnedDBManager):
             return self._provision_macos()
 
         if not self.is_provisioned():
+            sizing = self._write_config()
             self._initialize_data_dir()
-            self._write_config()
-            self._install_unit()
+            self._install_unit(sizing)
             self._reset_failed_state()
             run_command(self._systemctl("enable", "--now", self._UNIT_NAME), env=self._systemctl_env())
 
@@ -90,24 +92,74 @@ class MariaDBManager(UserOwnedDBManager):
 
     def _initialize_data_dir(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
-        run_command(["mariadb-install-db", f"--datadir={self.data_dir}", "--skip-test-db"])
+        run_command(
+            [
+                "mariadb-install-db",
+                f"--defaults-file={self.my_cnf_path}",
+                f"--datadir={self.data_dir}",
+                "--skip-test-db",
+            ]
+        )
 
-    def _write_config(self) -> None:
+    def _write_config(self) -> MariaDBMemorySizing:
         """Write every server setting into our own my.cnf so mariadbd, launched
         with --defaults-file, never falls back to reading /etc/mysql/my.cnf."""
+        sizing = calculate_mariadb_memory(self._total_memory_mb())
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         content = (
+            "# Managed by Pilot.\n"
             "[mysqld]\n"
             f"datadir = {self.data_dir}\n"
             f"socket = {self.socket_path}\n"
             f"port = {self.config.port}\n"
             f"pid-file = {self.pid_file}\n"
             "bind-address = 127.0.0.1\n"
+            "\n"
+            "default-storage-engine = InnoDB\n"
+            "character-set-server = utf8mb4\n"
+            "collation-server = utf8mb4_unicode_ci\n"
+            "character-set-client-handshake = OFF\n"
+            "local-infile = OFF\n"
+            "max-allowed-packet = 512M\n"
+            "\n"
+            f"innodb-buffer-pool-size = {sizing.innodb_buffer_pool_mb}M\n"
+            f"innodb-log-file-size = {sizing.innodb_log_file_mb}M\n"
+            "innodb-flush-log-at-trx-commit = 1\n"
+            "innodb-print-all-deadlocks = ON\n"
+            "innodb-stats-persistent-sample-pages = 256\n"
+            "innodb-strict-mode = ON\n"
+            "innodb-snapshot-isolation = OFF\n"
+            f"key-buffer-size = {sizing.key_buffer_mb}M\n"
+            f"max-connections = {sizing.max_connections}\n"
+            "slave-connections-needed-for-purge = 0\n"
+            "tmp-table-size = 32M\n"
+            "max-heap-table-size = 32M\n"
+            "\n"
+            "[client]\n"
+            f"socket = {self.socket_path}\n"
+            f"port = {self.config.port}\n"
+            "default-character-set = utf8mb4\n"
+            "\n"
+            "[mariadb-dump]\n"
+            "max-allowed-packet = 512M\n"
         )
-        self.my_cnf_path.write_text(content)
+        self.my_cnf_path.write_text(content, encoding="utf-8")
+        self.my_cnf_path.chmod(0o600)
+        return sizing
 
-    def _install_unit(self) -> None:
+    def _total_memory_mb(self) -> int:
+        try:
+            pages = os.sysconf("SC_PHYS_PAGES")
+            page_size = os.sysconf("SC_PAGE_SIZE")
+        except (OSError, ValueError) as exc:
+            raise DatabaseError("Could not detect total system memory for MariaDB sizing.") from exc
+        total_memory_mb = pages * page_size // (1024 * 1024)
+        if total_memory_mb <= 0:
+            raise DatabaseError("Could not detect total system memory for MariaDB sizing.")
+        return total_memory_mb
+
+    def _install_unit(self, sizing: MariaDBMemorySizing) -> None:
         mariadbd = which("mariadbd") or which("mysqld") or "/usr/sbin/mariadbd"
         content = (
             "[Unit]\n"
@@ -117,6 +169,10 @@ class MariaDBManager(UserOwnedDBManager):
             # --defaults-file must be the first argument; it makes mariadbd
             # skip every system default file instead of layering over them.
             f"ExecStart={mariadbd} --defaults-file={self.my_cnf_path}\n"
+            "LimitNOFILE=65535\n"
+            f"MemoryHigh={sizing.memory_high_mb}M\n"
+            f"MemoryMax={sizing.memory_max_mb}M\n"
+            "MemorySwapMax=100M\n"
             "Restart=on-failure\n\n"
             "[Install]\n"
             "WantedBy=default.target\n"

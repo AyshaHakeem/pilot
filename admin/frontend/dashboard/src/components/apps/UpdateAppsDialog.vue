@@ -77,7 +77,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button, Checkbox, Dialog, ErrorMessage, LoadingText } from 'frappe-ui'
-import { migrationsApi } from '@/api/migrations'
+import { updatesApi } from '@/api/updates'
 import AppIcon from '@/components/apps/AppIcon.vue'
 import { useAppRegistry } from '@/composables/apps/useAppRegistry'
 import { useAppUpdates } from '@/composables/apps/useAppUpdates'
@@ -129,12 +129,12 @@ async function runUpdate() {
   updating.value = true
   error.value = ''
   try {
-    const res = await migrationsApi.createUpdate({
+    const res = await updatesApi.createUpdate({
       apps: [...selected.value],
       disable_safeguards: !safeguard.value,
     })
     open.value = false
-    router.push({ name: 'MigrationDetail', params: { operationId: res.operation.id } })
+    router.push({ name: 'UpdateDetail', params: { operationId: res.operation.id } })
   } catch (e) {
     error.value = e.message || 'Failed to start update.'
   } finally {

@@ -122,7 +122,7 @@ print('\\n'.join(_leaks))
 
 def test_main_dispatches_native_command(monkeypatch: pytest.MonkeyPatch) -> None:
     dispatched = []
-    monkeypatch.setattr(sys, "argv", ["bench", "--bench", "demo", "restart"])
+    monkeypatch.setattr(sys, "argv", ["pilot", "--bench", "demo", "restart"])
     monkeypatch.setattr(
         registry,
         "dispatch",
@@ -144,7 +144,7 @@ def test_main_forwards_unknown_command_to_frappe(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(
         sys,
         "argv",
-        ["bench", "--bench", "demo", "--site", "site.localhost", "migrate"],
+        ["pilot", "--bench", "demo", "--site", "site.localhost", "migrate"],
     )
 
     cli.main()
@@ -162,7 +162,7 @@ def test_main_forwards_explicit_frappe_command(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(
         sys,
         "argv",
-        ["bench", "-b", "demo", "frappe", "--site", "site.localhost", "migrate", "--verbose"],
+        ["pilot", "-b", "demo", "frappe", "--site", "site.localhost", "migrate", "--verbose"],
     )
 
     cli.main()
@@ -174,7 +174,7 @@ def test_main_dispatches_all_benches_without_selecting_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     dispatched = []
-    monkeypatch.setattr(sys, "argv", ["bench", "-b", "all", "restart"])
+    monkeypatch.setattr(sys, "argv", ["pilot", "-b", "all", "restart"])
     monkeypatch.setattr(
         registry,
         "dispatch_all",

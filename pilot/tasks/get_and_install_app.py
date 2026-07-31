@@ -40,12 +40,16 @@ class GetAndInstallAppTask(Task):
     @step("fetch", lambda self: f"Fetch {self.marketplace_app or self.repo}")
     def fetch(self) -> AppInstallResult:
         # Marketplace apps can bring dependency apps; raw repos do not.
+        commit = ""
         if self.marketplace_app:
             resolver = Marketplace(self.bench).find_app(self.marketplace_app)
-            app = App(AppConfig(name=resolver.app, repo=resolver.repo, branch=resolver.target), self.bench)
+            commit = resolver.commit
+            app = App(AppConfig(name=resolver.app, repo=resolver.repo, branch=resolver.branch), self.bench)
         else:
             app = App.from_repo(self.bench, self.repo, self.branch)
-        return app.install(install_dependencies=bool(self.marketplace_app), on_progress=self.report)
+        return app.install(
+            install_dependencies=bool(self.marketplace_app), commit=commit, on_progress=self.report
+        )
 
     def install_on_sites(self, app: App) -> None:
         for site in self.sites:

@@ -19,7 +19,7 @@ class FrappeCommand(Command):
     def run(self) -> None:
         python = self.bench.env_path / "bin" / "python"
         if not python.exists():
-            raise BenchError("Frappe environment not found. Run 'bench init' first.")
+            raise BenchError("Frappe environment not found. Run 'pilot init' first.")
         result = subprocess.run(
             [*self.bench.frappe_call, "frappe", *self.args],
             cwd=self.bench.sites_path,

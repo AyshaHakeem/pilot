@@ -6,10 +6,11 @@ import {
   kindLabel,
   opTitle,
   patchSkipped,
+  pendingActionLabel,
   siteStatus,
   stateLabel,
   stateTone,
-} from './migrationFormat.js'
+} from './updateFormat.js'
 import { fmtDateTime } from './taskFormat.js'
 
 test('kindLabel formats update and site_migrate', () => {
@@ -90,4 +91,11 @@ test('siteStatus formats per-site lifecycle', () => {
   assert.equal(siteStatus({ migration_status: 'failed' }).label, 'Failed')
   assert.equal(siteStatus({ backup_status: 'backing_up' }).label, 'Backing up')
   assert.equal(siteStatus({ backup_status: 'pending' }).label, 'Pending')
+})
+
+test('pendingActionLabel describes a queued action', () => {
+  assert.equal(pendingActionLabel(null), '')
+  assert.equal(pendingActionLabel({ role: 'retry', status: 'queued' }), 'Retry queued')
+  assert.equal(pendingActionLabel({ role: 'bypass_patch', status: 'queued' }), 'Skip patch queued')
+  assert.equal(pendingActionLabel({ role: 'restore', status: 'running' }), 'Restore in progress')
 })

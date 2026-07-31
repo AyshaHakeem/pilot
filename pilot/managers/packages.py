@@ -1,16 +1,23 @@
-"""System package installation with per-distro package aliases."""
-
 import os
 import subprocess
 from abc import ABC, abstractmethod
 from typing import ClassVar
 
-from pilot.managers.platform import Distro, _privileged, detect_distro, is_macos
+from pilot.exceptions import BenchError
+from pilot.managers.platform import (
+    Distro,
+    _privileged,
+    detect_distro,
+    has_passwordless_sudo,
+    is_macos,
+    is_root,
+)
 
 
 class SystemPackageManager(ABC):
     # Canonical (Debian/apt) name -> native name(s). Unmapped names pass through.
     package_aliases: ClassVar[dict[str, str | tuple[str, ...]]] = {}
+    requires_privilege: ClassVar[bool] = True
 
     def _resolve(self, *packages: str) -> list[str]:
         resolved: list[str] = []
@@ -20,8 +27,17 @@ class SystemPackageManager(ABC):
             resolved.extend(name for name in names if name not in resolved)
         return resolved
 
-    @abstractmethod
     def install(self, *packages: str) -> None:
+        if self.requires_privilege and not is_root() and not has_passwordless_sudo():
+            names = ", ".join(self._resolve(*packages))
+            raise BenchError(
+                f"Required: {names}. No passwordless sudo available; install "
+                "manually with your system package manager, then re-run this command."
+            )
+        self._install(*packages)
+
+    @abstractmethod
+    def _install(self, *packages: str) -> None:
         """Install one or more system packages."""
 
     @abstractmethod
@@ -34,7 +50,7 @@ class AptPackageManager(SystemPackageManager):
         "modsecurity-nginx": "libnginx-mod-http-modsecurity",
     }
 
-    def install(self, *packages: str) -> None:
+    def _install(self, *packages: str) -> None:
         subprocess.run(
             _privileged(["apt-get", "install", "-y", *self._resolve(*packages)]),
             env={**os.environ, "DEBIAN_FRONTEND": "noninteractive"},
@@ -61,11 +77,10 @@ class DnfPackageManager(SystemPackageManager):
         "redis-server": "valkey",
         "postgresql": "postgresql-server",
         "postgresql-client": "postgresql",
-        "zfsutils-linux": "zfs",
         "modsecurity-nginx": "nginx-mod-modsecurity",
     }
 
-    def install(self, *packages: str) -> None:
+    def _install(self, *packages: str) -> None:
         subprocess.run(
             _privileged(["dnf", "install", "-y", *self._resolve(*packages)]),
             check=True,
@@ -92,12 +107,10 @@ class PacmanPackageManager(SystemPackageManager):
         # Arch moved redis to the AUR in favour of valkey.
         "redis-server": "valkey",
         "postgresql-client": "postgresql",
-        # Only available via the third-party archzfs repository.
-        "zfsutils-linux": "zfs-utils",
         "modsecurity-nginx": "nginx-mod-modsecurity",
     }
 
-    def install(self, *packages: str) -> None:
+    def _install(self, *packages: str) -> None:
         subprocess.run(
             _privileged(["pacman", "-S", "--noconfirm", "--needed", *self._resolve(*packages)]),
             check=True,
@@ -113,7 +126,9 @@ class PacmanPackageManager(SystemPackageManager):
 
 
 class BrewPackageManager(SystemPackageManager):
-    def install(self, *packages: str) -> None:
+    requires_privilege: ClassVar[bool] = False
+
+    def _install(self, *packages: str) -> None:
         subprocess.run(
             ["brew", "install", *packages],
             check=True,

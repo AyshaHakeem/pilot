@@ -51,7 +51,8 @@ echo "--- path B: bench user run installs everything ---"
 su - frappe -c "PILOT_REPO_URL=$PILOT_REPO_URL PILOT_BRANCH=$PILOT_BRANCH sh /pilot-src/install.sh --dev"
 
 echo "--- assertions ---"
-su - frappe -c 'test -x "$HOME/pilot/bench"'
+su - frappe -c 'test -x "$HOME/pilot/bin/pilot"'
+su - frappe -c 'test ! -e "$HOME/pilot/bench"'
 su - frappe -c 'test -f "$HOME/pilot/.admin-venv/bin/python"'
 su - frappe -c 'command -v node'
 su - frappe -c 'command -v git'

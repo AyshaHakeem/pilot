@@ -10,6 +10,8 @@ if TYPE_CHECKING:
     from pilot.core.app import App
     from pilot.internal.git import GitRepo
 
+_FETCH_TIMEOUT_SECONDS = 30
+
 
 class AppRepository:
     def __init__(self, app: "App") -> None:
@@ -45,26 +47,46 @@ class AppRepository:
         return pin is not None and not self.is_on_revision(pin)
 
     def update_target(self, marketplace_entry: dict | None) -> RevisionPin | None:
-        """The fixed revision this app would update to: a marketplace pin, or the
-        live branch tip captured as a commit pin. None when unresolved.
-
-        Pinning the tip here (rather than resetting to origin/<branch> at update
-        time) is what lets callers know the exact target commit before updating.
-        """
-        target = self._matching_marketplace_target(marketplace_entry)
-        pin = RevisionPin.from_marketplace_target(target) if target else None
-        if pin is not None:
-            return pin
+        """The fixed revision this app would update to, or None when there is none. (forward only)"""
+        if marketplace_entry and self.is_marketplace_app(marketplace_entry):
+            release = self.forward_release(marketplace_entry)
+            return RevisionPin.from_marketplace_release(release) if release else None
         if not self.app.config.branch:
             return None
         tip = self.repo.remote_branch_sha(self.app.config.branch)
         return RevisionPin(kind="commit", ref=tip) if tip else None
 
-    def _matching_marketplace_target(self, marketplace_entry: dict | None) -> dict | None:
-        if not marketplace_entry or self.app.config.repo != marketplace_entry["repo"]:
+    def is_marketplace_app(self, marketplace_entry: dict | None) -> bool:
+        """Whether the registry entry describes this app's own repository."""
+        from pilot.integrations.git.base import same_repository
+
+        if not marketplace_entry:
+            return False
+        return same_repository(self.app.config.repo, marketplace_entry.get("repo", ""))
+
+    def forward_release(self, marketplace_entry: dict) -> dict | None:
+        """The newest release advertised for this app's branch, when git says it
+        is ahead of the checked-out commit. Releases arrive newest-first."""
+        newest = next(
+            (r for r in marketplace_entry["releases"] if r.get("branch") == self.app.config.branch), None
+        )
+        if newest is None or not newest.get("commit"):
             return None
-        version = self.app.installed_version
-        return next((t for t in marketplace_entry["targets"] if t["version"] == version), None)
+        return newest if self._is_ahead_of_installed(newest["commit"]) else None
+
+    def _is_ahead_of_installed(self, commit: str) -> bool:
+        """Whether `commit` is a step forward from HEAD, asking git rather than
+        comparing version labels."""
+        installed = self.installed_hash
+        if installed == commit:
+            return False
+        if not installed:
+            return True  # HEAD is unreadable - moving to the published commit is the fix
+        repo = self.repo
+        if not repo.has_commit(commit):
+            self._sync_remote_url()
+            repo.fetch(commit, timeout=_FETCH_TIMEOUT_SECONDS)
+        return not repo.is_ancestor(commit, installed)
 
     def has_remote_update(self) -> bool:
         """Check the remote branch tip without downloading objects."""
@@ -241,8 +263,21 @@ class AppRepository:
         self._checkout_pinned_ref(sha)
 
     def _checkout_pinned_ref(self, ref: str) -> None:
-        """Land on `ref`, keeping the configured branch name attached instead of a detached HEAD."""
+        """Land on `ref`, keeping the configured branch name attached instead of a detached HEAD.
+
+        Stashes first, as switching branches does. Building an app's assets writes
+        generated files back into its own repo - components.d.ts, yarn.lock - so
+        the update after a build would find a dirty tree and git would refuse to
+        check anything out. The stash is left alone on success: the revision being
+        moved to is free to conflict with it, and dropping it would lose work.
+        """
+        stashed = self.repo.stash_all()
         branch = self.app.config.branch
         if branch and not self.is_commit_hash(branch) and self.repo.checkout_new_branch(branch, ref):
             return
-        run_command(["git", "-C", str(self.app.path), "checkout", ref])
+        try:
+            run_command(["git", "-C", str(self.app.path), "checkout", ref])
+        except CommandError:
+            if stashed:
+                self.repo.stash_pop()
+            raise

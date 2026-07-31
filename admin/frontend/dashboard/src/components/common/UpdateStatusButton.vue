@@ -19,16 +19,16 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { Button } from 'frappe-ui'
-import { useMigration } from '@/composables/migrations/useMigration'
+import { useUpdate } from '@/composables/updates/useUpdate'
 import UpdateAppsDialog from '@/components/apps/UpdateAppsDialog.vue'
 
 const router = useRouter()
-const { status, start } = useMigration()
+const { status, start } = useUpdate()
 const showDialog = ref(false)
 
 function onClick() {
   if (status.value.operationId) {
-    router.push({ name: 'MigrationDetail', params: { operationId: status.value.operationId } })
+    router.push({ name: 'UpdateDetail', params: { operationId: status.value.operationId } })
   } else {
     showDialog.value = true
   }

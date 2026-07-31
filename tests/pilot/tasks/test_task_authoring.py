@@ -48,6 +48,19 @@ def test_step_reports_failure_once(tmp_path: Path, capsys: pytest.CaptureFixture
     assert output.count("STEP-FAILED work,") == 1
 
 
+def test_step_failure_logs_the_reason(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Every migration task calls this from an except block. Without the reason
+    a failed task logs nothing but STEP-FAILED, and the user has no idea why."""
+    demo = task(tmp_path)
+
+    try:
+        demo.fail()
+    except RuntimeError:
+        demo.step_failed()
+
+    assert "Error: boom" in capsys.readouterr().out
+
+
 def test_successful_step_does_not_leave_stale_current_step(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

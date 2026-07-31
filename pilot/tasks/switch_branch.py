@@ -16,7 +16,9 @@ class SwitchBranchTask(Task):
         from pilot.managers.environment import PythonEnvManager
 
         app = self.bench.app(self.name)
+        previous_branch, previous_sha = app.current_branch, app.head_sha
         self.checkout(app)
+        self.validate(app, previous_branch, previous_sha)
 
         env = PythonEnvManager(self.bench)
         self.install(env, app)
@@ -40,6 +42,26 @@ class SwitchBranchTask(Task):
         except BenchError as exc:
             print(str(exc))
             sys.exit(1)
+
+    @step("validate", lambda self: f"Validate {self.name} on '{self.branch}'")
+    def validate(self, app, previous_branch: str, previous_sha: str) -> None:
+        """The env installs the app editable, so the branch is live the moment it's
+        checked out - a branch that fails the checks has to go back.
+
+        Restore the branch rather than its commit: a detached HEAD would disagree
+        with the branch bench.toml records. Any BenchError rolls back, not just a
+        validation failure - uv falling over leaves the same live bad branch.
+        """
+        from pilot.exceptions import BenchError
+
+        try:
+            app.validate()
+        except BenchError:
+            if previous_branch:
+                app.switch_branch(previous_branch)
+            else:
+                app.checkout_commit(previous_sha)  # it was already detached
+            raise
 
     @step("install", lambda self: f"Reinstall {self.name}")
     def install(self, env, app) -> None:

@@ -14,6 +14,7 @@ from admin.backend.api.v1.sites.shared import task_failure
 from pilot.core.bench import Bench
 from pilot.core.bench.migration.operation import MigrationOperation
 from pilot.exceptions import MigrationNotFoundError
+from pilot.managers.task import TaskReader
 from pilot.tasks.bypass_patch import BypassPatchTask
 from pilot.tasks.retry_update import RetryUpdateTask
 from pilot.tasks.revert_migration import RevertMigrationTask
@@ -31,7 +32,23 @@ def _summary(operation: MigrationOperation) -> dict:
         app["compare_url"] = revision.compare_url
     data["can_restore"] = operation.can_revert
     data["task_logs"] = _task_logs(operation)
+    data["pending_action"] = _pending_action(operation)
     return data
+
+
+def _pending_action(operation: MigrationOperation) -> dict | None:
+    """The queued/running action task on an operation still paused on a failure."""
+    if not operation.state.is_failure or not operation.task_ids:
+        return None
+    reader = TaskReader(operation.bench.path)
+    for role, task_id in reversed(list(operation.task_ids.items())):
+        try:
+            task = reader.read_task(task_id)
+        except Exception:
+            continue
+        if task.status.is_active:
+            return {"role": role, "task_id": task_id, "status": task.status.value}
+    return None
 
 
 _CHAIN_LABELS = {

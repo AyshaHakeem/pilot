@@ -50,15 +50,15 @@ class FetchAppUpdatesTask(Task):
         return labels
 
     def _marketplace_target_version(self, app) -> str:
-        """The version the marketplace advertises for this app's branch line."""
+        """The newest version the marketplace advertises for this app's branch line."""
         entry = self.marketplace_by_name.get(app.config.name)
         if not entry or not same_repository(app.config.repo, entry.get("repo", "")):
             return ""
         return next(
             (
-                target["version"]
-                for target in entry.get("targets") or []
-                if target.get("target_type") == "branch" and target.get("target") == app.config.branch
+                release["version"]
+                for release in entry.get("releases") or []
+                if release.get("branch") == app.config.branch
             ),
             "",
         )

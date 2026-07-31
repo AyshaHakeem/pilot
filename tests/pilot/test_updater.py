@@ -96,12 +96,15 @@ def _make_install(tmp_path: Path) -> tuple[Path, Path]:
     root = tmp_path / "pilot"
     (root / "pilot").mkdir(parents=True)
     (root / "pilot" / "old.py").write_text("old")
+    (root / "bench").write_text("old launcher")
     (root / "benches").mkdir()
     (root / "benches" / "data.txt").write_text("keep me")
 
     staging = root.with_name("pilot.update")
     (staging / "pilot").mkdir(parents=True)
     (staging / "pilot" / "new.py").write_text("new")
+    (staging / "bin").mkdir()
+    (staging / "bin" / "pilot").write_text("new launcher")
     (staging / "VERSION").write_text("v0.0.2-pre-alpha")
     return root, staging
 
@@ -113,6 +116,8 @@ def test_swap_in_prunes_stale_files_and_keeps_data(tmp_path: Path) -> None:
 
     assert (root / "pilot" / "new.py").read_text() == "new"
     assert not (root / "pilot" / "old.py").exists()  # stale file pruned via whole-dir swap
+    assert (root / "bin" / "pilot").read_text() == "new launcher"
+    assert not (root / "bench").exists()
     assert (root / "VERSION").read_text() == "v0.0.2-pre-alpha"
     assert (root / "benches" / "data.txt").read_text() == "keep me"  # data untouched
     assert not root.with_name("pilot.backup").exists()  # backup cleaned up
@@ -133,6 +138,7 @@ def test_swap_in_rolls_back_on_failure(tmp_path: Path) -> None:
 
     assert (root / "pilot" / "old.py").read_text() == "old"
     assert not (root / "pilot" / "new.py").exists()
+    assert (root / "bench").read_text() == "old launcher"
     assert not root.with_name("pilot.backup").exists()
     assert (root / "benches" / "data.txt").read_text() == "keep me"
 

@@ -9,6 +9,7 @@ import pytest
 from pilot.exceptions import BenchError
 from pilot.internal.cli import CliContext
 from pilot.internal.cli import dispatch as cli_dispatch
+from pilot.internal.cli.registry import build_parser
 
 
 def _context(root: Path, bench_name: str | None = None) -> CliContext:
@@ -20,6 +21,10 @@ def _make_bench(root: Path, name: str) -> Path:
     bench_dir.mkdir(parents=True)
     (bench_dir / "bench.toml").write_text(f'[bench]\nname = "{name}"\n')
     return bench_dir
+
+
+def test_parser_uses_pilot_program_name() -> None:
+    assert build_parser().prog == "pilot"
 
 
 def test_single_bench_auto_picked_without_explicit(tmp_path: Path, monkeypatch) -> None:

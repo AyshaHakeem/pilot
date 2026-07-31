@@ -11,7 +11,7 @@ The implementation contract lives in `pilot/core/adapters/domain_provider.py`.
 
 ## Install
 
-Build one executable named exactly `bench-domain-provider`, make it executable, and put it on `PATH` for the user running bench and the Admin service.
+Build one executable named exactly `bench-domain-provider`, make it executable, and put it on `PATH` for the user running Pilot and the Admin service.
 
 ```sh
 install -m 0755 ./my-domain-provider /usr/local/bin/bench-domain-provider
@@ -154,4 +154,4 @@ if __name__ == "__main__":
 ./bench-domain-provider register taken.example.com
 ```
 
-Install it on `PATH`, then test `bench new-site` with a wildcard-matching name and Add/Remove Domain in the Admin UI.
+Install it on `PATH`, then test `pilot new-site` with a wildcard-matching name and Add/Remove Domain in the Admin UI.

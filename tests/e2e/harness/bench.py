@@ -18,10 +18,10 @@ from urllib.request import urlopen
 REPO_ROOT = Path(__file__).resolve().parents[3]
 BENCHES_DIR = REPO_ROOT / "benches"
 
-# The CLI entry point. CI installs the `bench` console script (pip install -e),
+# The CLI entry point. CI installs the `pilot` console script (pip install -e),
 # but the in-repo launcher works everywhere (stdlib-only, python3 shebang), so
-# default to it and let BENCH_BIN override.
-BENCH_BIN = os.environ.get("BENCH_BIN") or str(REPO_ROOT / "bench")
+# default to it and let PILOT_BIN override.
+PILOT_BIN = os.environ.get("PILOT_BIN") or str(REPO_ROOT / "bin" / "pilot")
 
 # Only ever destroy benches we created, so a misconfigured run can't delete a
 # developer's real bench.
@@ -43,7 +43,7 @@ class Bench:
             raise ValueError(f'Bench name must start with "{E2E_PREFIX}" (got "{name}")')
         self.name = name
         self._extra_env = env or {}
-        # `bench new` no longer pre-generates an admin password (it's set in the
+        # `pilot new` no longer pre-generates an admin password (it's set in the
         # wizard's first step and persisted by PUT /api/v1/setup/configuration).
         # So the harness chooses it, the wizard enters it, and login reuses it.
         # A bare token_urlsafe() isn't guaranteed to satisfy the wizard's password
@@ -72,28 +72,28 @@ class Bench:
         return f"http://127.0.0.1:{self.admin_port}"
 
     def create(self) -> None:
-        """`bench new <name>` then read the generated admin port."""
+        """`pilot new <name>` then read the generated admin port."""
         if self.dir.exists():
             raise RuntimeError(f'Bench "{self.name}" already exists at {self.dir} - clean it up first')
         self._run(["new", self.name])
         if not (self.dir / "bench.toml").exists():
-            # `bench` resolves its benches dir as <dir containing pilot>/benches.
-            # The repo launcher (<repo>/bench, the default) puts it at <repo>/benches,
-            # which is what this harness reads. A `bench` from a non-editable
+            # `pilot` resolves its benches dir as <dir containing pilot>/benches.
+            # The repo launcher (<repo>/bin/pilot, the default) puts it at <repo>/benches,
+            # which is what this harness reads. A `pilot` from a non-editable
             # `pip install` lives in site-packages and writes benches there instead,
-            # so `bench new` "succeeds" yet nothing appears where we look.
+            # so `pilot new` "succeeds" yet nothing appears where we look.
             raise RuntimeError(
-                f"`bench new {self.name}` reported success but {self.dir / 'bench.toml'} "
-                f"was not created.\nBENCH_BIN={BENCH_BIN} writes benches under a different "
+                f"`pilot new {self.name}` reported success but {self.dir / 'bench.toml'} "
+                f"was not created.\nPILOT_BIN={PILOT_BIN} writes benches under a different "
                 f"root than this harness reads ({BENCHES_DIR}).\nUse the repo launcher "
-                f"(unset BENCH_BIN, or point it at {REPO_ROOT / 'bench'}); an installed "
-                f"`bench` from a non-editable pip install writes next to its site-packages."
+                f"(unset PILOT_BIN, or point it at {REPO_ROOT / 'bin' / 'pilot'}); an installed "
+                f"`pilot` from a non-editable pip install writes next to its site-packages."
             )
         self._info = self._read_config()
 
     def start_wizard(self) -> None:
         """Start the standalone setup-wizard server."""
-        # No-op unless E2E_BUILD_ADMIN is set; otherwise `bench start` downloads
+        # No-op unless E2E_BUILD_ADMIN is set; otherwise `pilot start` downloads
         # the prebuilt wizard UI itself.
         self._build_admin_ui()
         self._spawn_start()
@@ -118,8 +118,8 @@ class Bench:
         self._proc = None
 
     def start_full(self) -> None:
-        """`bench -b <name> start` on the initialized bench: full admin + workload."""
-        # `bench init` (run by the wizard) re-downloads the prebuilt admin dist,
+        """`pilot -b <name> start` on the initialized bench: full admin + workload."""
+        # `pilot init` (run by the wizard) re-downloads the prebuilt admin dist,
         # clobbering any local build. Rebuild from source only when E2E_BUILD_ADMIN
         # is set (no-op otherwise) - e.g. to exercise *this* branch's admin UI
         # rather than the released bundle.
@@ -130,7 +130,7 @@ class Bench:
     def stop(self) -> None:
         """Best-effort: stop the bench and kill the spawned process tree."""
         subprocess.run(
-            [BENCH_BIN, "-b", self.name, "stop"],
+            [PILOT_BIN, "-b", self.name, "stop"],
             cwd=REPO_ROOT,
             env=self._process_env(),
             stdout=subprocess.DEVNULL,
@@ -147,12 +147,12 @@ class Bench:
             self.remove_dir()
 
     def _drop_bench(self) -> None:
-        """`bench -b <name> drop --yes` - best-effort. No-op if the bench has no
+        """`pilot -b <name> drop --yes` - best-effort. No-op if the bench has no
         config yet (nothing to drop)."""
         if not (self.dir / "bench.toml").exists():
             return
         subprocess.run(
-            [BENCH_BIN, "-b", self.name, "drop", "--yes"],
+            [PILOT_BIN, "-b", self.name, "drop", "--yes"],
             cwd=REPO_ROOT,
             env=self._process_env(),
             stdout=subprocess.DEVNULL,
@@ -277,7 +277,7 @@ class Bench:
     def _run(self, args: list[str]) -> None:
         BENCHES_DIR.mkdir(parents=True, exist_ok=True)
         res = subprocess.run(
-            [BENCH_BIN, *args],
+            [PILOT_BIN, *args],
             cwd=REPO_ROOT,
             env=self._process_env(),
             capture_output=True,
@@ -285,7 +285,7 @@ class Bench:
         )
         if res.returncode != 0:
             raise RuntimeError(
-                f"bench {' '.join(args)} failed (exit {res.returncode}):\n{res.stdout}\n{res.stderr}"
+                f"pilot {' '.join(args)} failed (exit {res.returncode}):\n{res.stdout}\n{res.stderr}"
             )
 
     def _spawn_start(self) -> None:
@@ -294,7 +294,7 @@ class Bench:
         # start_new_session=True -> own process group so stop() can signal the
         # whole tree. stdout/stderr inherit so logs stream to the console.
         self._proc = subprocess.Popen(
-            [BENCH_BIN, "-b", self.name, "start"],
+            [PILOT_BIN, "-b", self.name, "start"],
             cwd=REPO_ROOT,
             env=self._process_env(),
             start_new_session=True,
@@ -322,7 +322,7 @@ class Bench:
         while time.time() < deadline:
             if self._proc and self._proc.poll() is not None:
                 raise RuntimeError(
-                    f"bench start exited early (code {self._proc.returncode}) before the admin came up"
+                    f"pilot start exited early (code {self._proc.returncode}) before the admin came up"
                 )
             try:
                 with urlopen(f"{self.admin_url}/api/v1/bootstrap", timeout=5) as res:

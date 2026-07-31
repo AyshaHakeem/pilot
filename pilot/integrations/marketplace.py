@@ -1,13 +1,12 @@
 """Resolve installable apps and their dependency versions against the bench's current Frappe version."""
 
-import json
 import typing
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Literal
 
 from packaging.specifiers import InvalidSpecifier, SpecifierSet
-from packaging.version import Version
+from packaging.version import InvalidVersion, Version
 
 from pilot.exceptions import AppNotFoundError, DependencyResolutionError
 from pilot.utils import run_command
@@ -20,8 +19,9 @@ if typing.TYPE_CHECKING:
 class Resolver:
     app: str
     repo: str
-    target_type: Literal["tag", "branch", "target"]
-    target: str
+    branch: str
+    commit: str
+    channel: Literal["stable", "nightly"]
     version: str
     frappe_version: str
     required_version: str
@@ -41,8 +41,9 @@ class Resolver:
         return {
             "name": self.app,
             "repo": self.repo,
-            "target_type": self.target_type,
-            "target": self.target,
+            "branch": self.branch,
+            "commit": self.commit,
+            "channel": self.channel,
             "version": self.version,
             "frappe_version": self.frappe_version,
             "required_version": self.required_version,
@@ -120,16 +121,14 @@ class Marketplace:
     def __post_init__(self):
         self.frappe_version = self.get_current_frappe_version()
         # Snapshot at construction so callers see a consistent registry for this instance.
-        self._registry = self._parse_registry(json.loads(self._read_apps_json()))
+        self._registry = self._parse_registry(self._load_registry())
 
     @staticmethod
-    def _read_apps_json() -> str:
+    def _load_registry() -> list[dict]:
         from pilot.core.registry_cache import RegistryCache
         from pilot.utils import cli_root
 
-        cache = RegistryCache(cli_root())
-        cache.ensure_fresh()
-        return cache.apps_json_path.read_text()
+        return RegistryCache(cli_root()).load()
 
     def get_current_frappe_version(self) -> str:
         cmd = [
@@ -144,14 +143,23 @@ class Marketplace:
     @lru_cache(maxsize=1)
     def registry() -> list[dict]:
         """Parsed registry for callers that don't have a Marketplace/bench (e.g. tasks). Cached once."""
-        return Marketplace._parse_registry(json.loads(Marketplace._read_apps_json()))
+        return Marketplace._parse_registry(Marketplace._load_registry())
 
     @staticmethod
     def _parse_registry(raw: list[dict]) -> list[dict]:
         for app in raw:
-            for target in app.get("targets") or []:
-                target["_spec"] = Marketplace._safe_spec(target.get("frappe_core"))
+            releases = app.get("releases") or []
+            for release in releases:
+                release["_spec"] = Marketplace._safe_spec(release.get("frappe_core"))
+            releases.sort(key=Marketplace._version_key, reverse=True)
         return raw
+
+    @staticmethod
+    def _version_key(release: dict) -> Version:
+        try:
+            return Version(release.get("version") or "")
+        except InvalidVersion:
+            return Version("0")
 
     @staticmethod
     def _safe_spec(frappe_core: str | None) -> SpecifierSet | None:
@@ -161,16 +169,17 @@ class Marketplace:
         except InvalidSpecifier:
             return None
 
-    def _make_resolver(self, app: dict, target: dict, is_installable: bool) -> "Resolver":
+    def _make_resolver(self, app: dict, release: dict, is_installable: bool) -> "Resolver":
         return Resolver(
             app=app["name"],
             repo=app["repo"],
-            target_type=target.get("target_type", ""),
-            target=target.get("target", ""),
-            version=target.get("version", ""),
+            branch=release.get("branch", ""),
+            commit=release.get("commit", ""),
+            channel=release.get("channel", "stable"),
+            version=release.get("version", ""),
             frappe_version=self.frappe_version,
-            required_version=target.get("frappe_core") or "",
-            dependencies=target.get("dependencies", {}),
+            required_version=release.get("frappe_core") or "",
+            dependencies=release.get("dependencies", {}),
             title=app.get("title", app["name"]),
             description=app.get("description", ""),
             logo_url=app.get("logo_url", ""),
@@ -188,21 +197,29 @@ class Marketplace:
         current_frappe = Version(self.frappe_version)
 
         for app in self._registry:
-            targets = app.get("targets") or []
-            compatible_targets = [t for t in targets if t["_spec"] and current_frappe in t["_spec"]]
-            best_match = compatible_targets[0] if compatible_targets else None
-            display_target = best_match or (targets[0] if targets else {})
+            releases = app.get("releases") or []
+            compatible = self._preferred_channel(
+                [r for r in releases if r["_spec"] and current_frappe in r["_spec"]]
+            )
+            best_match = compatible[0] if compatible else None
+            display_release = best_match or (releases[0] if releases else {})
 
-            resolvers.append(self._make_resolver(app, display_target, is_installable=bool(best_match)))
+            resolvers.append(self._make_resolver(app, display_release, is_installable=bool(best_match)))
 
-            if compatible_targets:
+            if compatible:
                 dependency_lookup[app["name"]] = [
-                    self._make_resolver(app, t, is_installable=True) for t in compatible_targets
+                    self._make_resolver(app, r, is_installable=True) for r in compatible
                 ]
 
         for resolver in resolvers:
             resolver._registry = dependency_lookup
         return resolvers
+
+    @staticmethod
+    def _preferred_channel(compatible: list[dict]) -> list[dict]:
+        """Stable releases, falling back to nightly ones when no stable release fits."""
+        stable = [r for r in compatible if r.get("channel") != "nightly"]
+        return stable or compatible
 
     def find_app(self, name: str) -> Resolver:
         """Look up a marketplace app by name, or raise AppNotFoundError - the

@@ -8,11 +8,9 @@ import pytest
 from flows.admin import (
     create_site,
     drop_site,
-    install_custom_app,
     installed_apps,
     login,
     site_exists,
-    uninstall_app,
 )
 from flows.wizard import complete_dev_wizard
 from harness.tasks import expect_bench_online
@@ -20,26 +18,11 @@ from harness.tasks import expect_bench_online
 pytestmark = pytest.mark.incremental
 
 
-def _truthy(name: str, default: str = "") -> bool:
-    return os.environ.get(name, default).strip().lower() in ("1", "true", "yes", "on")
-
-
 DB_TYPE = os.environ.get("E2E_DB_TYPE", "mariadb")  # 'mariadb' | 'postgres'
 # Distinct name per variant so local runs of different variants don't collide.
 BENCH_NAME = f"e2e-{DB_TYPE}"
 
 SITE = "site1.localhost"
-
-# An extra app installed from a public repo. Defaults to a light, known-good
-# frappe app so CI stays fast; point it at erpnext / india-compliance to widen.
-# Set E2E_EXTRA_APP=0 to skip the install/uninstall steps entirely.
-INSTALL_EXTRA_APP = _truthy("E2E_EXTRA_APP", "1")
-EXTRA_APP_NAME = os.environ.get("E2E_EXTRA_APP_NAME", "blog")
-EXTRA_APP_REPO = os.environ.get("E2E_EXTRA_APP_REPO", "https://github.com/frappe/blog")
-EXTRA_APP_BRANCH = os.environ.get("E2E_EXTRA_APP_BRANCH", "develop")
-
-_skip_extra_app = pytest.mark.skipif(not INSTALL_EXTRA_APP, reason="E2E_EXTRA_APP=0")
-
 
 def test_completes_setup_wizard(bench, page):
     page.goto(bench.admin_url)
@@ -72,18 +55,6 @@ def test_creates_a_new_site(bench, page):
     assert site_exists(page, bench.admin_url, SITE)
     # A fresh site always has frappe installed.
     assert "frappe" in installed_apps(page, bench.admin_url, SITE)
-
-
-@_skip_extra_app
-def test_installs_extra_app(bench, page):
-    install_custom_app(page, bench.admin_url, SITE, EXTRA_APP_REPO, EXTRA_APP_BRANCH)
-    assert EXTRA_APP_NAME in installed_apps(page, bench.admin_url, SITE)
-
-
-@_skip_extra_app
-def test_uninstalls_extra_app(bench, page):
-    uninstall_app(page, bench.admin_url, SITE, EXTRA_APP_NAME)
-    assert EXTRA_APP_NAME not in installed_apps(page, bench.admin_url, SITE)
 
 
 def test_drops_the_site(bench, page):

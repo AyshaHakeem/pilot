@@ -15,7 +15,7 @@ BENCH_TEST_ROOT = Path(os.environ.get("BENCH_TEST_ROOT", _DEFAULT_BENCH_ROOT))
 def pytest_configure(config):
     config.addinivalue_line(
         "markers",
-        "integration: requires a fully initialised Frappe bench (run bench init first)",
+        "integration: requires a fully initialised Frappe bench (run pilot init first)",
     )
     config.addinivalue_line(
         "markers",
@@ -29,21 +29,21 @@ def bench_root() -> Path:
     if not (BENCH_TEST_ROOT / "bench.toml").exists():
         pytest.skip(
             f"No bench.toml at {BENCH_TEST_ROOT}. "
-            "Run 'bench init' inside that directory first, or set BENCH_TEST_ROOT."
+            "Run 'pilot init' inside that directory first, or set BENCH_TEST_ROOT."
         )
-    # bench-cli installs no `bench` into the bench venv; probe the interpreter.
+    # Pilot installs no `pilot` into the bench venv; probe the interpreter.
     if not (BENCH_TEST_ROOT / "env" / "bin" / "python").exists():
         pytest.skip(
-            f"Bench env not initialised at {BENCH_TEST_ROOT}. Run 'bench init' inside that directory first."
+            f"Bench env not initialised at {BENCH_TEST_ROOT}. Run 'pilot init' inside that directory first."
         )
     return BENCH_TEST_ROOT
 
 
 @pytest.fixture(scope="session")
 def bench_bin() -> str:
-    b = shutil.which("bench")
+    b = shutil.which("pilot")
     if b is None:
-        pytest.skip("'bench' binary not found in PATH - install bench-cli first")
+        pytest.skip("'pilot' binary not found in PATH - install Pilot first")
     return b
 
 

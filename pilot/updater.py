@@ -15,6 +15,7 @@ from pilot.utils import cli_root, extract_tar_archive
 RELEASE_REPO = "frappe/pilot"
 _RELEASES_API = f"https://api.github.com/repos/{RELEASE_REPO}/releases?per_page=1"
 _TARBALL_ASSET = "pilot.tar.gz"
+_OBSOLETE_TOP_LEVEL_ENTRIES = ("bench",)
 
 Progress = Callable[[str], None]
 
@@ -23,7 +24,7 @@ def latest_release() -> dict | None:
     """Newest release as {tag, asset_url, body}, or None. Uses the releases list (prereleases included)."""
     request = urllib.request.Request(
         _RELEASES_API,
-        headers={"Accept": "application/vnd.github+json", "User-Agent": "bench-cli"},
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "pilot"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         releases = json.load(response)
@@ -46,7 +47,7 @@ def update_available() -> tuple[bool, str | None]:
 
 
 def perform_upgrade(on_progress: Progress = lambda message: None) -> None:
-    """Update the bench-cli code in place. Restarting the admin service is the caller's job."""
+    """Update the Pilot code in place. Restarting the admin service is the caller's job."""
     from pilot.internal.patch_runner import run_patches
 
     run_patches("pre_update", on_progress=on_progress)
@@ -63,7 +64,7 @@ def _upgrade_dev(on_progress: Progress) -> None:
     from pilot.utils import run_command
 
     root = cli_root()
-    on_progress("Pulling latest bench-cli (dev install)...")
+    on_progress("Pulling latest Pilot (dev install)...")
     run_command(["git", "-C", str(root), "pull"], stream_output=True)
     on_progress("Installing admin Python dependencies...")
     AdminEnvManager(root).install_python_deps()
@@ -107,13 +108,18 @@ def _swap_in(root: Path, staging: Path, on_progress: Progress) -> None:
 
     Directories in the release (pilot/, admin/) are swapped whole, so files dropped between
     versions are pruned. Data dirs (benches/, .admin-venv, .git) are absent from the tarball
-    and never touched. A stale top-level entry removed entirely between versions is left in
-    place - rare, and harmless. (ponytail: prune those too only if it ever matters.)
+    and never touched. Top-level entries are otherwise preserved unless explicitly listed
+    as obsolete.
     """
     backup = root.with_name(root.name + ".backup")
     _reset_dir(backup)
     swapped: list[tuple[str, bool]] = []
     try:
+        for name in _OBSOLETE_TOP_LEVEL_ENTRIES:
+            target = root / name
+            if target.exists() or target.is_symlink():
+                os.rename(target, backup / name)
+                swapped.append((name, True))
         for entry in sorted(staging.iterdir()):
             target = root / entry.name
             had_original = target.exists()

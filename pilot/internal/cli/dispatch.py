@@ -71,9 +71,9 @@ def _implicit_bench_root(benches_dir: Path) -> Path:
             return candidates[0]
         if len(candidates) > 1:
             names = ", ".join(d.name for d in sorted(candidates))
-            raise BenchError(f"Multiple benches found: {names}\nSpecify one with: bench -b <name> <command>")
+            raise BenchError(f"Multiple benches found: {names}\nSpecify one with: pilot -b <name> <command>")
 
-    raise BenchError("No bench found. Create one with: bench new <name>")
+    raise BenchError("No bench found. Create one with: pilot new <name>")
 
 
 def load_bench(context: CliContext, require_explicit: bool = False) -> "Bench":
@@ -213,8 +213,8 @@ def report_elapsed(elapsed: float) -> None:
 
 def available_hint(benches_dir: Path, sort: bool = False) -> str:
     if not benches_dir.is_dir():
-        return "  No benches found. Run: bench new <name>"
+        return "  No benches found. Run: pilot new <name>"
     names = [d.name for d in benches_dir.iterdir() if d.is_dir() and (d / "bench.toml").exists()]
     if not names:
-        return "  No benches found. Run: bench new <name>"
+        return "  No benches found. Run: pilot new <name>"
     return f"  Available: {', '.join(sorted(names) if sort else names)}"

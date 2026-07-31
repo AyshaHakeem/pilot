@@ -16,7 +16,7 @@ class RetryUpdateTask(Task):
     def run(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
         try:
-            operation.retry_arm()
+            operation.retry()
         except Exception:
             self.step_failed()
             sys.exit(1)

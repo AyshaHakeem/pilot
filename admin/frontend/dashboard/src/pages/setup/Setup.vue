@@ -122,7 +122,7 @@
             <p class="font-medium text-ink-gray-6 text-xs">Develop locally</p>
             <code
               class="block bg-surface-gray-2 mt-1 px-2 py-1.5 rounded font-mono text-ink-gray-8 text-sm select-all"
-              >{{ benchCommand }}
+              >{{ pilotCommand }}
               start</code
             >
           </div>
@@ -130,13 +130,13 @@
             <p class="font-medium text-ink-gray-6 text-xs">Deploy to production</p>
             <code
               class="block bg-surface-gray-2 mt-1 px-2 py-1.5 rounded font-mono text-ink-gray-8 text-sm select-all"
-              >{{ benchCommand }}
+              >{{ pilotCommand }}
               setup production --admin-domain &lt;your-domain&gt; --tls --letsencrypt-email
               &lt;you@example.com&gt;</code
             >
           </div>
           <p class="text-ink-gray-5 text-xs">
-            <code class="font-mono">{{ benchCommand }} start</code>
+            <code class="font-mono">{{ pilotCommand }} start</code>
             reloads this page automatically once the bench is back.
           </p>
         </div>
@@ -230,7 +230,7 @@ const {
   isLinux,
   isProductionHandoff,
   isDone,
-  benchCommand,
+  pilotCommand,
   terminal,
   streamUrl,
   streamStatus,

@@ -1,11 +1,10 @@
-"""Tests for /api/v1/runtime and /api/v1/logs routes."""
+"""Tests for /api/v1/logs routes."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from pilot.config import BenchConfig
 
@@ -24,72 +23,6 @@ def _client(bench_root: Path, password: str = "secret"):
     client = app.test_client()
     client.set_cookie("sid", Session(Bench(bench_root)).issue_session_token()[0])
     return client
-
-
-def _process(name="web", status="running"):
-    return SimpleNamespace(
-        name=name,
-        status=status,
-        pid=123,
-        uptime="1h",
-        cpu_percent=1.0,
-        rss_mb=10.0,
-        pss_mb=8.0,
-        log_file=Path(f"{name}.log"),
-    )
-
-
-def test_runtime_processes_lists_processes(tmp_path: Path) -> None:
-    bench_root = tmp_path / "benches" / "current"
-    client = _client(bench_root)
-
-    with patch(
-        "admin.backend.providers.processes.ProcessProvider.get_all",
-        return_value=[_process()],
-    ):
-        response = client.get("/api/v1/runtime/processes")
-
-    body = response.get_json()
-    assert response.status_code == 200
-    assert body["processes"][0]["name"] == "web"
-    assert body["production"] is False
-
-
-def test_runtime_actions_require_production(tmp_path: Path) -> None:
-    bench_root = tmp_path / "benches" / "current"
-    client = _client(bench_root)
-
-    for action in ("start", "stop", "restart"):
-        response = client.post(f"/api/v1/runtime/actions/{action}")
-        assert response.status_code == 409
-        assert response.get_json()["error"]["code"] == "process_control_unavailable"
-
-
-def test_runtime_restart_returns_the_process_list(tmp_path: Path) -> None:
-    bench_root = tmp_path / "benches" / "current"
-    client = _client(bench_root)
-    conf_dir = bench_root / "config" / "supervisor"
-    conf_dir.mkdir(parents=True)
-    (conf_dir / "supervisord.conf").write_text("")
-
-    status_result = Mock(returncode=0, stdout="current:web RUNNING\n")
-    restart_result = Mock(returncode=0)
-
-    with (
-        patch(
-            "admin.backend.api.v1.processes.subprocess.run",
-            side_effect=[status_result, restart_result],
-        ),
-        patch(
-            "admin.backend.providers.processes.ProcessProvider.get_all",
-            return_value=[_process()],
-        ),
-    ):
-        response = client.post("/api/v1/runtime/actions/restart")
-
-    body = response.get_json()
-    assert response.status_code == 200
-    assert body["processes"][0]["name"] == "web"
 
 
 def _make_log(bench_root: Path, name: str, content: str) -> None:

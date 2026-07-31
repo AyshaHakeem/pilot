@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class BenchCreator:
     """Creates a bench. Host-shared settings (MariaDB/Postgres server, ACME
     email, admin JWKS trust) live in common_config.toml. Database credentials
-    are generated at `bench init`, not here - see BenchInitializer."""
+    are generated at `pilot init`, not here - see BenchInitializer."""
 
     def __init__(
         self,
@@ -58,7 +58,7 @@ class BenchCreator:
         admin_port = BenchConfig.default_ports()["admin.port"] + offset
         on_progress(f"\nBench '{self.name}' created at {self.target_directory}")
         on_progress("\nNext step:")
-        on_progress("  bench start")
+        on_progress("  pilot start")
         on_progress(f"  Then open http://localhost:{admin_port} - the setup wizard takes it from there.")
 
         return Bench(self.target_directory)

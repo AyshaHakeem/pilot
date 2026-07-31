@@ -169,7 +169,7 @@ class ProductionSetup:
 
         if not is_linux():
             print(
-                "Error: bench setup production only runs on Linux servers.\nOn macOS, use 'bench start' for local development.",
+                "Error: pilot setup production only runs on Linux servers.\nOn macOS, use 'pilot start' for local development.",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -250,7 +250,7 @@ class ProductionSetup:
 
     def _start_workload(self) -> None:
         """Start the workload (and admin) so the bench is actually serving once
-        setup completes - otherwise sites 502 until a separate `bench start`."""
+        setup completes - otherwise sites 502 until a separate `pilot start`."""
         from pilot.managers.processes.local import ProcessManager
 
         ProcessManager.for_bench(self.bench).start()

@@ -118,4 +118,4 @@ def test_rename_followup_advises_on_failure(
     )
     out = capsys.readouterr().out
     assert "did not complete" in out
-    assert "bench setup production -b b1" in out
+    assert "pilot setup production -b b1" in out

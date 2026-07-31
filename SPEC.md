@@ -1,6 +1,6 @@
-# Bench CLI Spec
+# Pilot CLI Spec
 
-Bench CLI manages local and production Frappe benches with a small object model: `Server`, `Bench`, `Site`, `App`, and the database engines behind a bench.
+Pilot manages local and production Frappe benches with a small object model: `Server`, `Bench`, `Site`, `App`, and the database engines behind a bench.
 
 The command line and Admin API should stay thin. They parse input, authorize the request, start tasks when needed, and delegate work to `pilot.core`.
 

@@ -1,7 +1,7 @@
-# Benches (created by `bench new`)
+# Benches (created by `pilot new`)
 /benches/
 
-# Rootless per-host database servers (created by `bench init`)
+# Rootless per-host database servers (created by `pilot init`)
 /databases/
 
 # Local ad-hoc screenshots

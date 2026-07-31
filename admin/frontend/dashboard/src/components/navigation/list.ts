@@ -10,7 +10,7 @@ export const sidebarSections = [
     label: 'Insights',
     items: [
       { label: 'Analytics', icon: 'lucide-chart-line', to: '/insights/analytics' },
-      { label: 'Migrations', icon: 'lucide-git-pull-request-arrow', to: '/migrations' },
+      { label: 'Updates', icon: 'lucide-git-pull-request-arrow', to: '/updates' },
       { label: 'Logs', icon: 'lucide-scroll-text', to: '/insights/logs' },
       { label: 'Tasks', icon: 'lucide-list-checks', to: '/insights/tasks' },
     ],

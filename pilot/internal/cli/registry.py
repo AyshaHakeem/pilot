@@ -11,7 +11,7 @@ from pilot.exceptions import BenchError
 from pilot.internal.cli.command import add_command_arguments, command_from_args
 from pilot.internal.cli.dispatch import CliContext, load_bench
 
-# Help text for command groups (e.g. `bench setup ...`).
+# Help text for command groups (e.g. `pilot setup ...`).
 GROUP_HELP = {
     "admin": "Admin control-plane commands.",
     "setup": "Production setup commands.",
@@ -49,7 +49,7 @@ def command_names() -> frozenset[str]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="bench", description="Frappe bench manager")
+    parser = argparse.ArgumentParser(prog="pilot", description="Frappe bench manager")
     parser.add_argument("--verbose", action="store_true", help="Show full tracebacks on error.")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompts.")
     parser.add_argument(

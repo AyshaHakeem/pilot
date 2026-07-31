@@ -31,7 +31,7 @@ class GitHubProvider(GitProvider):
         headers = {
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "bench-cli",
+            "User-Agent": "pilot",
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
@@ -84,7 +84,7 @@ class GitHubProvider(GitProvider):
     def fetch_raw_file(self, repo_url: str, path: str, ref: str = "HEAD") -> str:
         owner, repo = parse_github_owner_repo(repo_url)
         url = f"https://raw.githubusercontent.com/{owner}/{repo}/{ref}/{path}"
-        headers = {"User-Agent": "bench"}
+        headers = {"User-Agent": "pilot"}
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         req = urllib.request.Request(url, headers=headers)

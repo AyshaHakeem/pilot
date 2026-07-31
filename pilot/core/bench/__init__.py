@@ -96,6 +96,11 @@ class Bench:
         return self.path / "apps"
 
     @property
+    def staging_path(self) -> Path:
+        """Where apps are cloned and validated before they enter apps/."""
+        return self.path / ".staging"
+
+    @property
     def sites_path(self) -> Path:
         return self.path / "sites"
 

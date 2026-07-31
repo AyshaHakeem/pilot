@@ -1,20 +1,20 @@
 import { computed, onUnmounted, ref } from 'vue'
-import { migrationsApi, isActive, needsAttention } from '@/api/migrations'
+import { updatesApi, isActive, isPending, needsAttention } from '@/api/updates'
 import { useAppUpdates } from '@/composables/apps/useAppUpdates'
-import { stateLabel } from '@/utils/migrationFormat'
+import { pendingActionLabel, stateLabel } from '@/utils/updateFormat'
 
 const current = ref(null)
 const loaded = ref(false)
 const POLL_INTERVAL_MS = 3000
 let timer = null
 
-export function useMigration() {
+export function useUpdate() {
   const { updatesAvailable, checked, check } = useAppUpdates()
 
   async function load() {
     const wasActive = isActive(current.value)
     try {
-      current.value = await migrationsApi.current()
+      current.value = await updatesApi.current()
     } catch {
       current.value = null
     } finally {
@@ -26,7 +26,7 @@ export function useMigration() {
 
   function schedule() {
     clearTimeout(timer)
-    if (isActive(current.value)) {
+    if (isActive(current.value) || isPending(current.value)) {
       timer = setTimeout(load, POLL_INTERVAL_MS)
     }
   }
@@ -45,6 +45,14 @@ export function useMigration() {
   // Priority: unresolved failure > active run > update available.
   const status = computed(() => {
     const operation = current.value
+    if (isPending(operation)) {
+      return {
+        kind: 'active',
+        label: pendingActionLabel(operation.pending_action),
+        operationId: operation.id,
+        icon: 'lucide-loader-circle',
+      }
+    }
     if (needsAttention(operation)) {
       return {
         kind: 'failed',

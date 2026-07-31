@@ -214,7 +214,7 @@ class BenchConfig:
     @staticmethod
     def _known_fields(dataclass_type: type, data: dict) -> dict:
         """Drop keys a bench.toml table has that the dataclass no longer
-        declares, so a config written by an older bench-cli still loads."""
+        declares, so a config written by an older Pilot version still loads."""
         known = {f.name for f in fields(dataclass_type)}
         return {k: v for k, v in data.items() if k in known}
 
@@ -624,7 +624,7 @@ class BenchConfig:
             self.workers.groups = _workers_to_groups(value)
         elif key == "production_process_manager":
             # Store the manager preference only. Production is enabled (and the
-            # deployment built) by `bench setup production`, never by editing config.
+            # deployment built) by `pilot setup production`, never by editing config.
             self.production.process_manager = "" if str(value) in ("", "none") else str(value)
         # unknown keys (wizard extras like is_linux) are ignored
 
@@ -827,7 +827,7 @@ _BENCH_KEYS = {
     "default_branch",
     "allow_developer_mode",
 }
-# Keys older bench-cli versions wrote that the parser still tolerates.
+# Keys older Pilot versions wrote that the parser still tolerates.
 _PRODUCTION_LEGACY = {"lightweight", "nginx"}
 _WORKER_LEGACY = {"queue"}
 

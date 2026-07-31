@@ -40,7 +40,7 @@ Tasks are small workers. Each task performs one job and then stops:
 | Task | Job |
 | --- | --- |
 | `MigrationBackupTask` | Create a recovery snapshot for one site |
-| `UpdateTask` | Update apps, reinstall dependencies, and rebuild assets |
+| `UpdateTask` | Update apps, validate them, reinstall dependencies, and rebuild assets |
 | `MigrateTask` | Migrate one site |
 | `RetryUpdateTask` | Restart the workflow from the failed step |
 | `RevertMigrationTask` | Re-arm a failed operation for restore and start the revert chain |
@@ -212,6 +212,10 @@ Pilot stops before updating code, records the failed site, and restores every si
 ### Update or migration failure
 
 Pilot moves the operation to `needs_attention`. Sites remain protected while the user investigates or chooses a recovery action.
+
+Every app is checked out to its target revision first, then validated as a group, before anything is installed or built.
+A failure there means no app has been reinstalled yet, so `RevertAppsTask` only has commits to check back out. See
+[App Dependencies](app-dependencies.md) for which checks an update runs.
 
 For migration failures, Pilot stores useful details when available:
 

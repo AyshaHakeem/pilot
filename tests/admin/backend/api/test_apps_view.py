@@ -190,6 +190,42 @@ def test_marketplace_returns_catalog_apps(tmp_path: Path) -> None:
     assert response.get_json() == [{"app": "suite"}]
 
 
+def test_marketplace_reports_an_unreadable_registry_as_unavailable(tmp_path: Path) -> None:
+    """A stale or tampered registry cache is a dependency failure, not a server
+    bug - the reason has to reach the caller so it is fixable."""
+    from pilot.exceptions import RegistryUnavailableError
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+
+    with patch(
+        "pilot.integrations.marketplace.Marketplace",
+        side_effect=RegistryUnavailableError("the registry cache is unusable"),
+    ):
+        response = client.get("/api/v1/marketplace/apps")
+
+    assert response.status_code == 503
+    body = response.get_json()["error"]
+    assert body["code"] == "registry_unavailable"
+    assert "unusable" in body["message"]
+
+
+def test_fetch_updates_reports_an_unreadable_registry_as_unavailable(tmp_path: Path) -> None:
+    from pilot.exceptions import RegistryUnavailableError
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+
+    with patch(
+        "pilot.tasks.fetch_app_updates.FetchAppUpdatesTask.queue",
+        side_effect=RegistryUnavailableError("the registry cache is unusable"),
+    ):
+        response = client.post("/api/v1/apps/fetch")
+
+    assert response.status_code == 503
+    assert response.get_json()["error"]["code"] == "registry_unavailable"
+
+
 def test_app_updates_reads_without_fetching(tmp_path: Path) -> None:
     bench_root = tmp_path / "benches" / "current"
     client = _client(bench_root)

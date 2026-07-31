@@ -106,7 +106,7 @@ const router = useRouter()
 const siteName = route.params.name
 
 const { setBreadcrumbs } = useBreadcrumbs()
-const { site, loading, error, status, load, login, backup } = useSite(siteName)
+const { site, loading, error, status, load, reload, login, backup } = useSite(siteName)
 const { version, load: loadBench } = useBench()
 
 setBreadcrumbs([{ label: 'Sites', route: { name: 'Sites' } }, { label: siteName }])
@@ -227,19 +227,36 @@ const menuOptions = computed(() => [
   },
 ])
 
-// Provisioning is a transient state (a new-site/reinstall task still running);
-// poll until it clears instead of leaving the badge stuck on "Creating".
-let provisioningPoll = null
-watch(status, (value) => {
-  if (value === 'provisioning' && !provisioningPoll) {
-    provisioningPoll = setInterval(load, 3000)
-  } else if (value !== 'provisioning' && provisioningPoll) {
-    clearInterval(provisioningPoll)
-    provisioningPoll = null
-  }
-})
+// Provisioning and a pending setup wizard both resolve without us: poll quietly
+// until they do, so the badge and the header button settle on their own.
+const POLL_INTERVAL_MS = 5000
+const isSettling = computed(
+  () => status.value === 'provisioning' || (status.value === 'online' && !site.value.setup_complete),
+)
+
+let poll = null
+watch(
+  isSettling,
+  (settling) => {
+    if (settling && !poll) {
+      poll = setInterval(reload, POLL_INTERVAL_MS)
+    } else if (!settling && poll) {
+      clearInterval(poll)
+      poll = null
+    }
+  },
+  { immediate: true },
+)
+
+watch(
+  () => site.value?.setup_complete,
+  (complete, wasComplete) => {
+    if (complete && wasComplete === false) toast.success('Site setup is complete')
+  },
+)
+
 onUnmounted(() => {
-  if (provisioningPoll) clearInterval(provisioningPoll)
+  if (poll) clearInterval(poll)
 })
 
 onMounted(() => {

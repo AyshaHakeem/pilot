@@ -15,8 +15,9 @@ def make_resolver(name: str, deps: dict[str, str] | None = None) -> Resolver:
     return Resolver(
         app=name,
         repo=f"https://github.com/frappe/{name}",
-        target_type="branch",
-        target="main",
+        branch="main",
+        commit="a" * 40,
+        channel="stable",
         version="1.0.0",
         frappe_version="16.0.0",
         required_version="",
@@ -31,8 +32,13 @@ def test_full_flow_runs_when_app_not_registered(tmp_path: Path) -> None:
     cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp")
 
     with (
-        patch.object(App, "clone") as mock_clone,
-        patch.object(App, "_validate") as mock_validate,
+        patch.object(
+            App,
+            "clone",
+            autospec=True,
+            side_effect=lambda app: app.path.mkdir(parents=True, exist_ok=True),
+        ) as mock_clone,
+        patch.object(App, "validate") as mock_validate,
         patch.object(App, "_install_into_environment") as mock_install,
         patch.object(App, "_build_assets_via_env_manager") as mock_build,
     ):
@@ -53,7 +59,7 @@ def test_run_short_circuits_when_app_already_registered(tmp_path: Path) -> None:
 
     with (
         patch.object(App, "clone") as mock_clone,
-        patch.object(App, "_validate") as mock_validate,
+        patch.object(App, "validate") as mock_validate,
         patch.object(App, "_install_into_environment") as mock_install,
         patch.object(App, "_build_assets_via_env_manager") as mock_build,
     ):
@@ -96,7 +102,7 @@ def test_short_circuit_still_populates_installed_dependencies(tmp_path: Path) ->
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[helpdesk]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
     ):
         cmd = GetAppCommand(bench, repo="https://github.com/frappe/helpdesk", install_dependencies=True)
         cmd.run()
@@ -118,14 +124,15 @@ def test_still_installs_missing_dependency_when_parent_already_installed(tmp_pat
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[helpdesk]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         patch.object(
             App,
             "clone",
             autospec=True,
             side_effect=lambda app: app.path.mkdir(parents=True, exist_ok=True),
         ) as mock_clone,
-        patch.object(App, "_validate"),
+        patch.object(App, "checkout_commit"),
+        patch.object(App, "validate"),
         patch.object(App, "_install_into_environment"),
         patch.object(App, "_build_assets_via_env_manager"),
     ):
@@ -138,20 +145,27 @@ def test_still_installs_missing_dependency_when_parent_already_installed(tmp_pat
     assert [app.config.name for app in cmd.installed_dependencies] == ["telephony"]
 
 
-def test_skip_validations_flag_still_skips_validate(tmp_path: Path) -> None:
+def test_get_app_always_validates(tmp_path: Path) -> None:
+    """There is no way past the checks. An app that cannot pass them cannot be
+    installed, so nothing reaches a bench unvalidated."""
     bench = make_bench(tmp_path)
     bench.create_directories()
-    cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp", skip_validations=True)
+    cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp")
 
     with (
-        patch.object(App, "clone"),
-        patch.object(App, "_validate") as mock_validate,
+        patch.object(
+            App,
+            "clone",
+            autospec=True,
+            side_effect=lambda app: app.path.mkdir(parents=True, exist_ok=True),
+        ),
+        patch.object(App, "validate") as mock_validate,
         patch.object(App, "_install_into_environment"),
         patch.object(App, "_build_assets_via_env_manager"),
     ):
         cmd.run()
 
-    mock_validate.assert_not_called()
+    mock_validate.assert_called_once()
 
 
 def test_bench_is_app_installed_reflects_apps_txt_contents(tmp_path: Path) -> None:

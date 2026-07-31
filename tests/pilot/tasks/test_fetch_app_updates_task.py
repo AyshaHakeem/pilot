@@ -8,7 +8,7 @@ from pilot.core.app import RevisionPin
 from pilot.integrations.marketplace import Marketplace
 from pilot.tasks.fetch_app_updates import FetchAppUpdatesTask
 
-REGISTRY = [{"name": "helpdesk", "repo": "r", "targets": []}]
+REGISTRY = [{"name": "helpdesk", "repo": "r", "releases": []}]
 
 
 def _make_git_apps(bench_root: Path, names: list[str]) -> None:
@@ -78,9 +78,9 @@ ERP_NEXT_REGISTRY = [
     {
         "name": "erpnext",
         "repo": "https://github.com/frappe/erpnext",
-        "targets": [
-            {"version": "16.28.0", "target_type": "branch", "target": "version-16"},
-            {"version": "15.117.0", "target_type": "branch", "target": "version-15"},
+        "releases": [
+            {"version": "16.28.0", "branch": "version-16", "commit": "c" * 40},
+            {"version": "15.117.0", "branch": "version-15", "commit": "d" * 40},
         ],
     }
 ]

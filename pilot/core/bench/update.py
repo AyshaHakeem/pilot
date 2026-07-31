@@ -27,18 +27,36 @@ class BenchUpdater:
         marketplace_by_name = self._marketplace_registry() if live_lookup else {}
         pins = pins or {}
 
+        updated = []
         for app in self.bench.apps():
             if apps_filter is not None and app.config.name not in apps_filter:
                 continue
+            pin = pins.get(app.config.name) or (
+                marketplace_pin(app, marketplace_by_name) if live_lookup else None
+            )
+            if pin is None and not self._follows_its_branch(app, marketplace_by_name, live_lookup):
+                on_progress(f"{app.config.name} is at the newest advertised release, skipping.")
+                continue
             on_progress(f"Updating {app.config.name}...")
-            pin = pins.get(app.config.name)
-            if pin is None and live_lookup:
-                pin = marketplace_pin(app, marketplace_by_name)
             try:
                 app.update(pin=pin)
             except CommandError as error:
                 print(f"  Error updating {app.config.name}: {error}", file=sys.stderr)
                 raise MigrateError(f"Failed to update {app.config.name}") from error
+            updated.append(app)
+
+        # Every app is on its target revision now, so the checks see the tree
+        # migrate will actually run against. Failing here means nothing has been
+        # installed or built yet, and reverting is a checkout.
+        for app in updated:
+            on_progress(f"Validating {app.config.name}...")
+            app.validate()
+
+    @staticmethod
+    def _follows_its_branch(app: "App", marketplace_by_name: dict, live_lookup: bool) -> bool:
+        if not live_lookup:
+            return False
+        return not app.is_marketplace_app(marketplace_by_name.get(app.config.name))
 
     @staticmethod
     def _marketplace_registry() -> dict:
@@ -72,14 +90,8 @@ class BenchUpdater:
 
 
 def marketplace_pin(app: "App", marketplace_by_name: dict) -> "RevisionPin | None":
+    """The newer advertised release for a marketplace app, or None when there is none."""
     entry = marketplace_by_name.get(app.config.name)
-    if not entry or app.config.repo != entry.get("repo"):
+    if not app.is_marketplace_app(entry):
         return None
-    version = app.installed_version
-    target = next((target for target in entry.get("targets", []) if target["version"] == version), None)
-    if target is None:
-        return None
-
-    from pilot.core.app import RevisionPin
-
-    return RevisionPin.from_marketplace_target(target)
+    return app.update_target(entry)

@@ -18,7 +18,7 @@ class NewCommand(Command):
         str,
         Arg(
             help="Admin domain for this bench. Optional for development; "
-            "required by 'bench setup production' (pass it there if omitted here)."
+            "required by 'pilot setup production' (pass it there if omitted here)."
         ),
     ] = ""
     # None -> inherit the server-wide value from a sibling bench (default False).

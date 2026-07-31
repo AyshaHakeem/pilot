@@ -28,7 +28,7 @@
     :subject="siteSubject"
     :warning="{
       title: 'The site goes down while this runs.',
-      message: `A recovery backup is taken first. If the migration fails you can retry it, or restore that backup from the migration page.`,
+      message: `A recovery backup is taken first. If the migration fails you can retry it, or restore that backup from the update page.`,
     }"
     :error="migrateError"
     confirm-label="Migrate"
@@ -116,7 +116,7 @@ async function confirmMigrate() {
     const data = await sitesApi.migrate(props.siteName)
     if (data.operation_id) {
       showMigrate.value = false
-      router.push({ name: 'MigrationDetail', params: { operationId: data.operation_id } })
+      router.push({ name: 'UpdateDetail', params: { operationId: data.operation_id } })
     } else migrateError.value = apiErrorMessage(data, 'Failed to migrate site.')
   } catch (e) {
     migrateError.value = e.message || 'Failed to migrate site.'

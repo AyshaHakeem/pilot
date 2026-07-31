@@ -85,7 +85,7 @@
           <li>
             Run
             <code class="bg-surface-gray-2 px-1 py-0.5 rounded font-mono text-ink-gray-8"
-              >bench -b {{ session.benchName }} set-admin-password</code
+              >pilot -b {{ session.benchName }} set-admin-password</code
             >
           </li>
         </ol>

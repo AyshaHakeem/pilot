@@ -15,7 +15,7 @@ class UpdateCliTask(Task):
         self.update()
         self.restart_admin()
 
-    @step("update", lambda self: f"Update bench-cli at {cli_root()}")
+    @step("update", lambda self: f"Update Pilot at {cli_root()}")
     def update(self) -> None:
         from pilot.updater import perform_upgrade
 

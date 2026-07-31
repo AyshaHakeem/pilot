@@ -16,7 +16,7 @@ class RevertMigrationTask(Task):
     def run(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
         try:
-            operation.revert_arm()
+            operation.revert()
         except Exception:
             self.step_failed()
             sys.exit(1)

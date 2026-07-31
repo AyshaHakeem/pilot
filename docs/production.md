@@ -21,14 +21,14 @@ tls = true
 ## Setup Flow
 
 ```bash
-bench setup requirements
-bench setup config
-bench setup nginx
-bench setup production --admin-domain admin.example.com
-bench setup letsencrypt
+pilot setup requirements
+pilot setup config
+pilot setup nginx
+pilot setup production --admin-domain admin.example.com
+pilot setup letsencrypt
 ```
 
-`bench setup production` writes process manager config and nginx integration. `bench remove production` removes production deployment files and services while keeping logs, certificates, and admin domain config.
+`pilot setup production` writes process manager config and nginx integration. `pilot remove production` removes production deployment files and services while keeping logs, certificates, and admin domain config.
 
 ## Process Managers
 
@@ -36,15 +36,15 @@ Supported managers are `systemd` and `supervisor`.
 
 Runtime commands:
 
-- `bench start`
-- `bench stop`
-- `bench restart`
+- `pilot start`
+- `pilot stop`
+- `pilot restart`
 
-`bench restart` targets the production workload. Local development start/stop uses bench runtime managers.
+`pilot restart` targets the production workload. Local development start/stop uses bench runtime managers.
 
 ## Nginx And TLS
 
-Nginx config is rendered from bench and site state. Regenerate it with `bench setup nginx` or `bench setup config`.
+Nginx config is rendered from bench and site state. Regenerate it with `pilot setup nginx` or `pilot setup config`.
 
 Let's Encrypt setup uses configured domains and should run after nginx is rendered. Site domain changes should reload nginx through site/domain code.
 

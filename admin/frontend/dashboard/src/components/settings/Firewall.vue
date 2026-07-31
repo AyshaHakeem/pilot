@@ -8,7 +8,7 @@
         <span class="text-ink-gray-6 text-p-sm"
           >These rules take effect only in production (they're applied by nginx). This bench isn't
           deployed, so nothing is enforced until you run
-          <span class="font-mono text-xs">bench setup production</span>.</span
+          <span class="font-mono text-xs">pilot setup production</span>.</span
         >
       </template>
     </Alert>

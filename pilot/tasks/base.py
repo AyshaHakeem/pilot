@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import functools
+import sys
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
@@ -157,6 +158,15 @@ class Task:
         return _TaskStep(self, key)
 
     def step_failed(self) -> None:
+        """Report the failure being handled, then mark the step failed.
+
+        Reads the exception under handling instead of taking it as an argument,
+        so a caller cannot mark a step failed and drop the reason - which left
+        every migration task logging nothing but STEP-FAILED.
+        """
+        error = sys.exc_info()[1]
+        if error is not None:
+            print(f"Error: {error}", flush=True)
         if self._current_step:
             self.mark_step_failed(self._current_step)
 

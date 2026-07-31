@@ -102,7 +102,7 @@ export function useSetup() {
     isInstalling.value && showStreamDetails.value ? 'max-w-2xl' : 'max-w-lg',
   )
   const isDone = computed(() => currentStep.value === 'done')
-  const benchCommand = computed(() => (benchName.value ? `bench -b ${benchName.value}` : 'bench'))
+  const pilotCommand = computed(() => (benchName.value ? `pilot -b ${benchName.value}` : 'pilot'))
   const stepTitle = computed(() => {
     if (isDone.value && isProductionHandoff.value) return 'Finishing setup'
     return STEP_TITLES[currentStep.value] || benchName.value
@@ -120,7 +120,7 @@ export function useSetup() {
       postgresPasswordConfigured.value = config.postgres_password_configured === true
       // Bench arrived with production already chosen (the admin UI's "New Bench"
       // flow) - the wizard's task will bring up production itself, so the 'done'
-      // step shouldn't tell the user to run `bench setup production` by hand.
+      // step shouldn't tell the user to run `pilot setup production` by hand.
       // The flattened config renders an unset manager as the literal string
       // "none" (see BenchTomlBuilder._flatten), not an empty value.
       const processManager = config.production_process_manager
@@ -345,7 +345,7 @@ export function useSetup() {
     isLinux,
     isProductionHandoff,
     isDone,
-    benchCommand,
+    pilotCommand,
     terminal,
     streamUrl,
     streamStatus,

@@ -6,7 +6,7 @@ set -e
 # their derivatives via ID_LIKE. Unknown distros fall back to apt.
 #
 # Two passes. As root it prepares the host and the bench user, then stops.
-# As that user it installs bench itself, needing no privileges at all.
+# As that user it installs Pilot itself, needing no privileges at all.
 
 # ── configuration ─────────────────────────────────────────────────────────────
 # All three point at the same GitHub repo/branch; override PILOT_GITHUB_SLUG and
@@ -187,11 +187,11 @@ ensure_homebrew() {
 }
 
 # ── system packages ───────────────────────────────────────────────────────────
-# Everything bench needs at runtime is installed here, as root, once. The bench
+# Everything Pilot needs at runtime is installed here, as root, once. The bench
 # user has no passwordless sudo, so anything missing from this list becomes a
-# password prompt in the middle of `bench init` or a deploy.
+# password prompt in the middle of `pilot init` or a deploy.
 
-# Bare images ship almost nothing: the tools this script and bench both need
+# Bare images ship almost nothing: the tools this script and Pilot both need
 # before first use, plus the build deps for the admin venv and frappe wheels.
 bootstrap_packages() {
     case "$DISTRO" in
@@ -218,7 +218,7 @@ add_distro_repos() {
 
 # One MariaDB, PostgreSQL and Redis per bench user (rootless, systemctl --user),
 # shared across that user's benches. The dev headers are for the Python client
-# libraries frappe's virtualenv compiles during `bench init`.
+# libraries frappe's virtualenv compiles during `pilot init`.
 install_database_engines() {
     case "$DISTRO" in
         macos)
@@ -233,7 +233,7 @@ install_database_engines() {
     esac
 }
 
-# What `bench setup production` needs. Installing the WAF module up front keeps
+# What `pilot setup production` needs. Installing the WAF module up front keeps
 # enabling the WAF later a non-root operation too.
 install_production_packages() {
     case "$DISTRO" in
@@ -267,7 +267,7 @@ install_node() {
 
 # The distro packages auto-start services on their default ports. Benches run
 # their own instances, so free the ports and the memory right away. nginx is
-# started by `bench setup production`, which a sudoers grant already allows.
+# started by `pilot setup production`, which a sudoers grant already allows.
 disable_system_services() {
     case "$DISTRO" in
         macos|unknown) return 0 ;;
@@ -479,10 +479,10 @@ prepare_host() {
     echo ""
     echo "========================================================================"
     echo " User '$BENCH_USER' is ready — base tools, database engines and the"
-    echo " production stack are installed system-wide, so day-to-day bench"
+    echo " production stack are installed system-wide, so day-to-day Pilot"
     echo " commands never need root."
     echo ""
-    echo " bench must NOT be installed as root. Switch to '$BENCH_USER' and run"
+    echo " Pilot must NOT be installed as root. Switch to '$BENCH_USER' and run"
     echo " the installer again:"
     echo ""
     echo "   su - $BENCH_USER"
@@ -494,7 +494,7 @@ prepare_host() {
 # Nothing below here needs privileges: prepare_host granted them all already.
 
 # Only root can turn lingering on. Fail now rather than midway through
-# `bench init`, where systemctl --user finds no bus to talk to.
+# `pilot init`, where systemctl --user finds no bus to talk to.
 require_linger() {
     systemd_booted || return 0
     linger_enabled "$(id -un)" && return 0
@@ -572,19 +572,31 @@ ensure_tzdata() {
 add_path_line() {
     file="$1"; line="$2"
     mkdir -p "$(dirname "$file")"
-    grep -qF 'pilot' "$file" 2>/dev/null && return 0
+    case "$line" in
+        fish_add_path*) legacy_line="fish_add_path \$HOME/pilot" ;;
+        *) legacy_line="export PATH=\"\$HOME/pilot:\$PATH\"" ;;
+    esac
+    if grep -qFx "$legacy_line" "$file" 2>/dev/null; then
+        tmp="$(mktemp)"
+        awk -v old="$legacy_line" -v new="$line" '$0 == old { print new; next } { print }' "$file" > "$tmp"
+        cat "$tmp" > "$file"
+        rm -f "$tmp"
+        echo "Updated Pilot PATH in $file"
+        return 0
+    fi
+    grep -qFx "$line" "$file" 2>/dev/null && return 0
     echo "$line" >> "$file"
-    echo "Added bench to PATH in $file"
+    echo "Added Pilot to PATH in $file"
 }
 
 # Sets RC_FILE to the rc it touched, for the closing hint.
-add_bench_to_path() {
+add_pilot_to_path() {
     # Escaped so $HOME lands literally in the rc file and expands at shell start.
-    export_line="export PATH=\"\$HOME/pilot:\$PATH\""
+    export_line="export PATH=\"\$HOME/pilot/bin:\$PATH\""
     case "$SHELL" in
         */fish)
             RC_FILE="$HOME/.config/fish/config.fish"
-            add_path_line "$RC_FILE" "fish_add_path \$HOME/pilot" ;;
+            add_path_line "$RC_FILE" "fish_add_path \$HOME/pilot/bin" ;;
         */zsh)
             RC_FILE="$HOME/.zshrc"
             add_path_line "$RC_FILE" "$export_line" ;;
@@ -600,7 +612,7 @@ add_bench_to_path() {
             add_path_line "$HOME/.profile" "$export_line" ;;
     esac
 
-    export PATH="$PILOT_DIR:$PATH"
+    export PATH="$PILOT_DIR/bin:$PATH"
     # fish rc syntax is not sh, so never source it back into this shell.
     case "$SHELL" in */fish) RC_FILE=""; return ;; esac
     # Best-effort: shell-specific rc syntax may not parse here, which is fine —
@@ -636,20 +648,21 @@ install_for_user() {
     echo "Setting up your environment..."
     require_linger
     fetch_pilot
-    chmod +x "$PILOT_DIR/bench"
+    rm -f "$PILOT_DIR/bench"
+    chmod +x "$PILOT_DIR/bin/pilot"
     ensure_uv
     ensure_tzdata
-    add_bench_to_path
+    add_pilot_to_path
     ensure_admin_venv
 
     echo ""
-    echo "bench installed to $PILOT_DIR"
+    echo "Pilot installed to $PILOT_DIR"
     echo ""
     echo "Quick start:"
-    echo "  bench new my-bench"
-    echo "  bench start"
+    echo "  pilot new my-bench"
+    echo "  pilot start"
     echo ""
-    echo "If 'bench' is not found, open a new terminal or run: . ${RC_FILE:-$HOME/.bashrc}"
+    echo "If 'pilot' is not found, open a new terminal or run: . ${RC_FILE:-$HOME/.bashrc}"
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────

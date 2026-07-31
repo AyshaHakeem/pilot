@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from playwright.sync_api import Page, expect
 
-# Long pole: bench init clones the framework and builds the venv.
+# Long pole: pilot init clones the framework and builds the venv.
 SETUP_TIMEOUT_MS = 20 * 60_000
 
 
@@ -32,14 +32,14 @@ def complete_dev_wizard(
     # "Connect to external database" shows host/user/password fields.
     page.get_by_role("button", name="Next").click()
     # The wizard always provisions a development bench (no production/process-manager
-    # choice - that's a separate `bench setup production` step run from the terminal
+    # choice - that's a separate `pilot setup production` step run from the terminal
     # afterwards). We keep the repo default.
     expect(page.get_by_text("Customize your bench")).to_be_visible(timeout=30_000)
     if framework_branch:
         _choose_select(page, "Frappe branch", framework_branch)
 
     page.get_by_role("button", name="Set up bench").click()
-    # bench init clones the framework and builds the venv; this is the long pole.
+    # pilot init clones the framework and builds the venv; this is the long pole.
     expect(page.get_by_text("Setting up your bench")).to_be_visible(timeout=60_000)
 
     # The wizard resolves to exactly one terminal state: success ("Your bench is

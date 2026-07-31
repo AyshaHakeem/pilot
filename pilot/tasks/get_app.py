@@ -26,13 +26,16 @@ class GetAppTask(Task):
 
     @step("fetch", lambda self: f"Fetch {self.marketplace_app or self.repo}")
     def fetch(self) -> None:
+        commit = ""
         if self.marketplace_app:
             resolver = Marketplace(self.bench).find_app(self.marketplace_app)
-            repo, branch = resolver.repo, resolver.target
+            repo, branch, commit = resolver.repo, resolver.branch, resolver.commit
         else:
             repo, branch = self.repo, self.branch
         app = App.from_repo(self.bench, repo, branch)
-        app.install(install_dependencies=bool(self.marketplace_app), on_progress=self.report)
+        app.install(
+            install_dependencies=bool(self.marketplace_app), commit=commit, on_progress=self.report
+        )
 
 
 if __name__ == "__main__":

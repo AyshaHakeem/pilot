@@ -79,7 +79,7 @@ class TestSetupWizard:
         # Frappe routes the request to the correct site via the Host header.
         session.headers["Host"] = SITE
 
-        # Authenticate as Administrator (created by bench new-site --admin-password).
+        # Authenticate as Administrator (created by pilot new-site --admin-password).
         login = session.post(
             f"{BASE_URL}/api/method/login",
             data={"usr": "Administrator", "pwd": ADMIN_PASSWORD},

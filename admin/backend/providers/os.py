@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 from pathlib import Path
 
 from pilot.config import BenchConfig
@@ -35,11 +34,12 @@ class OSProvider:
             return ""
 
         try:
-            result = subprocess.run([binary, *args], capture_output=True, text=True, timeout=5)
-        except (OSError, subprocess.SubprocessError):
+            result = run_command([binary, *args], timeout=5)
+        except (OSError, CommandError):
             return ""
 
-        match = re.search(pattern, result.stdout or result.stderr)
+        output = (result.stdout or result.stderr or b"").decode(errors="replace")
+        match = re.search(pattern, output)
         return match.group(1) if match else ""
 
     @property

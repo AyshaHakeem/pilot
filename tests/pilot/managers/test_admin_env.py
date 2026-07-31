@@ -30,7 +30,7 @@ def uv_runs(tmp_path: Path):
             _existing_venv(tmp_path)
 
     with (
-        patch("pilot.managers.environment.shutil.which", return_value="uv"),
+        patch("pilot.managers.environment.find_uv", return_value="uv"),
         patch("pilot.managers.environment.subprocess.run", side_effect=fake_run) as run,
     ):
         yield run
@@ -101,3 +101,32 @@ def test_dev_build_installs_frontend_deps(tmp_path: Path, uv_runs) -> None:
         _make_manager(tmp_path).ensure()
 
     assert [call for call in uv_runs.call_args_list if call.args[0][:1] == ["npm"]]
+
+
+def test_find_uv_looks_where_the_installer_puts_it(monkeypatch, tmp_path: Path) -> None:
+    """Tasks run under a service PATH with no ~/.local/bin. Trusting PATH alone
+    reported a working uv as missing and reinstalled it on every task."""
+    from pilot.managers import environment
+
+    installed = tmp_path / ".local" / "bin" / "uv"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("")
+    monkeypatch.setattr(environment.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(environment, "which", lambda name: None)
+
+    assert environment.find_uv() == str(installed)
+
+
+def test_ensure_uv_does_not_reinstall_what_is_already_there(monkeypatch, tmp_path: Path) -> None:
+    from pilot.managers import environment
+
+    installed = tmp_path / ".cargo" / "bin" / "uv"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("")
+    monkeypatch.setattr(environment.Path, "home", staticmethod(lambda: tmp_path))
+    monkeypatch.setattr(environment, "which", lambda name: None)
+    monkeypatch.setattr(
+        environment, "run_command", lambda *a, **k: pytest.fail("uv is present, nothing to install")
+    )
+
+    assert environment.ensure_uv() == str(installed)

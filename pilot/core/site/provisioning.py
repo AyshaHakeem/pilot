@@ -143,7 +143,7 @@ def validate_new_site(bench: "Bench", name: str, apps: list[str]) -> bool:
     installed = set(apps_txt.read_text().splitlines()) if apps_txt.exists() else set()
     for app in apps:
         if app not in installed:
-            raise BenchError(f"App '{app}' is not installed. Run 'bench get-app <repo>' first.")
+            raise BenchError(f"App '{app}' is not installed. Run 'pilot get-app <repo>' first.")
     return bool(patterns)
 
 

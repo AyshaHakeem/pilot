@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import subprocess
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -8,6 +7,8 @@ from pathlib import Path
 from pilot.config import BenchConfig
 from pilot.core.bench import Bench
 from pilot.core.database import make_database, site_database_name
+from pilot.exceptions import CommandError
+from pilot.utils import run_command
 
 _SYSTEM_SCHEMAS = {"mysql", "performance_schema", "information_schema", "sys"}
 
@@ -80,9 +81,8 @@ class StorageBreakdown:
 @lru_cache(maxsize=256)
 def directory_size_bytes(path: str) -> int:
     try:
-        result = subprocess.run(["du", "-sb", path], capture_output=True, timeout=10)
-        return int(result.stdout.split()[0]) if result.returncode == 0 else 0
-    except Exception:
+        return int(run_command(["du", "-sb", path], timeout=10).stdout.split()[0])
+    except (OSError, CommandError, IndexError, ValueError):
         return 0
 
 

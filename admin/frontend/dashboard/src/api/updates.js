@@ -1,6 +1,6 @@
 import { request } from './client'
 
-export const migrationsApi = {
+export const updatesApi = {
   list: (params = {}) => request.get('migrations', { searchParams: params }).json(),
   current: () => request.get('migrations/current').json(),
   detail: (id) => request.get(`migrations/${id}`).json(),
@@ -33,4 +33,8 @@ export function needsAttention(operation) {
 
 export function isActive(operation) {
   return !!operation && ACTIVE_STATES.includes(operation.state)
+}
+
+export function isPending(operation) {
+  return !!operation?.pending_action
 }

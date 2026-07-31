@@ -1,6 +1,6 @@
 # Architecture
 
-Bench CLI is organized around a few domain objects. External surfaces should delegate to those objects instead of doing orchestration directly.
+Pilot is organized around a few domain objects. External surfaces should delegate to those objects instead of doing orchestration directly.
 
 ## Directory Map
 
@@ -51,6 +51,23 @@ admin/frontend/in-app-embed/  Desk Cloud Settings IIFE (served at /embed/cloud-s
 
 `App` represents one app repository. It owns cloning, dependency install, validation, revision pins, and app metadata.
 
+`App.install` puts the app in `.staging`, validates there, then moves it into `apps/` under its importable name. An app
+already sitting in `apps/` is moved into staging too, and moved back if it fails - nothing unvetted stays in the
+directory that `bench.apps()` scans to decide what to update, reinstall and constrain. A failed install is undone, so a
+half-installed app never reaches a site.
+
+`App.validate` runs every check, and is the only gate: install, `update` and `switch-branch` all use it, so an app that
+has moved revision is held to the same standard as a new one. `pilot.core.app.validator` holds one class per check,
+each raising `AppValidationError` with the fix. See [App Dependencies](app-dependencies.md) for what apps must declare
+and how conflicts between them are resolved.
+
+Checks read the app's source, never run it. Hooks validation resolves each dotted path to a name that exists on disk -
+not to code that works: it cannot see a wrong signature, and stops at the first attribute, so `module.Class.method`
+is checked only as far as `Class`.
+
+Every app must ship `pyproject.toml` with a `[tool.bench.frappe-dependencies]` table pinning the frappe versions it
+supports, and the declared ranges are compared against the versions actually installed.
+
 Database objects are created from `bench.db_type`. A bench uses one engine for its sites: `mariadb`, `postgres`, or `sqlite`.
 
 ## Control Flow
@@ -81,6 +98,7 @@ Inside a bench:
 
 ```text
 apps/       cloned apps
+.staging/   apps being cloned and validated, before they enter apps/
 sites/      Frappe sites and assets
 env/        Python virtualenv
 logs/       process and task logs

@@ -128,6 +128,7 @@ export function useMarketplace(initialSiteName = '') {
         compatible: app.is_installable,
         needs: app.required_version,
         label: app.version ? `v${app.version}` : '',
+        nightly: app.channel === 'nightly',
       }))
   })
 

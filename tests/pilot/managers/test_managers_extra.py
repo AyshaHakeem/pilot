@@ -393,7 +393,7 @@ def test_systemd_admin_socket_listens_on_internal_port(tmp_path: Path) -> None:
     socket_unit = SystemdRenderer("test-bench").render_admin_socket(7001)
     assert "[Socket]" in socket_unit
     assert "ListenStream=127.0.0.1:7001" in socket_unit
-    # Independent of the workload target so the admin survives `bench stop`.
+    # Independent of the workload target so the admin survives `pilot stop`.
     assert "WantedBy=default.target" in socket_unit
     assert "PartOf=" not in socket_unit
 

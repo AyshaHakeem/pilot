@@ -142,9 +142,27 @@ def test_is_installed_argv(monkeypatch, manager, expected) -> None:
 
 def test_install_uses_sudo_when_not_root(monkeypatch) -> None:
     monkeypatch.setattr(platform, "is_root", lambda: False)
+    monkeypatch.setattr(package_managers, "has_passwordless_sudo", lambda: True)
     with patch.object(package_managers.subprocess, "run") as run:
         DnfPackageManager().install("git")
     assert run.call_args[0][0] == ["sudo", "dnf", "install", "-y", "git"]
+
+
+def test_install_raises_without_passwordless_sudo(monkeypatch) -> None:
+    from pilot.exceptions import BenchError
+
+    monkeypatch.setattr(package_managers, "is_root", lambda: False)
+    monkeypatch.setattr(package_managers, "has_passwordless_sudo", lambda: False)
+    with pytest.raises(BenchError, match="Required: git"):
+        DnfPackageManager().install("git")
+
+
+def test_install_skips_permission_check_on_macos(monkeypatch) -> None:
+    monkeypatch.setattr(package_managers, "is_root", lambda: False)
+    monkeypatch.setattr(package_managers, "has_passwordless_sudo", lambda: False)
+    with patch.object(package_managers.subprocess, "run") as run:
+        BrewPackageManager().install("git")
+    assert run.call_args[0][0] == ["brew", "install", "git"]
 
 
 # Node.js is installed once by install.sh's root bootstrap now, not per bench

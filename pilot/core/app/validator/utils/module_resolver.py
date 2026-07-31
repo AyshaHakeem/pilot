@@ -3,27 +3,25 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from pilot.exceptions import BenchError
-
 
 class ModuleResolver:
-    """Resolves imported modules against a venv's site-packages by stat'ing
-    files instead of importing them, so no module-level code ever runs."""
+    """Resolves imported modules by stat'ing files under one or more roots,
+    instead of importing them, so no module-level code ever runs."""
 
     _SUFFIXES = (".py", ".so", ".pyd")
 
-    def __init__(self, env_path: Path) -> None:
-        site_packages = next(env_path.glob("lib/python*/site-packages"), None)
-        if site_packages is None:
-            raise BenchError(f"No site-packages found in {env_path}.")
-        self.site_packages = site_packages
+    def __init__(self, *roots: Path) -> None:
+        self.roots = [root for root in roots if root.is_dir()]
 
     def unresolved(self, modules: Iterable[str]) -> list[str]:
-        """Get modules which are not resolvable in the venv's site-packages."""
+        """Modules that none of the roots provide."""
         return [module for module in modules if not self._is_resolvable(module)]
 
     def _is_resolvable(self, module: str) -> bool:
-        directory = self.site_packages
+        return any(self._is_under(root, module) for root in self.roots)
+
+    def _is_under(self, root: Path, module: str) -> bool:
+        directory = root
         parts = module.split(".")
         for index, part in enumerate(parts):
             if (directory / part).is_dir():

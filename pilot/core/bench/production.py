@@ -142,7 +142,7 @@ class BenchProduction:
         self.bench.config.production.process_manager = ""
         on_progress(f"\nProduction deployment removed for {name}.")
         on_progress("\nRun it locally with:")
-        on_progress(f"  bench -b {name} start")
+        on_progress(f"  pilot -b {name} start")
         on_progress("\nDevelopment admin:")
         on_progress(f"  {admin_url(self.bench.config)}")
 

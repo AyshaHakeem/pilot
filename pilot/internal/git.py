@@ -48,6 +48,15 @@ class GitRepo:
         except ValueError:
             return 0
 
+    def has_commit(self, sha: str) -> bool:
+        """Whether the object is already in this clone (no network)."""
+        return bool(sha) and self._run("cat-file", "-e", f"{sha}^{{commit}}").returncode == 0
+
+    def is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        """Whether `ancestor` is reachable from `descendant`. False when either
+        commit is missing locally, so callers must fetch before trusting it."""
+        return self._run("merge-base", "--is-ancestor", ancestor, descendant).returncode == 0
+
     def tracking_sha(self, branch: str) -> str:
         """SHA of the locally-cached remote branch tip (no network)."""
         if not branch:

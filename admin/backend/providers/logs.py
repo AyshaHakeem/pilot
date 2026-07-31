@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import time
 from collections.abc import Generator
 from dataclasses import dataclass
@@ -87,10 +86,12 @@ class LogProvider:
 
     @staticmethod
     def count_lines(path: Path) -> int:
+        from pilot.exceptions import CommandError
+        from pilot.utils import run_command
+
         try:
-            output = subprocess.check_output(["wc", "-l", str(path)])
-            return int(output.split()[0])
-        except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+            return int(run_command(["wc", "-l", str(path)]).stdout.split()[0])
+        except (OSError, CommandError, IndexError, ValueError):
             return 0
 
     def _validated_path(self, filename: str) -> Path:

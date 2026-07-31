@@ -64,14 +64,14 @@ class SiteRename:
             self._run_or_advise(
                 "production setup",
                 lambda: self.bench.setup_production(on_progress=on_progress),
-                f"bench setup production -b {name}",
+                f"pilot setup production -b {name}",
                 on_progress,
             )
         elif ssl_enabled:
             self._run_or_advise(
                 "Let's Encrypt setup",
                 self.bench.setup_letsencrypt,
-                f"bench setup letsencrypt -b {name}",
+                f"pilot setup letsencrypt -b {name}",
                 on_progress,
             )
 

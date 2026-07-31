@@ -339,7 +339,7 @@ def test_operation_site_lifecycle(tmp_path: Path) -> None:
     )
 
 
-def test_operation_failure_and_retry_rearm(tmp_path: Path) -> None:
+def test_operation_failure_and_retry_resumes(tmp_path: Path) -> None:
     mock_bench = MagicMock()
     mock_bench.path = tmp_path
     site_dir = tmp_path / "sites" / "site1.localhost"
@@ -366,8 +366,8 @@ def test_operation_failure_and_retry_rearm(tmp_path: Path) -> None:
     assert op.diagnosis["patch"] == "patch_x"
     assert op.sites[0].touched_tables_trusted is False
 
-    # Test retry re-arm
-    op.retry_arm()
+    # Test retry resumes
+    op.retry()
     assert op.state == "migrating"
     assert op.sites[0].migration_status == "pending"
     assert op.failed_site is None
@@ -538,7 +538,7 @@ def test_restore_uses_full_fallback_when_touched_tables_are_untrusted(tmp_path: 
     operation.sites[0].touched_tables = ["tabUser"]
     operation.sites[0].touched_tables_trusted = False
 
-    operation.revert_arm()
+    operation.revert()
     operation.revert_site(operation.sites[0].name)
 
     site_mock.migration_backup.restore.assert_called_once_with([])
@@ -565,7 +565,7 @@ def test_revert_site_marks_recovering_before_restore(tmp_path: Path) -> None:
 
     site_mock.migration_backup.restore.side_effect = assert_recovering_mid_restore
 
-    operation.revert_arm()
+    operation.revert()
     operation.revert_site(operation.sites[0].name)
 
     assert operation.sites[0].migration_status == "recovered"
@@ -583,7 +583,7 @@ def test_revert_skips_reverting_apps_phase_when_no_apps(tmp_path: Path) -> None:
     operation.sites[0].backup_status = "backed_up"
     operation.sites[0].migration_status = "failed"
 
-    operation.revert_arm()
+    operation.revert()
 
     assert operation.state == "reverting_sites"
 
@@ -641,3 +641,27 @@ def test_bypass_patch_records_audit(tmp_path: Path) -> None:
     assert fields["operation"] == operation.id
     assert fields["patch"] == "frappe.patches.expected"
     assert operation.decisions[-1]["patch"] == "frappe.patches.expected"
+
+
+def test_bypass_patch_auto_resumes_migration(tmp_path: Path) -> None:
+    """A successful skip-patch resumes the failed site and returns to migrating."""
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    mock_bench.frappe_call = ["bench"]
+    mock_bench.sites_path = tmp_path / "sites"
+
+    from pilot.core.bench.migration.store import MigrationStore
+
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    operation.state = get_state("needs_attention")
+    operation.failed_site = "site1.localhost"
+    operation.sites[0].migration_status = "failed"
+    operation.return_state = "migrating"
+    operation.diagnosis = {"patch": "frappe.patches.expected"}
+
+    with patch("pilot.utils.run_command", return_value=MagicMock(returncode=0)):
+        operation.bypass_patch("frappe.patches.expected")
+
+    assert operation.state == "migrating"
+    assert operation.failed_site is None
+    assert operation.sites[0].migration_status == "pending"

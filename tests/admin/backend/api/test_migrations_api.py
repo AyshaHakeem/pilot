@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -49,7 +50,11 @@ def test_post_updates_creates_operation(tmp_path: Path) -> None:
     (bench_root / "sites" / "site1.localhost" / "site_config.json").write_text("{}")
     client = _client(bench_root)
 
-    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"):
+    with (
+        # Never read the machine's real marketplace cache from a test.
+        patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
+        patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
+    ):
         resp = client.post("/api/v1/updates", json={})
 
     assert resp.status_code == 202
@@ -72,7 +77,10 @@ def test_post_updates_rejects_when_one_is_already_unresolved(tmp_path: Path) -> 
     (bench_root / "sites" / "site1.localhost" / "site_config.json").write_text("{}")
     client = _client(bench_root)
 
-    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"):
+    with (
+        patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
+        patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
+    ):
         first = client.post("/api/v1/updates", json={})
         assert first.status_code == 202
 
@@ -89,7 +97,10 @@ def test_standalone_migrate_returns_operation_and_task_ids(tmp_path: Path) -> No
     (site_dir / "site_config.json").write_text("{}")
     client = _client(bench_root)
 
-    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"):
+    with (
+        patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
+        patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
+    ):
         response = client.post("/api/v1/sites/site1.localhost/actions/migrate", json={})
 
     assert response.status_code == 202
@@ -167,3 +178,37 @@ def test_migration_detail_includes_retained_task_logs(tmp_path: Path) -> None:
     ]
     # Pruned task logs are omitted; the operation stays readable.
     assert all("tasks" not in site for site in data["sites"])
+
+
+def test_detail_reports_a_queued_action_while_the_operation_is_paused(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    site_dir = bench_root / "sites" / "site1.localhost"
+    site_dir.mkdir(parents=True)
+    (site_dir / "site_config.json").write_text("{}")
+    client = _client(bench_root)
+    operation = Bench(bench_root).migrations.create_site_migrate("site1.localhost")
+    operation.state = get_state("needs_attention")
+    operation.task_ids = {"retry": "20260101-000000-abc123"}
+    operation.store.save(operation)
+    task_dir = bench_root / "tasks" / "20260101-000000-abc123"
+    task_dir.mkdir(parents=True)
+    (task_dir / "meta.json").write_text(
+        json.dumps(
+            {
+                "task_id": "20260101-000000-abc123",
+                "command": "retry-update",
+                "args": {},
+                "queued_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+    )
+    (task_dir / "status").write_text("queued")
+
+    pending = client.get(f"/api/v1/migrations/{operation.id}").get_json()["pending_action"]
+    assert pending["role"] == "retry"
+    assert pending["task_id"] == "20260101-000000-abc123"
+    assert pending["status"] == "queued"
+
+    # Once the worker is done, the operation state alone drives the UI again.
+    (task_dir / "status").write_text("success")
+    assert client.get(f"/api/v1/migrations/{operation.id}").get_json()["pending_action"] is None

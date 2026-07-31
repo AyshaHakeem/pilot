@@ -137,7 +137,7 @@ class ProcessManager:
 
     def start(self) -> None:
         if not self.is_configured():
-            raise BenchError(f"Procfile not found at {self.procfile_path}. Run 'bench init' first.")
+            raise BenchError(f"Procfile not found at {self.procfile_path}. Run 'pilot init' first.")
         self.write_config()
         self.pid_file.write_text(str(os.getpid()))
         try:

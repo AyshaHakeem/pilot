@@ -10,8 +10,8 @@
         This is a development install. Update it from a terminal:
       </p>
       <pre class="p-3 bg-surface-gray-2 rounded overflow-x-auto text-ink-gray-8 text-xs">git pull
-bench admin build
-bench admin upgrade</pre>
+pilot admin build
+pilot admin upgrade</pre>
       <p class="text-ink-gray-5 text-p-sm">The last step restarts the admin service.</p>
     </div>
 

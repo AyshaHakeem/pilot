@@ -25,7 +25,7 @@ def ensure_admin_frontend(on_progress: Callable[[str], None] = lambda message: N
     if _has_admin_dist(root):
         return
     raise BenchError(
-        "Admin UI is missing from this release. Reinstall bench-cli, or run it from a source checkout."
+        "Admin UI is missing from this release. Reinstall Pilot, or run it from a source checkout."
     )
 
 
@@ -92,7 +92,7 @@ def _find_frontend() -> Path:
     if (candidate / "package.json").exists():
         return candidate
     raise BenchError(
-        "admin/frontend/dashboard not found. This command requires the bench-cli source directory "
+        "admin/frontend/dashboard not found. This command requires the Pilot source directory "
         "with admin/frontend/dashboard/."
     )
 
@@ -104,7 +104,7 @@ def _find_editor() -> Path:
     if (candidate / "package.json").exists():
         return candidate
     raise BenchError(
-        "admin/frontend/editor not found. This command requires the bench-cli source directory "
+        "admin/frontend/editor not found. This command requires the Pilot source directory "
         "with admin/frontend/editor/."
     )
 
@@ -116,7 +116,7 @@ def _find_in_app_embed() -> Path:
     if (candidate / "package.json").exists():
         return candidate
     raise BenchError(
-        "admin/frontend/in-app-embed not found. This command requires the bench-cli source directory "
+        "admin/frontend/in-app-embed not found. This command requires the Pilot source directory "
         "with admin/frontend/in-app-embed/."
     )
 
@@ -134,13 +134,12 @@ def _is_npm_install_stale(frontend: Path) -> bool:
 
 
 def _check_node_version() -> None:
-    import subprocess
+    from pilot.exceptions import CommandError
+    from pilot.utils import run_command
 
     try:
-        output = subprocess.run(
-            ["node", "--version"], capture_output=True, text=True, check=True, timeout=5
-        ).stdout.strip()
-    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        output = run_command(["node", "--version"], timeout=5).stdout.decode().strip()
+    except (OSError, CommandError) as error:
         raise BenchError(
             "Node.js is required to build the admin frontend but was not found. "
             "Install Node.js >= 20.11, or install a released build that ships the prebuilt frontend."

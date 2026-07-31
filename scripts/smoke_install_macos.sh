@@ -36,7 +36,8 @@ echo "=== macOS smoke test ==="
 sh "$REPO_ROOT/install.sh" --dev
 
 echo "--- assertions ---"
-test -x "$HOME/pilot/bench"
+test -x "$HOME/pilot/bin/pilot"
+test ! -e "$HOME/pilot/bench"
 test -f "$HOME/pilot/.admin-venv/bin/python"
 command -v brew
 command -v node

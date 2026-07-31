@@ -5,7 +5,7 @@ on:
     branches: [develop]
   pull_request:
     branches: [develop]
-  # Heavy (bench init clones the framework); allow manual runs too.
+  # Heavy (pilot init clones the framework); allow manual runs too.
   workflow_dispatch:
 
 jobs:
@@ -20,15 +20,13 @@ jobs:
       matrix:
         include:
           # Dev bench on the rootless, per-user MariaDB server the wizard
-          # provisions from scratch; exercises app install/uninstall.
+          # provisions from scratch.
           - variant: mariadb
             db_type: mariadb
-            extra_app: "1"
           # PostgreSQL bench on the rootless, per-user PostgreSQL server the
           # wizard provisions from scratch.
           - variant: postgres
             db_type: postgres
-            extra_app: "1"
 
     steps:
       - uses: actions/checkout@v4
@@ -52,8 +50,16 @@ jobs:
 
       - name: Install MariaDB
         if: matrix.db_type == 'mariadb'
+        env:
+          MARIADB_REPO_SETUP_URL: https://r.mariadb.com/downloads/mariadb_repo_setup
+          MARIADB_VERSION: "11.8"
         run: |
-          sudo apt-get install -y mariadb-server libmariadb-dev
+          curl -LsSf "$MARIADB_REPO_SETUP_URL" -o /tmp/mariadb_repo_setup
+          sudo bash /tmp/mariadb_repo_setup \
+            --mariadb-server-version="mariadb-$MARIADB_VERSION"
+          sudo apt-get update -y
+          sudo apt-get install -y mariadb-server mariadb-client libmariadb-dev
+          mariadbd --version
           # bench runs its own rootless, per-user MariaDB server (see
           # MariaDBManager) — disable the system service install.sh would
           # also disable, so it doesn't hold the port the wizard provisions
@@ -72,7 +78,7 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Install yarn, bench and e2e deps
+      - name: Install yarn, Pilot and e2e deps
         run: |
           npm install -g yarn
           pip install -e ".[test,admin,e2e]"
@@ -100,8 +106,8 @@ jobs:
 
       - name: Run e2e tests
         working-directory: tests/e2e
-        # BENCH_BIN is intentionally unset so the harness uses the repo launcher
-        # (<repo>/bench), which writes to <repo>/benches where the harness reads.
+        # PILOT_BIN is intentionally unset so the harness uses the repo launcher
+        # (<repo>/bin/pilot), which writes to <repo>/benches where the harness reads.
         run: pytest -v -s --durations=10
         env:
           E2E_MARIADB_PASSWORD: admin
@@ -109,7 +115,6 @@ jobs:
           # CI validates this branch's frontend, so build the admin UI from source.
           E2E_BUILD_ADMIN: "1"
           E2E_DB_TYPE: ${{ matrix.db_type }}
-          E2E_EXTRA_APP: ${{ matrix.extra_app }}
 
       - name: Upload Playwright traces
         if: ${{ !cancelled() }}

@@ -29,7 +29,7 @@ def test_write_then_read_round_trips(tmp_path: Path) -> None:
 
 
 def test_read_ignores_stale_mariadb_instance_keys(tmp_path: Path) -> None:
-    """Legacy MariaDB instance keys (from an older bench-cli schema) are
+    """Legacy MariaDB instance keys (from an older Pilot schema) are
     ignored, not rejected, when read back."""
     (tmp_path / "common_config.toml").write_text(
         '[mariadb]\nroot_password = "root"\ninstance = "old-bench"\n'

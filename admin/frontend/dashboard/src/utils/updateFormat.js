@@ -21,6 +21,18 @@ export function patchSkipped(op) {
   )
 }
 
+const ACTION_LABEL = {
+  retry: 'Retry',
+  restore: 'Restore',
+  bypass_patch: 'Skip patch',
+}
+
+export function pendingActionLabel(pending) {
+  if (!pending) return ''
+  const action = ACTION_LABEL[pending.role] || 'Action'
+  return pending.status === 'running' ? `${action} in progress` : `${action} queued`
+}
+
 export function appsSummary(op) {
   const names = (op.apps || []).map((a) => a.name)
   if (!names.length) return ''

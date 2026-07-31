@@ -16,7 +16,7 @@
           <span class="text-ink-gray-6 text-p-sm"
             >The WAF takes effect only in production (it's applied by nginx). This bench isn't
             deployed, so nothing is enforced until you run
-            <span class="font-mono text-xs">bench setup production</span>.</span
+            <span class="font-mono text-xs">pilot setup production</span>.</span
           >
         </template>
       </Alert>
@@ -31,7 +31,7 @@
           <span class="text-ink-gray-6 text-p-sm"
             >The ModSecurity module isn't installed on this host, so the WAF stays inactive even
             when enabled. Redeploy production (<span class="font-mono text-xs"
-              >bench setup production</span
+              >pilot setup production</span
             >) to install it, then it takes effect.</span
           >
         </template>

@@ -8,6 +8,7 @@ from flask import Blueprint, current_app, jsonify, request
 from admin.backend.api.responses import accepted_task_response, error_response
 from admin.backend.providers.apps import AppProvider
 from pilot.core.bench import Bench
+from pilot.exceptions import RegistryUnavailableError
 from pilot.internal.git import GitRepo
 from pilot.internal.validators import validate_app_name, validate_repo_url
 from pilot.tasks.fetch_app_updates import FetchAppUpdatesTask
@@ -37,6 +38,8 @@ def marketplace():
 
         apps = Marketplace(Bench(bench_root)).read_all_apps()
         return jsonify([a.to_dict() for a in apps])
+    except RegistryUnavailableError as exc:
+        return error_response("registry_unavailable", str(exc), 503)
     except Exception:
         return error_response("marketplace_unavailable", "Could not read marketplace apps.", 500)
 
@@ -176,6 +179,8 @@ def fetch_updates():
     bench_root = Path(current_app.config["BENCH_ROOT"])
     try:
         task_id = FetchAppUpdatesTask.queue(Bench(bench_root))
+    except RegistryUnavailableError as exc:
+        return error_response("registry_unavailable", str(exc), 503)
     except Exception:
         return error_response("app_fetch_failed", "Could not start fetching app updates.", 500)
     return accepted_task_response(bench_root, task_id)

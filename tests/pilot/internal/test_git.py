@@ -80,3 +80,19 @@ def test_fetch_and_count_track_new_remote_commits(tmp_path: Path) -> None:
     repo = GitRepo(clone)
     assert repo.fetch(repo.branch) is True
     assert repo.count("HEAD..FETCH_HEAD") == 1
+
+
+def test_has_commit_and_is_ancestor_relate_two_commits(tmp_path: Path) -> None:
+    repo_path = _init_repo(tmp_path / "repo")
+    _commit(repo_path, "first")
+    repo = GitRepo(repo_path)
+    first = repo.head_sha
+    _commit(repo_path, "second")
+    second = repo.head_sha
+
+    assert repo.has_commit(first) is True
+    assert repo.has_commit("0" * 40) is False
+    assert repo.is_ancestor(first, second) is True
+    assert repo.is_ancestor(second, first) is False
+    # A commit this clone has never seen can't be related either way.
+    assert repo.is_ancestor("0" * 40, second) is False

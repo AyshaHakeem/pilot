@@ -20,7 +20,7 @@ class ListCommand(Command):
         benches_dir = cli_root() / "benches"
         rows = self._collect(benches_dir)
         if not rows:
-            self.report("No benches yet. Create one with: bench new <name>")
+            self.report("No benches yet. Create one with: pilot new <name>")
             return
 
         # Column widths sized to content (with sensible minimums).

@@ -12,7 +12,7 @@ from pilot.exceptions import BenchError
 
 # Provider token-generation links surfaced in the UI.
 TOKEN_HELP_URLS = {
-    "github": "https://github.com/settings/tokens/new?scopes=repo&description=Bench+CLI",
+    "github": "https://github.com/settings/tokens/new?scopes=repo&description=Pilot",
 }
 
 

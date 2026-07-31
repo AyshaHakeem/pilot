@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import re
 import shlex
 import subprocess
 import sys
@@ -18,6 +20,7 @@ _REFRESH_INTERVAL_SECONDS = 60 * 60
 _LS_REMOTE_TIMEOUT_SECONDS = 15
 _CRON_JOB_KEY = "marketplace-registry-refresh"
 _CRON_SCHEDULE = "0 3 * * *"  # once a day, 03:00
+_APP_NAME = re.compile(r"[a-z][a-z0-9_]*")
 
 
 class RegistryCache:
@@ -31,12 +34,46 @@ class RegistryCache:
         return self._cli_root / "system" / "registry-cache"
 
     @property
-    def apps_json_path(self) -> Path:
+    def index_path(self) -> Path:
         return self.path / "apps.json"
 
     @property
     def _last_checked_path(self) -> Path:
         return self._cli_root / "system" / "registry-cache.last_checked"
+
+    def load(self) -> list[dict]:
+        """Index entries with each app's releases inlined from apps/<name>.json."""
+        self.ensure_fresh()
+        entries = self._read_json(self.index_path)
+        if not isinstance(entries, list):
+            raise RegistryUnavailableError(f"The marketplace index is not a list of apps: {self.index_path}")
+        for entry in entries:
+            entry["releases"] = self._read_releases(entry)
+        return entries
+
+    def _read_releases(self, entry: dict) -> list[dict]:
+        """Releases for one index entry, rejecting any pointer other than apps/<name>.json."""
+        name = entry.get("name") or ""
+        pointer = entry.get("releases")
+        expected = f"apps/{name}.json"
+        if not _APP_NAME.fullmatch(name) or pointer != expected:
+            raise RegistryUnavailableError(
+                f"The marketplace entry {name or entry!r} must point 'releases' at "
+                f"{expected!r}, not {pointer!r} - the registry cache is unusable."
+            )
+        payload = self._read_json(self.path / "apps" / f"{name}.json")
+        releases = payload.get("releases") if isinstance(payload, dict) else None
+        if not isinstance(releases, list):
+            raise RegistryUnavailableError(f"{expected} does not hold a 'releases' list.")
+        return releases
+
+    def _read_json(self, path: Path):
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RegistryUnavailableError(
+                f"Could not read the marketplace registry at {path}: {exc}"
+            ) from exc
 
     def ensure_fresh(self) -> None:
         """Clone on first use; later reject tampering and refresh hourly."""

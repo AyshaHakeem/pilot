@@ -56,7 +56,7 @@ function stopElapsed() {
 }
 
 // Whether the *current* bench is running in production. A dev bench (started
-// with `bench start`) most likely has no systemd/supervisor configured, so
+// with `pilot start`) most likely has no systemd/supervisor configured, so
 // auto-provisioning a managed bench from the UI would silently fail or confuse.
 // In that case we point the user at the CLI instead.
 const isProduction = ref(null)
@@ -270,7 +270,7 @@ async function createBench() {
           </p>
           <pre
             class="bg-surface-gray-2 px-3 py-2.5 rounded-lg text-ink-gray-8 text-sm select-all"
-          >bench new my-bench</pre>
+          >pilot new my-bench</pre>
         </div>
 
         <!-- Production bench: a process manager is configured, so we create the

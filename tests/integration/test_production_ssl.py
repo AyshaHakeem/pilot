@@ -20,7 +20,7 @@ ADMIN_DOMAIN_2 = "bench-admin2.localhost"
 ADMIN_PASSWORD = "admin"
 HTTP_PORT = 80
 HTTPS_PORT = 443
-CERT_ORG = "bench-cli-e2e"  # baked into our certs to prove nginx served ours
+CERT_ORG = "pilot-e2e"  # baked into our certs to prove nginx served ours
 LETSENCRYPT_LIVE = Path("/etc/letsencrypt/live")
 ALL_DOMAINS = (SITE, RENAMED_SITE, ADMIN_DOMAIN, ADMIN_DOMAIN_2)
 

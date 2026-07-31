@@ -15,8 +15,9 @@ def resolver(name: str, deps: dict[str, str] | None = None) -> Resolver:
     return Resolver(
         app=name,
         repo=f"https://github.com/frappe/{name}",
-        target_type="branch",
-        target="main",
+        branch="main",
+        commit="a" * 40,
+        channel="stable",
         version="1.0.0",
         frappe_version="16.0.0",
         required_version="",
@@ -59,7 +60,7 @@ def test_fetch_missing_apps_fetches_app_not_on_bench(tmp_path: Path) -> None:
         patch.object(Marketplace, "read_all_apps", return_value=[frappe_helpdesk]),
         patch.object(App, "install") as mock_install,
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
     ):
         task.fetch_missing_apps()
 
@@ -78,7 +79,7 @@ def test_fetch_missing_apps_installs_dependencies_via_get_app(tmp_path: Path) ->
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[top]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
         patch.object(App, "install") as mock_install,
     ):
         task.fetch_missing_apps()
@@ -96,7 +97,7 @@ def test_fetch_missing_apps_raises_when_not_in_marketplace(tmp_path: Path) -> No
     with (
         patch.object(Marketplace, "read_all_apps", return_value=[]),
         patch.object(Marketplace, "get_current_frappe_version", return_value="16.0.0"),
-        patch.object(Marketplace, "_read_apps_json", return_value="[]"),
+        patch.object(Marketplace, "_load_registry", return_value=[]),
     ):
         try:
             task.fetch_missing_apps()
@@ -127,7 +128,7 @@ def test_run_reloads_workers_after_fetching_apps_and_before_provisioning(tmp_pat
 
 def test_run_reloads_workers_even_when_no_app_was_fetched(tmp_path: Path) -> None:
     """An app already on the bench can still postdate the running workers - it
-    may have arrived through `bench get-app` after they started."""
+    may have arrived through `pilot get-app` after they started."""
     from unittest.mock import MagicMock
 
     task = make_task(tmp_path, ["frappe"])

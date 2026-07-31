@@ -4,7 +4,7 @@
 
 <script setup>
 import { Badge } from 'frappe-ui'
-import { stateLabel, stateTone } from '@/utils/migrationFormat'
+import { stateLabel, stateTone } from '@/utils/updateFormat'
 
 defineProps({ state: { type: String, required: true } })
 </script>

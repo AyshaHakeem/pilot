@@ -11,7 +11,7 @@ import {
 } from 'frappe-ui'
 import Sidebar from '@/components/navigation/Sidebar.vue'
 import PilotLogo from '@/components/icons/Pilot.vue'
-import MigrationStatusButton from '@/components/common/MigrationStatusButton.vue'
+import UpdateStatusButton from '@/components/common/UpdateStatusButton.vue'
 import SettingsDialog from '@/components/settings/SettingsDialog.vue'
 import BenchSwitcherDialog from '@/components/benches/BenchSwitcherDialog.vue'
 import NewBenchDialog from '@/components/benches/NewBenchDialog.vue'
@@ -90,7 +90,7 @@ function breadcrumbsFromRouteMeta({ title = '', group }) {
 
         <div id="header-badge" class="flex items-center" />
         <div id="header-actions" class="flex items-center gap-2 ml-auto">
-          <MigrationStatusButton v-if="route.name !== 'SiteDetail'" />
+          <UpdateStatusButton v-if="route.name !== 'SiteDetail'" />
         </div>
       </div>
     </header>
@@ -131,7 +131,7 @@ function breadcrumbsFromRouteMeta({ title = '', group }) {
           <Breadcrumbs :items="breadcrumbs" />
           <div id="header-badge" class="flex items-center" />
           <div id="header-actions" class="flex items-center gap-2 ml-auto">
-            <MigrationStatusButton />
+            <UpdateStatusButton />
           </div>
         </div>
       </div>

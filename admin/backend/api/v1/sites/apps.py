@@ -24,6 +24,7 @@ from pilot.exceptions import (
     BenchError,
     MigrationConflictError,
     MigrationNotFoundError,
+    RegistryUnavailableError,
     TaskNotFoundError,
 )
 from pilot.internal.site_paths import site_exists
@@ -93,6 +94,8 @@ def site_marketplace(name: str):
         from pilot.integrations.marketplace import Marketplace
 
         apps = Marketplace(Bench(bench_root)).read_all_apps()
+    except RegistryUnavailableError as exc:
+        return error_response("registry_unavailable", str(exc), 503)
     except Exception:
         return internal_error("Could not read marketplace apps.")
     return jsonify([app.to_dict() for app in apps])

@@ -17,7 +17,6 @@ class GetAppCommand(Command):
     repo: Annotated[str, Arg(help="Git repository URL.")]
     branch: Annotated[str, Arg(help="Git branch to checkout.")] = ""
     install_dependencies: Annotated[bool, Arg(help="Install app dependencies")] = False
-    skip_validations: Annotated[bool, Arg(help="Skip running app validations")] = False
 
     def __post_init__(self) -> None:
         from pilot.core.app import App
@@ -28,7 +27,6 @@ class GetAppCommand(Command):
     def run(self) -> None:
         result = self.app.install(
             install_dependencies=self.install_dependencies,
-            skip_validations=self.skip_validations,
             on_progress=self.report,
         )
         self.app = result.app
