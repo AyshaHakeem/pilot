@@ -83,10 +83,14 @@ class NodePackages:
     def is_workspace_member(self) -> bool:
         """Whether a workspace pattern at `app_path` matches `path`, and no `!` pattern excludes it."""
         member = self.path.relative_to(self.app_path).as_posix()
-        patterns = [pattern.strip().removeprefix("./").rstrip("/") for pattern in self.workspace_patterns]
-        included = any(fnmatch(member, pattern) for pattern in patterns if not pattern.startswith("!"))
-        return included and not any(
-            fnmatch(member, pattern[1:]) for pattern in patterns if pattern.startswith("!")
+        included: list[str] = []
+        excluded: list[str] = []
+        for pattern in self.workspace_patterns:
+            pattern = pattern.strip()
+            patterns = excluded if pattern.startswith("!") else included
+            patterns.append(pattern.removeprefix("!").strip().removeprefix("./").rstrip("/"))
+        return any(fnmatch(member, pattern) for pattern in included) and not any(
+            fnmatch(member, pattern) for pattern in excluded
         )
 
     @property
@@ -172,14 +176,20 @@ class NodePackages:
 
     @staticmethod
     def read_pnpm_workspace_packages(text: str) -> list[str]:
-        """The block list under the top-level `packages:` key. Pilot has no YAML parser."""
+        """Items of the top-level `packages:` key, as a block or flow list. Pilot has no YAML parser."""
         packages: list[str] = []
         in_packages = False
         for line in text.splitlines():
             content = line.split("#", 1)[0].rstrip()
             item = content.strip()
             if content and not content[0].isspace() and not item.startswith("-"):
-                in_packages = item == "packages:"
+                key, _, value = item.partition(":")
+                in_packages = key.strip() == "packages"
+                if in_packages:
+                    flow_list = value.strip().removeprefix("[").removesuffix("]")
+                    packages += [
+                        entry.strip().strip("'\"") for entry in flow_list.split(",") if entry.strip()
+                    ]
             elif in_packages and item.startswith("- "):
                 packages.append(item[2:].strip().strip("'\""))
         return packages

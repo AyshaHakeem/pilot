@@ -178,6 +178,11 @@ def test_non_frozen_pnpm_install_replaces_node_modules_without_a_prompt(
         {
             "pnpm-workspace.yaml": "# members\npackages:\n  - 'front*'\n  - '!roster'\nonlyBuiltDependencies:\n  - esbuild\n"
         },
+        {
+            "pnpm-workspace.yaml": "packages: [frontend, './roster/'] # inline\n",
+            "package.json": '{"workspaces": ["!./roster"]}',
+        },
+        {"pnpm-workspace.yaml": "packages: ['*', \"!./roster/\"]\n"},
     ],
 )
 def test_only_workspace_members_install_from_the_root(
