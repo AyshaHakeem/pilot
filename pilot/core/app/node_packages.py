@@ -33,7 +33,7 @@ class NodePackageManager:
     def bin(self) -> str:
         """The tool on PATH, or where `ensure_installed` puts it."""
         if not self.is_installed:
-            raise BenchError(f"{self.name} not found - run pilot init to install it.")
+            raise BenchError(f"{self.name} not found on PATH or in {self.local_bin.parent}.")
         return shutil.which(self.name) or str(self.local_bin)
 
     def ensure_installed(self) -> None:
