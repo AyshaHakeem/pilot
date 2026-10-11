@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from pilot.core.app.node_packages import NodePackages
+from pilot.core.app.node_packages import NodePackages, install_app_packages
 from pilot.exceptions import BenchError, CommandError
 
 
@@ -209,3 +209,17 @@ def test_workspace_member_installs_from_a_root_without_a_lockfile(
     NodePackages(frontend, app).install()
 
     run_command.assert_called_once_with(["yarn", "install", "--frozen-lockfile"], cwd=app, stream_output=True)
+
+
+def test_frontend_with_two_lockfiles_stops_the_app_install_before_the_root_installs(
+    tmp_path: Path, run_command: MagicMock
+) -> None:
+    app = write_package(tmp_path / "app")
+    (app / "yarn.lock").write_text("")
+    frontend = write_package(app / "frontend")
+    (frontend / "yarn.lock").write_text("")
+    (frontend / "pnpm-lock.yaml").write_text("")
+
+    with pytest.raises(BenchError, match=r"yarn\.lock and pnpm-lock\.yaml"):
+        install_app_packages(app, ["frontend"])
+    run_command.assert_not_called()

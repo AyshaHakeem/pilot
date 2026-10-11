@@ -97,16 +97,19 @@ def test_script_installs_with_the_lockfile_manager_and_keeps_pnpm_on_path(
     ]
 
 
+@pytest.mark.parametrize("conflict_dir", ["", "frontend"])
 def test_two_lockfiles_stop_the_install_before_any_manager_runs(
-    tmp_path: Path, environment: dict[str, str]
+    tmp_path: Path, environment: dict[str, str], conflict_dir: str
 ) -> None:
     app = tmp_path / "app"
     write_package(app)
     (app / "yarn.lock").write_text("")
-    (app / "pnpm-lock.yaml").write_text("")
+    write_package(app / "frontend")
+    (app / conflict_dir / "yarn.lock").write_text("")
+    (app / conflict_dir / "pnpm-lock.yaml").write_text("")
 
     result = subprocess.run(
-        [sys.executable, "-m", "pilot.core.app.node_packages", str(app)],
+        [sys.executable, "-m", "pilot.core.app.node_packages", str(app), "frontend"],
         env={**environment, "PYTHONPATH": str(ROOT)},
         capture_output=True,
         text=True,

@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pilot.core.app.node_packages import NodePackages
+from pilot.core.app.node_packages import NodePackages, get_app_packages
 from pilot.exceptions import BenchError, CommandError
 from pilot.managers.systemd_user import can_cap_memory, memory_capped, systemctl_env
 from pilot.utils import run_command
@@ -88,8 +88,10 @@ class PythonAssetBuilder:
                     self.build_page_islands()
                 return
 
-        NodePackages(app.path).ensure_installed()
-        self.ensure_frontend_dependencies(app)
+        # Frappe's build runs the app's build script, which can build `frontend`/`roster`, so
+        # their node_modules must be installed before it.
+        for packages in get_app_packages(app.path, self.frontend_dirs(app)):
+            packages.ensure_installed()
 
         print(f"  Building assets for {app.config.name}...")
         sys.stdout.flush()
@@ -112,12 +114,6 @@ class PythonAssetBuilder:
                 env=self.manager._build_env(),
                 stream_output=True,
             )
-
-    def ensure_frontend_dependencies(self, app: "App") -> None:
-        """frappe's own `bench build` shells into `frontend`/`roster`, so node_modules must
-        be synced there before that step runs, not just in the standalone build loop after it."""
-        for frontend_dir in self.frontend_dirs(app):
-            NodePackages(frontend_dir, app.path).ensure_installed()
 
     @staticmethod
     def frontend_dirs(app: "App") -> list[Path]:

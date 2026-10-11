@@ -7,6 +7,9 @@ from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from pilot.exceptions import BenchError
 from pilot.managers.python_assets import PythonAssetBuilder
 
 
@@ -95,6 +98,18 @@ def test_frontend_builds_after_frappe_build_when_the_app_has_no_build_script(tmp
     commands = build_app(app_path)
 
     assert commands[-1] == ["pnpm", "run", "build"]
+
+
+def test_frontend_with_two_lockfiles_fails_before_any_install(tmp_path: Path) -> None:
+    app_path = tmp_path / "helpdesk"
+    write_package(app_path)
+    (app_path / "yarn.lock").write_text("")
+    write_package(app_path / "frontend")
+    (app_path / "frontend" / "yarn.lock").write_text("")
+    (app_path / "frontend" / "pnpm-lock.yaml").write_text("")
+
+    with pytest.raises(BenchError, match=r"yarn\.lock and pnpm-lock\.yaml"):
+        build_app(app_path, on_install=lambda: pytest.fail("installed before the lockfile check"))
 
 
 def test_page_islands_are_built_with_frappe_s_own_script(tmp_path: Path) -> None:

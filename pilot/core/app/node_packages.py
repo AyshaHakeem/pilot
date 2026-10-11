@@ -106,14 +106,19 @@ class NodePackages:
             patterns += self.read_pnpm_workspace_packages(pnpm_workspace.read_text())
         return patterns
 
-    @property
-    def lockfile(self) -> Path | None:
+    def check_lockfiles(self) -> None:
+        """Raise when the install path has the lockfiles of two package managers."""
         lockfiles = self.lockfiles_in(self.install_path)
         if len(lockfiles) > 1:
             names = " and ".join(lockfile.name for lockfile in lockfiles)
             raise BenchError(
                 f"{self.install_path} has both {names}. Keep the lockfile of one package manager."
             )
+
+    @property
+    def lockfile(self) -> Path | None:
+        self.check_lockfiles()
+        lockfiles = self.lockfiles_in(self.install_path)
         return lockfiles[0] if lockfiles else None
 
     @property
@@ -195,14 +200,26 @@ class NodePackages:
         return packages
 
 
-def install_app_packages(app_path: Path, build_dirs: list[str]) -> None:
-    """Install the JS dependencies of the app root and of each build dir, once per install path."""
-    install_paths: set[Path] = set()
-    for path in [app_path, *(app_path / build_dir for build_dir in build_dirs)]:
+def get_app_packages(app_path: Path, package_dirs: list[Path]) -> list[NodePackages]:
+    """The packages of the app root and `package_dirs`, one per install path.
+
+    Checks every lockfile first, so an app with a lockfile conflict installs nothing.
+    """
+    packages_by_install_path: dict[Path, NodePackages] = {}
+    for path in [app_path, *package_dirs]:
         packages = NodePackages(path, app_path)
-        if packages.has_package_json and packages.install_path not in install_paths:
-            install_paths.add(packages.install_path)
-            packages.install()
+        if packages.has_package_json:
+            packages_by_install_path.setdefault(packages.install_path, packages)
+
+    for packages in packages_by_install_path.values():
+        packages.check_lockfiles()
+    return list(packages_by_install_path.values())
+
+
+def install_app_packages(app_path: Path, build_dirs: list[str]) -> None:
+    """Install the JS dependencies of the app root and of each build dir."""
+    for packages in get_app_packages(app_path, [app_path / build_dir for build_dir in build_dirs]):
+        packages.install()
 
 
 if __name__ == "__main__":
