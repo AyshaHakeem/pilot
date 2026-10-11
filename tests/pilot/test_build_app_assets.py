@@ -68,8 +68,7 @@ def test_script_installs_with_the_lockfile_manager_and_keeps_pnpm_on_path(
     write_package(app)
     (app / "frappe").mkdir()
     (app / "frappe" / "hooks.py").write_text("")
-    (app / "pnpm-lock.yaml").write_text("")
-    (app / "pnpm-workspace.yaml").write_text("packages:\n  - frontend\n")
+    (app / "pnpm-lock.yaml").write_text("importers:\n\n  .: {}\n\n  frontend: {}\n")
     write_package(app / "frontend")
     write_package(app / "roster")
     (app / "pyproject.toml").write_text(

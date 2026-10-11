@@ -81,8 +81,16 @@ class NodePackages:
 
     @property
     def is_workspace_member(self) -> bool:
-        """Whether a workspace pattern at `app_path` matches `path`, and no `!` pattern excludes it."""
+        """Whether the workspace at `app_path` lists `path`.
+
+        A pnpm root lists its members as importers in its lockfile. Other roots list them in
+        `package.json` workspaces, where a `!` pattern excludes a match.
+        """
         member = self.path.relative_to(self.app_path).as_posix()
+        pnpm_lockfile = self.app_path / PNPM.lockfile
+        if pnpm_lockfile.exists():
+            return member in self.read_pnpm_importers(pnpm_lockfile.read_text())
+
         included: list[str] = []
         excluded: list[str] = []
         for pattern in self.workspace_patterns:
@@ -95,16 +103,12 @@ class NodePackages:
 
     @property
     def workspace_patterns(self) -> list[str]:
-        """Member globs from `package.json` workspaces and `pnpm-workspace.yaml` packages."""
-        patterns: list[str] = []
+        """Member globs from `package.json` workspaces at `app_path`."""
         package_json = self.app_path / "package.json"
-        if package_json.exists():
-            workspaces = json.loads(package_json.read_text()).get("workspaces", [])
-            patterns += workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces
-        pnpm_workspace = self.app_path / "pnpm-workspace.yaml"
-        if pnpm_workspace.exists():
-            patterns += self.read_pnpm_workspace_packages(pnpm_workspace.read_text())
-        return patterns
+        if not package_json.exists():
+            return []
+        workspaces = json.loads(package_json.read_text()).get("workspaces", [])
+        return workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces
 
     def check_lockfiles(self) -> None:
         """Raise when the install path has the lockfiles of two package managers."""
@@ -180,24 +184,20 @@ class NodePackages:
         return [path / manager.lockfile for manager in PACKAGE_MANAGERS if (path / manager.lockfile).exists()]
 
     @staticmethod
-    def read_pnpm_workspace_packages(text: str) -> list[str]:
-        """Items of the top-level `packages:` key, as a block or flow list. Pilot has no YAML parser."""
-        packages: list[str] = []
-        in_packages = False
+    def read_pnpm_importers(text: str) -> set[str]:
+        """Keys of every top-level `importers:` map in a pnpm lockfile. Pilot has no YAML parser.
+
+        pnpm can write more than one YAML document to the lockfile, each with its own importers.
+        """
+        importers: set[str] = set()
+        in_importers = False
         for line in text.splitlines():
-            content = line.split("#", 1)[0].rstrip()
-            item = content.strip()
-            if content and not content[0].isspace() and not item.startswith("-"):
-                key, _, value = item.partition(":")
-                in_packages = key.strip() == "packages"
-                if in_packages:
-                    flow_list = value.strip().removeprefix("[").removesuffix("]")
-                    packages += [
-                        entry.strip().strip("'\"") for entry in flow_list.split(",") if entry.strip()
-                    ]
-            elif in_packages and item.startswith("- "):
-                packages.append(item[2:].strip().strip("'\""))
-        return packages
+            if line and not line[0].isspace():
+                in_importers = line.rstrip() == "importers:"
+            elif in_importers and len(line) - len(line.lstrip()) == 2:
+                key = line.strip().partition(":")[0]
+                importers.add(key.strip("'\""))
+        return importers
 
 
 def get_app_packages(app_path: Path, package_dirs: list[Path]) -> list[NodePackages]:

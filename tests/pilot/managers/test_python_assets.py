@@ -73,8 +73,7 @@ def test_frontend_dependencies_install_before_frappe_build_runs(tmp_path: Path) 
 def test_pnpm_workspace_installs_once_and_builds_once(tmp_path: Path) -> None:
     app_path = tmp_path / "suite"
     write_package(app_path, scripts={"build": "pnpm --filter frontend build"})
-    (app_path / "pnpm-workspace.yaml").write_text("packages:\n  - frontend\n")
-    (app_path / "pnpm-lock.yaml").write_text("")
+    (app_path / "pnpm-lock.yaml").write_text("importers:\n\n  .: {}\n\n  frontend: {}\n")
     write_package(app_path / "frontend", scripts={"build": "vite build"})
 
     def write_install_marker() -> None:

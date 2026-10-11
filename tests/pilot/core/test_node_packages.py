@@ -23,6 +23,47 @@ def run_command() -> Iterator[MagicMock]:
         yield run_command
 
 
+# Modeled on Suite's lockfile: pnpm 12 writes its own environment as a first YAML document.
+SUITE_PNPM_LOCK = """---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    packageManagerDependencies:
+      pnpm:
+        specifier: 12.10.1
+        version: 12.10.1
+
+packages:
+
+  pnpm@12.10.1:
+    resolution: {integrity: sha512-abc}
+
+---
+lockfileVersion: '9.0'
+
+importers:
+
+  .:
+    dependencies:
+      vue:
+        specifier: ^3.5.38
+        version: 3.5.39
+
+  frontend:
+    dependencies:
+      frappe-ui:
+        specifier: ^0.1.0
+        version: 0.1.0
+
+packages:
+
+  vue@3.5.39:
+    resolution: {integrity: sha512-def}
+"""
+
+
 def write_package(path: Path, **package: object) -> Path:
     path.mkdir(parents=True, exist_ok=True)
     (path / "package.json").write_text(json.dumps(package))
@@ -53,8 +94,7 @@ def test_pnpm_lock_installs_frozen_with_pnpm(tmp_path: Path, run_command: MagicM
 
 def test_workspace_member_installs_from_the_workspace_root(tmp_path: Path, run_command: MagicMock) -> None:
     app = write_package(tmp_path / "app")
-    (app / "pnpm-workspace.yaml").write_text("packages:\n  - frontend\n")
-    (app / "pnpm-lock.yaml").write_text("")
+    (app / "pnpm-lock.yaml").write_text(SUITE_PNPM_LOCK)
     frontend = write_package(app / "frontend", scripts={"build": "vite build"})
 
     packages = NodePackages(frontend, app)
@@ -170,27 +210,33 @@ def test_non_frozen_pnpm_install_replaces_node_modules_without_a_prompt(
     )
 
 
-@pytest.mark.parametrize(
-    "workspace",
-    [
-        {"package.json": json.dumps({"workspaces": ["frontend"]})},
-        {"package.json": json.dumps({"workspaces": {"packages": ["./frontend/"]}})},
-        {
-            "pnpm-workspace.yaml": "# members\npackages:\n  - 'front*'\n  - '!roster'\nonlyBuiltDependencies:\n  - esbuild\n"
-        },
-        {
-            "pnpm-workspace.yaml": "packages: [frontend, './roster/'] # inline\n",
-            "package.json": '{"workspaces": ["!./roster"]}',
-        },
-        {"pnpm-workspace.yaml": "packages: ['*', \"!./roster/\"]\n"},
-    ],
-)
-def test_only_workspace_members_install_from_the_root(
-    tmp_path: Path, run_command: MagicMock, workspace: dict[str, str]
+def test_pnpm_lockfile_importers_decide_which_folders_install_from_the_root(
+    tmp_path: Path, run_command: MagicMock
 ) -> None:
     app = write_package(tmp_path / "app")
-    for name, text in workspace.items():
-        (app / name).write_text(text)
+    (app / "pnpm-lock.yaml").write_text(SUITE_PNPM_LOCK)
+    (app / "pnpm-workspace.yaml").write_text("packages: [\n  frontend\n]\n")
+    frontend = write_package(app / "frontend")
+    roster = write_package(app / "roster")
+
+    NodePackages(frontend, app).install()
+    NodePackages(roster, app).install()
+
+    assert [(call.args[0][0], call.kwargs["cwd"]) for call in run_command.call_args_list] == [
+        ("pnpm", app),
+        ("yarn", roster),
+    ]
+
+
+@pytest.mark.parametrize(
+    "workspaces",
+    [["frontend"], {"packages": ["./frontend/"]}, ["*", "!./roster"]],
+)
+def test_package_json_workspaces_decide_which_folders_install_from_the_root(
+    tmp_path: Path, run_command: MagicMock, workspaces: object
+) -> None:
+    app = write_package(tmp_path / "app", workspaces=workspaces)
+    (app / "yarn.lock").write_text("")
     frontend = write_package(app / "frontend")
     roster = write_package(app / "roster")
 
