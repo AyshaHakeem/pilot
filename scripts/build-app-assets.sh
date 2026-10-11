@@ -82,8 +82,7 @@ done
 # Some SPAs import their dev ports from here at build time; these are Frappe's defaults.
 echo '{"webserver_port": 8000, "socketio_port": 9000}' > "$bench/sites/common_site_config.json"
 
-# Installs as Pilot does, with NodePackages. A pnpm it installs into ~/.local/bin must stay on
-# PATH for app build scripts such as `pnpm --filter frontend build`.
+# App build scripts such as `pnpm --filter frontend build` need the pnpm installed into ~/.local/bin.
 pilot_root=$(dirname "$(dirname "$(realpath "$0")")")
 export PATH="$PATH:$HOME/.local/bin"
 install_js_dependencies() {
