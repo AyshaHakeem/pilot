@@ -82,6 +82,30 @@ done
 # Some SPAs import their dev ports from here at build time; these are Frappe's defaults.
 echo '{"webserver_port": 8000, "socketio_port": 9000}' > "$bench/sites/common_site_config.json"
 
+# As Pilot does: the lockfile names the package manager, and a workspace member without one
+# installs from the workspace root.
+installed_dirs=()
+install_js_dependencies() {
+    local dir=$1
+    if [ ! -f "$dir/yarn.lock" ] && [ ! -f "$dir/pnpm-lock.yaml" ] && { [ -f "$app_dir/pnpm-workspace.yaml" ] ||
+        python3 -c 'import json, sys; sys.exit("workspaces" not in json.load(open(sys.argv[1])))' \
+            "$app_dir/package.json" 2>/dev/null; }; then
+        dir=$app_dir
+    fi
+    case " ${installed_dirs[*]} " in *" $dir "*) return ;; esac
+    installed_dirs+=("$dir")
+    if [ -f "$dir/yarn.lock" ] && [ -f "$dir/pnpm-lock.yaml" ]; then
+        echo "error: $dir has both yarn.lock and pnpm-lock.yaml; keep the lockfile of one package manager" >&2
+        exit 1
+    elif [ -f "$dir/pnpm-lock.yaml" ]; then
+        local pnpm=(pnpm)
+        command -v pnpm > /dev/null || pnpm=(corepack pnpm)
+        (cd "$dir" && "${pnpm[@]}" install --frozen-lockfile --silent)
+    else
+        (cd "$dir" && yarn install --frozen-lockfile --silent)
+    fi
+}
+
 echo "==> Installing JS dependencies"
 (cd "$bench/apps/frappe" && yarn install --frozen-lockfile --silent)
 build_dirs=()
@@ -92,7 +116,7 @@ for spa in "${spas[@]}"; do
 done
 for dir in "${build_dirs[@]}"; do
     if [ -f "$app_dir/${dir:+$dir/}package.json" ]; then
-        (cd "$app_dir/$dir" && yarn install --frozen-lockfile --silent)
+        install_js_dependencies "$app_dir${dir:+/$dir}"
     fi
 done
 

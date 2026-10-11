@@ -9,9 +9,10 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pilot.core.app.node_packages import NodePackages
 from pilot.exceptions import BenchError, CommandError
 from pilot.managers.systemd_user import can_cap_memory, memory_capped, systemctl_env
-from pilot.utils import get_yarn_bin, run_command
+from pilot.utils import run_command
 
 if TYPE_CHECKING:
     from pilot.core.app import App
@@ -62,7 +63,7 @@ class PythonAssetBuilder:
     def build_assets(self) -> None:
         for app in self.bench.apps():
             if (app.path / "package.json").exists():
-                self.ensure_yarn_install(app.path)
+                NodePackages(app.path).ensure_installed()
         self.run_compiler(
             [*self.bench.frappe_call, "frappe", "build", "--force"],
             cwd=self.bench.sites_path,
@@ -76,7 +77,7 @@ class PythonAssetBuilder:
 
         # Desk serves /assets/frappe/node_modules, and every server build runs Frappe's esbuild.
         if app.config.name == "frappe" and (app.path / "package.json").exists():
-            self.ensure_yarn_install(app.path)
+            NodePackages(app.path).ensure_installed()
 
         if not force and not app.has_source_changes:
             from pilot.core.app.prebuilt_assets import PrebuiltAssets
@@ -89,7 +90,7 @@ class PythonAssetBuilder:
                 return
 
         if (app.path / "package.json").exists():
-            self.ensure_yarn_install(app.path)
+            NodePackages(app.path).ensure_installed()
 
         self.ensure_frontend_dependencies(app)
 
@@ -102,48 +103,29 @@ class PythonAssetBuilder:
             stream_output=True,
         )
 
-        for frontend_dir in ["frontend", "roster"]:
-            if (app.path / frontend_dir / "package.json").exists():
-                print(f"  Building {frontend_dir} for {app.config.name}...")
-                sys.stdout.flush()
-                self.run_compiler(
-                    [get_yarn_bin(), "build"],
-                    cwd=app.path / frontend_dir,
-                    stream_output=True,
-                )
+        # Frappe's build already ran the app's own build script, which builds its frontends.
+        if NodePackages(app.path).has_build_script:
+            return
+        for frontend_dir in self.frontend_dirs(app):
+            print(f"  Building {frontend_dir.name} for {app.config.name}...")
+            sys.stdout.flush()
+            self.run_compiler(
+                NodePackages(frontend_dir, app.path).get_script_command("build"),
+                cwd=frontend_dir,
+                stream_output=True,
+            )
 
     def ensure_frontend_dependencies(self, app: "App") -> None:
         """frappe's own `bench build` shells into `frontend`/`roster`, so node_modules must
         be synced there before that step runs, not just in the standalone build loop after it."""
-        for frontend_dir in ["frontend", "roster"]:
-            if (app.path / frontend_dir / "package.json").exists():
-                print(f"  Installing JS dependencies for {frontend_dir} of {app.config.name}...")
-                sys.stdout.flush()
-                self.ensure_yarn_install(app.path / frontend_dir)
+        for frontend_dir in self.frontend_dirs(app):
+            NodePackages(frontend_dir, app.path).ensure_installed()
 
-    def ensure_yarn_install(self, path: Path) -> None:
-        """Run yarn install when node_modules is missing or yarn.lock changed."""
-        integrity = path / "node_modules" / ".yarn-integrity"
-        lock = path / "yarn.lock"
-        if integrity.exists() and (not lock.exists() or lock.stat().st_mtime <= integrity.stat().st_mtime):
-            return
-        app_name = path.name
-        print(f"  Installing JS dependencies for {app_name}...")
-        sys.stdout.flush()
-        try:
-            run_command(
-                [get_yarn_bin(), "install", "--frozen-lockfile"],
-                cwd=path,
-                stream_output=True,
-            )
-        except Exception:
-            print(f"  Frozen lockfile install failed for {app_name}; retrying without modifying yarn.lock...")
-            sys.stdout.flush()
-            run_command(
-                [get_yarn_bin(), "install", "--pure-lockfile"],
-                cwd=path,
-                stream_output=True,
-            )
+    @staticmethod
+    def frontend_dirs(app: "App") -> list[Path]:
+        return [
+            app.path / name for name in ("frontend", "roster") if (app.path / name / "package.json").exists()
+        ]
 
     def setup_prebuilt_assets(
         self,
@@ -184,7 +166,7 @@ class PythonAssetBuilder:
         script = frappe_path / "ui" / "vite" / "island" / "build-pages.js"
         if not script.exists():
             return
-        self.ensure_yarn_install(script.parent / "toolchain")
+        NodePackages(script.parent / "toolchain").ensure_installed()
         print("  Building Frappe UI page islands...")
         sys.stdout.flush()
         self.run_compiler(["node", str(script), "--production"], cwd=frappe_path, stream_output=True)

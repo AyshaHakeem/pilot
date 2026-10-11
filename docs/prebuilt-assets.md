@@ -155,7 +155,7 @@ git clone https://github.com/frappe/pilot
 pilot/scripts/build-app-assets.sh <app checkout> <frappe branch> <output dir>
 ```
 
-It needs git, Python 3.11 or later, Node.js 24, and yarn. It writes the archive and its checksum to the output directory.
+It needs git, Python 3.11 or later, Node.js 24, and yarn. An app with a `pnpm-lock.yaml` also needs pnpm, or corepack, which Node.js includes. It writes the archive and its checksum to the output directory.
 
 ## Troubleshooting
 
