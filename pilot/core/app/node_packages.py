@@ -91,14 +91,13 @@ class NodePackages:
         if pnpm_lockfile.exists():
             return member in self.read_pnpm_importers(pnpm_lockfile.read_text())
 
-        included: list[str] = []
-        excluded: list[str] = []
-        for pattern in self.workspace_patterns:
-            pattern = pattern.strip()
-            patterns = excluded if pattern.startswith("!") else included
-            patterns.append(pattern.removeprefix("!").strip().removeprefix("./").rstrip("/"))
-        return any(fnmatch(member, pattern) for pattern in included) and not any(
-            fnmatch(member, pattern) for pattern in excluded
+        patterns = [pattern.strip() for pattern in self.workspace_patterns]
+
+        def matches(pattern: str) -> bool:
+            return fnmatch(member, pattern.removeprefix("./").rstrip("/"))
+
+        return any(matches(pattern) for pattern in patterns if not pattern.startswith("!")) and not any(
+            matches(pattern[1:].strip()) for pattern in patterns if pattern.startswith("!")
         )
 
     @property
@@ -110,7 +109,7 @@ class NodePackages:
         workspaces = json.loads(package_json.read_text()).get("workspaces", [])
         return workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces
 
-    def check_lockfiles(self) -> None:
+    def validate_lockfiles(self) -> None:
         """Raise when the install path has the lockfiles of two package managers."""
         lockfiles = self.lockfiles_in(self.install_path)
         if len(lockfiles) > 1:
@@ -121,7 +120,7 @@ class NodePackages:
 
     @property
     def lockfile(self) -> Path | None:
-        self.check_lockfiles()
+        self.validate_lockfiles()
         lockfiles = self.lockfiles_in(self.install_path)
         return lockfiles[0] if lockfiles else None
 
@@ -212,7 +211,7 @@ def get_app_packages(app_path: Path, package_dirs: list[Path]) -> list[NodePacka
             packages_by_install_path.setdefault(packages.install_path, packages)
 
     for packages in packages_by_install_path.values():
-        packages.check_lockfiles()
+        packages.validate_lockfiles()
     return list(packages_by_install_path.values())
 
 
