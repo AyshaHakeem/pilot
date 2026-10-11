@@ -16,7 +16,7 @@ Bench commands with `--bench NAME` can run from outside the bench directory. `Be
 
 ## Runtime Commands
 
-- `pilot start`: start bench processes.
+- `pilot start`: start bench processes in the foreground. Children receive no standard input, so they cannot consume a launcher's piped script. Use a service manager for unattended background operation.
 - `pilot stop`: stop bench processes.
 - `pilot restart`: restart the production workload.
 - `pilot build`: build assets, or download [prebuilt assets](prebuilt-assets.md) for the checked-out commit when the app publishes them. The queued build task (`pilot.tasks.build.BuildTask`) always forces a full rebuild, since a queued/CLI-triggered build is expected to reflect current source rather than reuse a prebuilt bundle.
