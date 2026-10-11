@@ -24,6 +24,8 @@ Bench commands with `--bench NAME` can run from outside the bench directory. `Be
 
 Some runtime commands support all benches when invoked with the CLI option for all-bench execution.
 
+For public development URLs, see [Development sites behind a proxy](development-proxies.md).
+
 ## App Commands
 
 - `pilot new-app APP`: scaffold a new Frappe app under `apps/` and install it. Prompts for title, description, publisher, email, license, GitHub workflow, and branch; pass any of `--title/--description/--publisher/--email/--license/--branch/--github-workflow` to skip prompts (branch defaults to `develop`).
