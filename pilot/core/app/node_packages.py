@@ -183,3 +183,21 @@ class NodePackages:
             elif in_packages and item.startswith("- "):
                 packages.append(item[2:].strip().strip("'\""))
         return packages
+
+
+def install_app_packages(app_path: Path, build_dirs: list[str]) -> None:
+    """Install the JS dependencies of the app root and of each build dir, once per install path."""
+    install_paths: set[Path] = set()
+    for path in [app_path, *(app_path / build_dir for build_dir in build_dirs)]:
+        packages = NodePackages(path, app_path)
+        if packages.has_package_json and packages.install_path not in install_paths:
+            install_paths.add(packages.install_path)
+            packages.install()
+
+
+if __name__ == "__main__":
+    # Invoked by scripts/build-app-assets.sh as: <app path> [<build dir>...]
+    try:
+        install_app_packages(Path(sys.argv[1]), sys.argv[2:])
+    except BenchError as error:
+        sys.exit(f"error: {error}")
