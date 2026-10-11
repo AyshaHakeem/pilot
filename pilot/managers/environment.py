@@ -7,11 +7,11 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pilot.core.app.node_packages import NodePackages
+from pilot.core.app.node_packages import PACKAGE_MANAGERS, YARN, NodePackages
 from pilot.exceptions import BenchError
 from pilot.managers.platform import add_mysqlclient_flags, is_macos, which
 from pilot.managers.python_assets import PythonAssetBuilder
-from pilot.utils import get_node_tool_bin, install_node_tool, run_command
+from pilot.utils import run_command
 
 MINIMUM_NODE_MAJOR = 24
 
@@ -157,12 +157,10 @@ class PythonEnvManager:
         """Build subprocess env with yarn and pnpm on PATH and macOS mysqlclient flags."""
         env = os.environ.copy()
 
-        for tool in ("yarn", "pnpm"):
-            try:
-                tool_dir = str(Path(get_node_tool_bin(tool)).parent)
-            except BenchError:
-                continue  # not installed yet (e.g. compiling C extensions pre-node)
-            env["PATH"] = os.pathsep.join([tool_dir, env.get("PATH", "")])
+        # A tool can be missing, for example while C extensions compile before Node is set up.
+        for manager in PACKAGE_MANAGERS:
+            if manager.is_installed:
+                env["PATH"] = os.pathsep.join([str(Path(manager.bin).parent), env.get("PATH", "")])
 
         add_mysqlclient_flags(env)
 
@@ -186,8 +184,7 @@ class PythonEnvManager:
         if not which("node"):
             self._install_node()
         self.require_node_version()
-        if not which("yarn"):
-            install_node_tool("yarn")
+        YARN.ensure_installed()
 
     @staticmethod
     def require_node_version() -> None:
@@ -210,8 +207,7 @@ class PythonEnvManager:
 
     def install_node_dependencies(self) -> None:
         for app in self.bench.apps():
-            if (app.path / "package.json").exists():
-                NodePackages(app.path).install()
+            NodePackages(app.path).install()
 
     def build_assets(self) -> None:
         self._assets.build_assets()

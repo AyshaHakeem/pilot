@@ -757,7 +757,7 @@ def test_requirements_installs_js_for_app_with_package_json(tmp_path: Path) -> N
     (app_dir / "package.json").write_text('{"name": "myapp"}\n')
 
     with (
-        patch("pilot.core.app.node_packages.get_node_tool_bin", return_value="yarn"),
+        patch("pilot.core.app.node_packages.shutil.which", return_value="yarn"),
         patch("pilot.core.app.node_packages.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_js_requirements(lambda _message: None)

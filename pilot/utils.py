@@ -1,6 +1,5 @@
 import contextlib
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -369,22 +368,6 @@ def installed_app_version(env_path: Path, name: str) -> str:
                 if line.startswith("Version:"):
                     return line.split(":", 1)[1].strip()
     return ""
-
-
-def get_node_tool_bin(name: str) -> str:
-    """A global npm tool on PATH, or where `install_node_tool` puts it."""
-    if tool := shutil.which(name):
-        return tool
-    local_tool = Path.home() / ".local" / "bin" / name
-    if local_tool.exists():
-        return str(local_tool)
-    raise BenchError(f"{name} not found - run pilot init to install it.")
-
-
-def install_node_tool(name: str) -> None:
-    npm_prefix = Path.home() / ".local"
-    npm_prefix.mkdir(parents=True, exist_ok=True)
-    run_command(["npm", "install", "-g", name, "--prefix", str(npm_prefix)])
 
 
 def redact_text(text: str, secrets: list[str] | None) -> str:

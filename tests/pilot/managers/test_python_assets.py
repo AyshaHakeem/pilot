@@ -38,7 +38,7 @@ def build_app(app_path: Path, on_install: Callable[[], None] = lambda: None) -> 
         on_install()
 
     with (
-        patch("pilot.core.app.node_packages.get_node_tool_bin", side_effect=lambda name: name),
+        patch("pilot.core.app.node_packages.shutil.which", side_effect=lambda name: name),
         patch("pilot.core.app.node_packages.run_command", side_effect=install),
         patch.object(builder, "run_compiler", side_effect=record),
     ):

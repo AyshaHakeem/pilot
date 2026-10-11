@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sys
 from dataclasses import dataclass
 from fnmatch import fnmatch
 from pathlib import Path
 
 from pilot.exceptions import BenchError
-from pilot.utils import get_node_tool_bin, install_node_tool, run_command
+from pilot.utils import run_command
 
 
 @dataclass(frozen=True)
@@ -18,32 +19,43 @@ class NodePackageManager:
     lockfile: str
     install_marker: str
     """A file the manager rewrites in node_modules on every install."""
-    install_args: tuple[str, ...]
-    frozen_install_args: tuple[str, ...]
+    extra_install_args: tuple[str, ...] = ()
+
+    @property
+    def local_bin(self) -> Path:
+        return Path.home() / ".local" / "bin" / self.name
+
+    @property
+    def is_installed(self) -> bool:
+        return bool(shutil.which(self.name)) or self.local_bin.exists()
 
     @property
     def bin(self) -> str:
-        try:
-            return get_node_tool_bin(self.name)
-        except BenchError:
-            install_node_tool(self.name)
-            return get_node_tool_bin(self.name)
+        """The tool on PATH, or where `ensure_installed` puts it."""
+        if not self.is_installed:
+            raise BenchError(f"{self.name} not found - run pilot init to install it.")
+        return shutil.which(self.name) or str(self.local_bin)
+
+    def ensure_installed(self) -> None:
+        """Install the tool into ~/.local unless it is already installed."""
+        if self.is_installed:
+            return
+        prefix = Path.home() / ".local"
+        prefix.mkdir(parents=True, exist_ok=True)
+        run_command(["npm", "install", "-g", self.name, "--prefix", str(prefix)])
 
 
 YARN = NodePackageManager(
     name="yarn",
     lockfile="yarn.lock",
     install_marker=".yarn-integrity",
-    install_args=("install",),
-    frozen_install_args=("install", "--frozen-lockfile"),
 )
 PNPM = NodePackageManager(
     name="pnpm",
     lockfile="pnpm-lock.yaml",
     install_marker=".modules.yaml",
     # Without a TTY, pnpm stops instead of asking to replace a node_modules another manager wrote.
-    install_args=("install", "--config.confirmModulesPurge=false"),
-    frozen_install_args=("install", "--frozen-lockfile", "--config.confirmModulesPurge=false"),
+    extra_install_args=("--config.confirmModulesPurge=false",),
 )
 PACKAGE_MANAGERS = (YARN, PNPM)
 
@@ -116,30 +128,43 @@ class NodePackages:
             return False
         return lockfile is None or lockfile.stat().st_mtime <= marker.stat().st_mtime
 
+    @property
+    def has_package_json(self) -> bool:
+        return (self.path / "package.json").exists()
+
     def install(self, frozen: bool = True) -> None:
+        """Install the dependencies. A directory without package.json has none."""
+        if not self.has_package_json:
+            return
         manager = self.package_manager
         if self.lockfile is None:
             print(f"  {self.install_path} has no lockfile; {manager.name} installs unpinned versions.")
             sys.stdout.flush()
-        args = manager.frozen_install_args if frozen else manager.install_args
-        run_command([manager.bin, *args], cwd=self.install_path, stream_output=True)
+        manager.ensure_installed()
+        frozen_args = ["--frozen-lockfile"] if frozen else []
+        run_command(
+            [manager.bin, "install", *frozen_args, *manager.extra_install_args],
+            cwd=self.install_path,
+            stream_output=True,
+        )
 
     def ensure_installed(self) -> None:
-        if not self.is_installed:
+        if self.has_package_json and not self.is_installed:
             print(f"  Installing JS dependencies in {self.install_path}...")
             sys.stdout.flush()
             self.install()
 
     def get_script_command(self, script: str) -> list[str]:
         """The command that runs a package.json script in `path`."""
-        return [self.package_manager.bin, "run", script]
+        manager = self.package_manager
+        manager.ensure_installed()
+        return [manager.bin, "run", script]
 
     @property
     def has_build_script(self) -> bool:
-        package_json = self.path / "package.json"
-        if not package_json.exists():
+        if not self.has_package_json:
             return False
-        return "build" in json.loads(package_json.read_text()).get("scripts", {})
+        return "build" in json.loads((self.path / "package.json").read_text()).get("scripts", {})
 
     @staticmethod
     def lockfiles_in(path: Path) -> list[Path]:

@@ -248,10 +248,10 @@ class BenchRuntime:
         from pilot.core.app.node_packages import NodePackages
 
         for app in self.bench.apps():
-            if not (app.path / "package.json").exists():
-                continue
-            on_progress(f"Installing JS requirements for {app.config.name}...")
-            NodePackages(app.path).install(frozen=False)
+            packages = NodePackages(app.path)
+            if packages.has_package_json:
+                on_progress(f"Installing JS requirements for {app.config.name}...")
+                packages.install(frozen=False)
 
 
 def incomplete_production_message(bench: "Bench") -> str:

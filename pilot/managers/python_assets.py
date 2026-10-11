@@ -62,8 +62,7 @@ class PythonAssetBuilder:
 
     def build_assets(self) -> None:
         for app in self.bench.apps():
-            if (app.path / "package.json").exists():
-                NodePackages(app.path).ensure_installed()
+            NodePackages(app.path).ensure_installed()
         self.run_compiler(
             [*self.bench.frappe_call, "frappe", "build", "--force"],
             cwd=self.bench.sites_path,
@@ -76,7 +75,7 @@ class PythonAssetBuilder:
         dist_dir = app_public_dir / "dist"
 
         # Desk serves /assets/frappe/node_modules, and every server build runs Frappe's esbuild.
-        if app.config.name == "frappe" and (app.path / "package.json").exists():
+        if app.config.name == "frappe":
             NodePackages(app.path).ensure_installed()
 
         if not force and not app.has_source_changes:
@@ -89,9 +88,7 @@ class PythonAssetBuilder:
                     self.build_page_islands()
                 return
 
-        if (app.path / "package.json").exists():
-            NodePackages(app.path).ensure_installed()
-
+        NodePackages(app.path).ensure_installed()
         self.ensure_frontend_dependencies(app)
 
         print(f"  Building assets for {app.config.name}...")
@@ -112,6 +109,7 @@ class PythonAssetBuilder:
             self.run_compiler(
                 NodePackages(frontend_dir, app.path).get_script_command("build"),
                 cwd=frontend_dir,
+                env=self.manager._build_env(),
                 stream_output=True,
             )
 
@@ -124,7 +122,9 @@ class PythonAssetBuilder:
     @staticmethod
     def frontend_dirs(app: "App") -> list[Path]:
         return [
-            app.path / name for name in ("frontend", "roster") if (app.path / name / "package.json").exists()
+            app.path / name
+            for name in ("frontend", "roster")
+            if NodePackages(app.path / name).has_package_json
         ]
 
     def setup_prebuilt_assets(

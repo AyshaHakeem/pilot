@@ -17,7 +17,7 @@ from pilot.exceptions import BenchError, CommandError
 @pytest.fixture
 def run_command() -> Iterator[MagicMock]:
     with (
-        patch("pilot.core.app.node_packages.get_node_tool_bin", side_effect=lambda name: name),
+        patch("pilot.core.app.node_packages.shutil.which", side_effect=lambda name: name),
         patch("pilot.core.app.node_packages.run_command") as run_command,
     ):
         yield run_command
@@ -119,25 +119,42 @@ def test_install_runs_again_only_after_the_lockfile_changes(
     run_command.assert_called_once()
 
 
-def test_missing_pnpm_is_installed_first(tmp_path: Path) -> None:
+def test_missing_pnpm_is_installed_into_local_before_it_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
     app = write_package(tmp_path / "app")
     (app / "pnpm-lock.yaml").write_text("")
-    installed: list[str] = []
+    commands: list[list[str]] = []
 
-    def find(name: str) -> str:
-        if name not in installed:
-            raise BenchError(f"{name} not found")
-        return f"/home/user/.local/bin/{name}"
+    def run(argv: list[str], **kwargs: object) -> None:
+        commands.append(argv)
+        if argv[:3] == ["npm", "install", "-g"]:
+            prefix = Path(argv[argv.index("--prefix") + 1])
+            (prefix / "bin").mkdir(parents=True)
+            (prefix / "bin" / "pnpm").write_text("")
 
     with (
-        patch("pilot.core.app.node_packages.get_node_tool_bin", side_effect=find),
-        patch("pilot.core.app.node_packages.install_node_tool", side_effect=installed.append),
-        patch("pilot.core.app.node_packages.run_command") as run_command,
+        patch("pilot.core.app.node_packages.shutil.which", return_value=None),
+        patch("pilot.core.app.node_packages.run_command", side_effect=run),
     ):
         NodePackages(app).install()
 
-    assert installed == ["pnpm"]
-    assert run_command.call_args.args[0][0] == "/home/user/.local/bin/pnpm"
+    local = tmp_path / "home" / ".local"
+    assert commands == [
+        ["npm", "install", "-g", "pnpm", "--prefix", str(local)],
+        [str(local / "bin" / "pnpm"), "install", "--frozen-lockfile", "--config.confirmModulesPurge=false"],
+    ]
+
+
+def test_directory_without_package_json_installs_nothing(tmp_path: Path, run_command: MagicMock) -> None:
+    app = tmp_path / "app"
+    app.mkdir()
+
+    NodePackages(app).install()
+    NodePackages(app).ensure_installed()
+
+    run_command.assert_not_called()
 
 
 def test_non_frozen_pnpm_install_replaces_node_modules_without_a_prompt(
@@ -187,22 +204,3 @@ def test_workspace_member_installs_from_a_root_without_a_lockfile(
     NodePackages(frontend, app).install()
 
     run_command.assert_called_once_with(["yarn", "install", "--frozen-lockfile"], cwd=app, stream_output=True)
-
-
-def test_node_tool_installs_where_the_lookup_finds_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from pilot import utils
-
-    monkeypatch.setenv("HOME", str(tmp_path))
-    monkeypatch.setenv("PATH", "")
-
-    def npm_install(argv: list[str], **kwargs: object) -> None:
-        prefix = Path(argv[argv.index("--prefix") + 1])
-        (prefix / "bin").mkdir(parents=True)
-        (prefix / "bin" / "pnpm").write_text("")
-
-    with patch("pilot.utils.run_command", side_effect=npm_install):
-        utils.install_node_tool("pnpm")
-
-    assert utils.get_node_tool_bin("pnpm") == str(tmp_path / ".local" / "bin" / "pnpm")
