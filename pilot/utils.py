@@ -382,11 +382,6 @@ def get_node_tool_bin(name: str) -> str:
 
 
 def install_node_tool(name: str) -> None:
-    from pilot.managers.platform import is_macos
-
-    if is_macos():
-        run_command(["npm", "install", "-g", name])
-        return
     npm_prefix = Path.home() / ".local"
     npm_prefix.mkdir(parents=True, exist_ok=True)
     run_command(["npm", "install", "-g", name, "--prefix", str(npm_prefix)])

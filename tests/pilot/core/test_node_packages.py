@@ -138,3 +138,71 @@ def test_missing_pnpm_is_installed_first(tmp_path: Path) -> None:
 
     assert installed == ["pnpm"]
     assert run_command.call_args.args[0][0] == "/home/user/.local/bin/pnpm"
+
+
+def test_non_frozen_pnpm_install_replaces_node_modules_without_a_prompt(
+    tmp_path: Path, run_command: MagicMock
+) -> None:
+    app = write_package(tmp_path / "app")
+    (app / "pnpm-lock.yaml").write_text("")
+
+    NodePackages(app).install(frozen=False)
+
+    run_command.assert_called_once_with(
+        ["pnpm", "install", "--config.confirmModulesPurge=false"], cwd=app, stream_output=True
+    )
+
+
+@pytest.mark.parametrize(
+    "workspace",
+    [
+        {"package.json": json.dumps({"workspaces": ["frontend"]})},
+        {"package.json": json.dumps({"workspaces": {"packages": ["./frontend/"]}})},
+        {
+            "pnpm-workspace.yaml": "# members\npackages:\n  - 'front*'\n  - '!roster'\nonlyBuiltDependencies:\n  - esbuild\n"
+        },
+    ],
+)
+def test_only_workspace_members_install_from_the_root(
+    tmp_path: Path, run_command: MagicMock, workspace: dict[str, str]
+) -> None:
+    app = write_package(tmp_path / "app")
+    for name, text in workspace.items():
+        (app / name).write_text(text)
+    frontend = write_package(app / "frontend")
+    roster = write_package(app / "roster")
+
+    NodePackages(frontend, app).install()
+    NodePackages(roster, app).install()
+
+    assert [call.kwargs["cwd"] for call in run_command.call_args_list] == [app, roster]
+
+
+def test_workspace_member_installs_from_a_root_without_a_lockfile(
+    tmp_path: Path, run_command: MagicMock
+) -> None:
+    app = write_package(tmp_path / "app", workspaces=["frontend"])
+    frontend = write_package(app / "frontend")
+
+    NodePackages(frontend, app).install()
+
+    run_command.assert_called_once_with(["yarn", "install", "--frozen-lockfile"], cwd=app, stream_output=True)
+
+
+def test_node_tool_installs_where_the_lookup_finds_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from pilot import utils
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("PATH", "")
+
+    def npm_install(argv: list[str], **kwargs: object) -> None:
+        prefix = Path(argv[argv.index("--prefix") + 1])
+        (prefix / "bin").mkdir(parents=True)
+        (prefix / "bin" / "pnpm").write_text("")
+
+    with patch("pilot.utils.run_command", side_effect=npm_install):
+        utils.install_node_tool("pnpm")
+
+    assert utils.get_node_tool_bin("pnpm") == str(tmp_path / ".local" / "bin" / "pnpm")

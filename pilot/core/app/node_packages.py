@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sys
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 
 from pilot.exceptions import BenchError
@@ -40,8 +41,8 @@ PNPM = NodePackageManager(
     name="pnpm",
     lockfile="pnpm-lock.yaml",
     install_marker=".modules.yaml",
-    install_args=("install",),
     # Without a TTY, pnpm stops instead of asking to replace a node_modules another manager wrote.
+    install_args=("install", "--config.confirmModulesPurge=false"),
     frozen_install_args=("install", "--frozen-lockfile", "--config.confirmModulesPurge=false"),
 )
 PACKAGE_MANAGERS = (YARN, PNPM)
@@ -50,7 +51,7 @@ PACKAGE_MANAGERS = (YARN, PNPM)
 class NodePackages:
     """JS dependencies of a package directory, installed by the manager its lockfile names.
 
-    A workspace member without its own lockfile installs from the workspace root at `app_path`.
+    A member of the workspace at `app_path` without its own lockfile installs from that root.
     A directory without any lockfile installs with yarn, as Frappe does.
     """
 
@@ -62,9 +63,32 @@ class NodePackages:
     def install_path(self) -> Path:
         if self.lockfiles_in(self.path) or self.path == self.app_path:
             return self.path
-        if self.is_workspace_root(self.app_path) and self.lockfiles_in(self.app_path):
+        if self.is_workspace_member:
             return self.app_path
         return self.path
+
+    @property
+    def is_workspace_member(self) -> bool:
+        """Whether a workspace pattern at `app_path` matches `path`, and no `!` pattern excludes it."""
+        member = self.path.relative_to(self.app_path).as_posix()
+        patterns = [pattern.strip().removeprefix("./").rstrip("/") for pattern in self.workspace_patterns]
+        included = any(fnmatch(member, pattern) for pattern in patterns if not pattern.startswith("!"))
+        return included and not any(
+            fnmatch(member, pattern[1:]) for pattern in patterns if pattern.startswith("!")
+        )
+
+    @property
+    def workspace_patterns(self) -> list[str]:
+        """Member globs from `package.json` workspaces and `pnpm-workspace.yaml` packages."""
+        patterns: list[str] = []
+        package_json = self.app_path / "package.json"
+        if package_json.exists():
+            workspaces = json.loads(package_json.read_text()).get("workspaces", [])
+            patterns += workspaces.get("packages", []) if isinstance(workspaces, dict) else workspaces
+        pnpm_workspace = self.app_path / "pnpm-workspace.yaml"
+        if pnpm_workspace.exists():
+            patterns += self.read_pnpm_workspace_packages(pnpm_workspace.read_text())
+        return patterns
 
     @property
     def lockfile(self) -> Path | None:
@@ -122,8 +146,15 @@ class NodePackages:
         return [path / manager.lockfile for manager in PACKAGE_MANAGERS if (path / manager.lockfile).exists()]
 
     @staticmethod
-    def is_workspace_root(path: Path) -> bool:
-        if (path / "pnpm-workspace.yaml").exists():
-            return True
-        package_json = path / "package.json"
-        return package_json.exists() and "workspaces" in json.loads(package_json.read_text())
+    def read_pnpm_workspace_packages(text: str) -> list[str]:
+        """The block list under the top-level `packages:` key. Pilot has no YAML parser."""
+        packages: list[str] = []
+        in_packages = False
+        for line in text.splitlines():
+            content = line.split("#", 1)[0].rstrip()
+            item = content.strip()
+            if content and not content[0].isspace() and not item.startswith("-"):
+                in_packages = item == "packages:"
+            elif in_packages and item.startswith("- "):
+                packages.append(item[2:].strip().strip("'\""))
+        return packages
