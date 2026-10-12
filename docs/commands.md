@@ -16,13 +16,15 @@ Bench commands with `--bench NAME` can run from outside the bench directory. `Be
 
 ## Runtime Commands
 
-- `pilot start`: start bench processes in the foreground. Children receive no standard input, so they cannot consume a launcher's piped script. Use a service manager for unattended background operation.
+- `pilot start`: start bench processes. On a development bench, it stays in the foreground and its children receive no standard input, so they cannot consume a launcher's piped script. Use a service manager for unattended development operation.
 - `pilot stop`: stop bench processes.
 - `pilot restart`: restart the production workload.
 - `pilot build`: build assets, or download [prebuilt assets](prebuilt-assets.md) for the checked-out commit when the app publishes them. The queued build task (`pilot.tasks.build.BuildTask`) always forces a full rebuild, since a queued/CLI-triggered build is expected to reflect current source rather than reuse a prebuilt bundle.
 - `pilot -b NAME frappe --site SITE COMMAND`: pass through to Frappe's bench helper without a `--` separator. For example: `pilot -b dev frappe --site test.local migrate`. Use `pilot frappe --help` for this syntax, or append `--help` to a Frappe command for its options.
 
 Some runtime commands support all benches when invoked with the CLI option for all-bench execution.
+
+When a classic development bench has multiple sites, `pilot start` warns if `FRAPPE_SITE` or `default_site` fixes routing to one site. It keeps the setting and starts the bench.
 
 ## App Commands
 
