@@ -181,8 +181,7 @@ class BenchRuntime:
 
         if not (dist / "assets").exists() and not can_build:
             raise BenchError(
-                "Admin UI is missing from this release. Reinstall Pilot, "
-                "or run it from a source checkout."
+                "Admin UI is missing from this release. Reinstall Pilot, or run it from a source checkout."
             )
         if can_build:
             self._rebuild_admin(on_progress)
