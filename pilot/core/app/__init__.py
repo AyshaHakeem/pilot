@@ -33,11 +33,7 @@ class NewAppOptions:
     github_workflow: bool = False
 
     def __post_init__(self) -> None:
-        missing = [
-            name
-            for name in ("description", "publisher", "email")
-            if not getattr(self, name).strip()
-        ]
+        missing = [name for name in ("description", "publisher", "email") if not getattr(self, name).strip()]
         if missing:
             raise BenchError(f"App {', '.join(missing)} cannot be blank.")
 
@@ -309,6 +305,7 @@ class App:
         self,
         *,
         install_dependencies: bool = False,
+        skip_assets: bool = False,
         commit: str = "",
         on_progress: Callable[[str], None] = lambda message: None,
     ) -> AppInstallResult:
@@ -338,8 +335,11 @@ class App:
         try:
             self._install_into_environment()
             self._register()
-            on_progress(f"\nSetting up assets for {self.config.name}...")
-            self._build_assets_via_env_manager()
+            if not skip_assets:
+                on_progress(f"\nSetting up assets for {self.config.name}...")
+                self._build_assets_via_env_manager()
+            else:
+                on_progress(f"\nSkipping assets for {self.config.name}...")
         except Exception:
             self._roll_back_install(delete_clone=existing_clone is None, on_progress=on_progress)
             raise
