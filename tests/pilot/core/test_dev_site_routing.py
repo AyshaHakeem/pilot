@@ -11,12 +11,13 @@ from tests.pilot.commands.test_commands import make_bench
 
 
 @pytest.mark.parametrize(
-    ("site_count", "default_site", "env_site", "warn"),
+    ("site_count", "default_site", "env_site", "lite_mode", "warn"),
     [
-        (2, "one.localhost", "", True),
-        (2, "", "one.localhost", True),
-        (1, "one.localhost", "", False),
-        (2, "", "", False),
+        (2, "one.localhost", "", False, True),
+        (2, "", "one.localhost", False, True),
+        (1, "one.localhost", "", False, False),
+        (2, "", "", False, False),
+        (2, "one.localhost", "", True, False),
     ],
 )
 def test_dev_start_warns_when_a_selector_pins_a_multi_site_bench(
@@ -25,9 +26,15 @@ def test_dev_start_warns_when_a_selector_pins_a_multi_site_bench(
     site_count: int,
     default_site: str,
     env_site: str,
+    lite_mode: bool,
     warn: bool,
 ) -> None:
     bench = make_bench(tmp_path)
+    if lite_mode:
+        bench.config.lite_mode.enabled = True
+        runner = bench.apps_path / "frappe" / "frappe" / "runner.py"
+        runner.parent.mkdir(parents=True)
+        runner.touch()
     (bench.env_path / "bin").mkdir(parents=True)
     bench.python.touch()
     for name in ("one.localhost", "two.localhost")[:site_count]:
