@@ -297,11 +297,6 @@ class App:
                     return child.name
         return conventional
 
-    def build_assets(self) -> None:
-        if not (self.path / "package.json").exists():
-            return
-        run_command(["yarn", "--cwd", str(self.path), "build"])
-
     def _skip_already_installed(
         self, on_progress: Callable[[str], None], install_dependencies: bool = False
     ) -> AppInstallResult:
