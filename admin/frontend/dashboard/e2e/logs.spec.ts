@@ -1,15 +1,16 @@
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
 import { rm, writeFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { isAbsolute, resolve } from 'node:path'
 
 const initialLogName = `e2e-browser-initial-${randomUUID()}.log`
 const selectedLogName = `e2e-browser-selected-${randomUUID()}.log`
 const initialLogLine = 'Playwright initial log marker'
 const selectedLogLine = 'Playwright selected log marker'
-const benchRoot = process.env.E2E_BENCH_ROOT || resolve(
-  process.cwd(), '../../../benches', `e2e-${process.env.E2E_DB_TYPE || 'mariadb'}`,
-)
+const benchRoot = process.env.E2E_BENCH_ROOT
+if (!benchRoot || !isAbsolute(benchRoot)) {
+  throw new Error('E2E_BENCH_ROOT must be the absolute path to the bench under test')
+}
 const initialLogPath = resolve(benchRoot, 'logs', initialLogName)
 const selectedLogPath = resolve(benchRoot, 'logs', selectedLogName)
 const createdLogPaths: string[] = []
