@@ -294,10 +294,13 @@ class App:
         return conventional
 
     def _skip_already_installed(
-        self, on_progress: Callable[[str], None], install_dependencies: bool = False
+        self,
+        on_progress: Callable[[str], None],
+        install_dependencies: bool = False,
+        skip_assets: bool = False,
     ) -> AppInstallResult:
         app = self.bench.app(self.module_name)
-        dependencies = app._install_dependencies(on_progress) if install_dependencies else []
+        dependencies = app._install_dependencies(on_progress, skip_assets) if install_dependencies else []
         on_progress(f"'{app.config.name}' already installed, skipping.")
         return AppInstallResult(app, already_installed=True, installed_dependencies=dependencies)
 
@@ -311,7 +314,7 @@ class App:
     ) -> AppInstallResult:
         """Pinned commit based Clone, validate, install, register, and build app assets."""
         if self.bench.is_app_installed(self.config.name):
-            return self._skip_already_installed(on_progress, install_dependencies)
+            return self._skip_already_installed(on_progress, install_dependencies, skip_assets)
 
         existing_clone = self.existing_clone_path
         self.is_staged = not self.is_marketplace
@@ -322,7 +325,7 @@ class App:
             if commit and self.installed_hash != commit:
                 on_progress(f"Checking out {self.config.name} at {commit[:8]}...")
                 self.checkout_commit(commit)
-            dependencies = self._install_dependencies(on_progress) if install_dependencies else []
+            dependencies = self._install_dependencies(on_progress, skip_assets) if install_dependencies else []
             if self.is_staged:
                 self.validate()
             self.promote()
@@ -383,10 +386,12 @@ class App:
         if delete_clone:
             shutil.rmtree(self.path, ignore_errors=True)
 
-    def _install_dependencies(self, on_progress: Callable[[str], None]) -> list["App"]:
+    def _install_dependencies(
+        self, on_progress: Callable[[str], None], skip_assets: bool = False
+    ) -> list["App"]:
         from pilot.core.app.dependency_installer import AppDependencyInstaller
 
-        return AppDependencyInstaller(self.bench, self).install(on_progress)
+        return AppDependencyInstaller(self.bench, self).install(on_progress, skip_assets=skip_assets)
 
     def validate(self) -> None:
         from pilot.core.app.validator import Validator
