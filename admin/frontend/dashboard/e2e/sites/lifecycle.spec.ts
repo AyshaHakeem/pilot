@@ -39,8 +39,16 @@ test('Install an app', async ({ page }) => {
 test('Uninstall the app', async ({ page }) => {
   await page.goto(`/sites/${site}`)
   await appRow(page, 'Blog', 'App actions').getByRole('button', { name: 'App actions' }).click()
-  await page.getByRole('menuitem', { name: 'Uninstall' }).click()
-  await page.getByRole('dialog', { name: 'Uninstall App' }).getByRole('button', { name: 'Uninstall' }).click()
+  const action = page.getByRole('menuitem', { name: /^(Remove|Uninstall)$/ })
+  await expect(action).toBeVisible()
+  await action.click()
+
+  const dialog = page.getByRole('dialog', { name: /^(Remove|Uninstall) App$/ })
+  await expect(dialog).toBeVisible()
+  if (await page.getByRole('dialog', { name: 'Remove App' }).isVisible()) {
+    await dialog.getByRole('button', { name: /^Uninstall .*stops working, and every doctype/ }).click()
+  }
+  await dialog.getByRole('button', { name: 'Uninstall', exact: true }).click()
 
   await waitForTask(page, new RegExp(`/sites/${site}/apps$`))
   await expect(page.getByRole('img', { name: 'Blog', exact: true })).toBeHidden()
