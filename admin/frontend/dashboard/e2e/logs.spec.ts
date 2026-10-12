@@ -7,17 +7,19 @@ const initialLogName = `e2e-browser-initial-${randomUUID()}.log`
 const selectedLogName = `e2e-browser-selected-${randomUUID()}.log`
 const initialLogLine = 'Playwright initial log marker'
 const selectedLogLine = 'Playwright selected log marker'
-const benchRoot = process.env.E2E_BENCH_ROOT
-if (!benchRoot || !isAbsolute(benchRoot)) {
-  throw new Error('E2E_BENCH_ROOT must be the absolute path to the bench under test')
-}
-const initialLogPath = resolve(benchRoot, 'logs', initialLogName)
-const selectedLogPath = resolve(benchRoot, 'logs', selectedLogName)
 const createdLogPaths: string[] = []
 
 test.describe.configure({ mode: 'serial' })
 
 test.beforeAll(async () => {
+  const benchRoot = process.env.E2E_BENCH_ROOT
+  if (!benchRoot || !isAbsolute(benchRoot)) {
+    throw new Error('E2E_BENCH_ROOT must be the absolute path to the bench under test')
+  }
+
+  const initialLogPath = resolve(benchRoot, 'logs', initialLogName)
+  const selectedLogPath = resolve(benchRoot, 'logs', selectedLogName)
+
   await writeFile(initialLogPath, `${initialLogLine}\n`, { flag: 'wx' })
   createdLogPaths.push(initialLogPath)
   await writeFile(selectedLogPath, `${selectedLogLine}\n`, { flag: 'wx' })
