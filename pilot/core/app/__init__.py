@@ -219,7 +219,7 @@ class App:
         up. A tree already in apps/ is moved into staging rather than cloned again."""
         if not self.is_staged:
             on_progress(f"Cloning {self.config.name}...")
-            self._repository.clone()
+            self._repository.clone(on_progress)
             return
 
         shutil.rmtree(self.path, ignore_errors=True)  # leftovers from an interrupted run
@@ -231,7 +231,7 @@ class App:
             return
 
         on_progress(f"Cloning {self.config.name}...")
-        self._repository.clone()
+        self._repository.clone(on_progress)
 
     def update(self, pin: RevisionPin | None = None) -> None:
         self._repository.update(pin)
@@ -325,7 +325,9 @@ class App:
             if commit and self.installed_hash != commit:
                 on_progress(f"Checking out {self.config.name} at {commit[:8]}...")
                 self.checkout_commit(commit)
-            dependencies = self._install_dependencies(on_progress, skip_assets) if install_dependencies else []
+            dependencies = (
+                self._install_dependencies(on_progress, skip_assets) if install_dependencies else []
+            )
             if self.is_staged:
                 self.validate()
             self.promote()

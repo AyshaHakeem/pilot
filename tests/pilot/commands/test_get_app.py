@@ -209,6 +209,30 @@ def test_bench_is_app_installed_reflects_apps_txt_contents(tmp_path: Path) -> No
     assert bench.is_app_installed("erpnext") is True
 
 
+def test_commit_is_checked_out_on_the_branch(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    commit = "b" * 40
+    cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp", branch="version-16", commit=commit)
+
+    with (
+        patch.object(
+            App,
+            "clone",
+            autospec=True,
+            side_effect=lambda app, on_progress=None: app.path.mkdir(parents=True, exist_ok=True),
+        ),
+        patch.object(App, "checkout_commit") as checkout_commit,
+        patch.object(App, "validate"),
+        patch.object(App, "_install_into_environment"),
+        patch.object(App, "_build_assets_via_env_manager"),
+    ):
+        cmd.run()
+
+    assert cmd.app.config.branch == "version-16"
+    checkout_commit.assert_called_once_with(commit)
+
+
 def test_without_a_branch_the_repository_default_is_used(tmp_path: Path) -> None:
     # Many Frappe apps default to develop and have no main branch.
     bench = make_bench(tmp_path)

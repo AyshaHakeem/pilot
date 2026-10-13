@@ -18,6 +18,9 @@ class GetAppCommand(Command):
     branch: Annotated[str, Arg(help="Git branch to checkout (default: the repository's default branch).")] = (
         ""
     )
+    commit: Annotated[
+        str, Arg(help="Git commit hash to checkout (default: the latest commit on the branch).")
+    ] = ""
     skip_assets: Annotated[bool, Arg(help="Skip building assets")] = False
     install_dependencies: Annotated[bool, Arg(help="Install app dependencies")] = False
 
@@ -32,6 +35,7 @@ class GetAppCommand(Command):
             install_dependencies=self.install_dependencies,
             skip_assets=self.skip_assets,
             on_progress=self.report,
+            commit=self.commit,
         )
         self.app = result.app
         self.installed_dependencies = result.installed_dependencies
