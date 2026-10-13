@@ -15,7 +15,10 @@ class GetAppCommand(Command):
     help: ClassVar[str] = "Clone and install an app."
 
     repo: Annotated[str, Arg(help="Git repository URL.")]
-    branch: Annotated[str, Arg(help="Git branch to checkout (default: the repository's default branch).")] = ""
+    branch: Annotated[str, Arg(help="Git branch to checkout (default: the repository's default branch).")] = (
+        ""
+    )
+    skip_assets: Annotated[bool, Arg(help="Skip building assets")] = False
     install_dependencies: Annotated[bool, Arg(help="Install app dependencies")] = False
 
     def __post_init__(self) -> None:
@@ -27,6 +30,7 @@ class GetAppCommand(Command):
     def run(self) -> None:
         result = self.app.install(
             install_dependencies=self.install_dependencies,
+            skip_assets=self.skip_assets,
             on_progress=self.report,
         )
         self.app = result.app
