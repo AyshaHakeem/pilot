@@ -86,7 +86,7 @@ The login signs in the user the token names. A token whose `sub` is an email sig
 
 ### Site To Central
 
-A site calls Central through `GET` or `POST /sites/<name>/central/<method>`. Pilot forwards the call with this host's Pilot credential, so Central knows the server and its team. Pilot forwards only these methods and refuses others with `403`:
+A site calls Central through `GET` or `POST /sites/<name>/central/<method>`. Pilot forwards the call with this host's Pilot credential, so Central knows the server and its team. Pilot removes the reserved `cmd` field from the request body so it cannot override the method in the URL. Pilot forwards only these methods and refuses others with `403`:
 
 | Method | Use |
 |---|---|
