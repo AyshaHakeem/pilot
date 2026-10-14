@@ -388,3 +388,18 @@ def test_proxy_body_cannot_override_the_allowlisted_method(tmp_path: Path, metho
     request = urlopen.call_args.args[0]
     assert request.full_url == f"https://central.test/api/method/{method_path}"
     assert json.loads(request.data) == fields
+
+
+@pytest.mark.parametrize("body", [[], ["cmd"], "not an object", 42, True])
+def test_proxy_rejects_non_object_body(tmp_path: Path, body) -> None:
+    client = _app_client(tmp_path / "bench")
+    with patch("admin.backend.api.v1.sites.central.CentralClient.forward", return_value={}) as forward:
+        response = client.post(
+            "/api/v1/sites/s1.localhost/central/central.billing.api.billing_api.save_billing_profile",
+            json=body,
+        )
+
+    assert response.status_code == 400
+    assert response.get_json()["error"]["code"] == "malformed_body"
+    assert response.get_json()["error"]["message"] == "Request body must be a JSON object."
+    forward.assert_not_called()
