@@ -257,7 +257,7 @@ onMounted(() => {
     <PageHero icon="lucide-globe">
       <template #title>
         <h1 class="text-lg-medium truncate">
-          {{ site.name }}
+          {{ site.primary_domain }}
         </h1>
 
         <Badge :label="statusLabel" :theme="statusBadgeTheme" class="shrink-0" />
