@@ -97,13 +97,11 @@ const openChangePlan = async () => {
   changePlanError.value = ''
 
   try {
-    const response = store.state.context?.account_url
-      ? { url: store.state.context.account_url }
-      : await getAccountUrl()
+    const links = await getAccountUrl()
 
-    if (!response?.url) throw new Error(__('Central is not configured.'))
+    if (!links?.change_plan) throw new Error(__('Central is not configured.'))
 
-    openExternal(response.url)
+    openExternal(links.change_plan)
   } catch (exception) {
     changePlanError.value = getErrorMessage(exception)
   } finally {
