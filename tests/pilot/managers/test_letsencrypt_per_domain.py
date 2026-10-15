@@ -152,3 +152,36 @@ def test_certificate_domain_names_reads_only_the_dns_names(tmp_path: Path) -> No
         names = certificate_domain_names(tmp_path / "fullchain.pem")
 
     assert names == {"erp.example.com", "site1.example.com"}
+
+
+def test_a_certificate_close_to_expiry_raises_an_alert(tmp_path: Path) -> None:
+    from pilot.managers.nginx import NginxManager
+
+    bench = _bench(tmp_path)
+    _site(bench, "site.example.com", ssl=True)
+
+    with (
+        patch.object(NginxManager, "has_cert", return_value=True),
+        patch("pilot.managers.letsencrypt.certificate_days_left", return_value=9),
+        patch("pilot.core.notification.events.record_alert") as record_alert,
+        patch("pilot.core.alerts.notify") as notify,
+    ):
+        LetsEncryptManager(bench).alert_expiring_certificates()
+
+    payload = notify.call_args.args[1]
+    assert payload["event"] == "certificate_expiry"
+    assert payload["context"]["days_left"] == 9
+    assert record_alert.call_args.kwargs["severity"] == "Warning"
+
+
+def test_a_certificate_with_time_left_raises_nothing(tmp_path: Path) -> None:
+    from pilot.managers.nginx import NginxManager
+
+    bench = _bench(tmp_path)
+    _site(bench, "site.example.com", ssl=True)
+
+    with (
+        patch.object(NginxManager, "has_cert", return_value=True),
+        patch("pilot.managers.letsencrypt.certificate_days_left", return_value=40),
+    ):
+        assert LetsEncryptManager(bench).expiring_certificates() == []

@@ -82,6 +82,8 @@ pilot setup production --admin-domain admin.example.com --tls --letsencrypt-emai
 ```
 
 You can also set `letsencrypt.email` in `common_config.toml` before setup.
+
+Let's Encrypt setup also installs the host-wide user timer `pilot-certificates.timer`. It runs 15 minutes after boot and then daily. It runs `certbot renew` once for the host, then checks every production bench: a certificate with less than 14 days left gets an alert in the bench's notifications and its alert sinks, because certbot renews from 30 days left. Its log is `system/logs/certificates.log` in the Pilot directory.
 When an upstream proxy terminates HTTPS, set `admin.tls = false` so Pilot does not change site SSL settings or request certificates.
 
 When requests arrive from configured proxy servers, Pilot preserves the forwarded scheme supplied by an edge that terminates TLS. Socket.IO also preserves an explicit browser `Origin` and reconstructs a same-origin value from the forwarded scheme and host only when that header is absent.

@@ -99,7 +99,7 @@ class BenchProduction:
 
     def setup_letsencrypt(self) -> None:
         from pilot.exceptions import ConfigError
-        from pilot.managers.letsencrypt import LetsEncryptManager
+        from pilot.managers.letsencrypt import LetsEncryptManager, install_renewal_timer
         from pilot.managers.nginx import NginxManager
 
         if not self.bench.config.letsencrypt.email:
@@ -108,6 +108,7 @@ class BenchProduction:
         nginx_manager = NginxManager(self.bench)
         letsencrypt_manager.install()
         letsencrypt_manager.setup_sudoers()
+        install_renewal_timer()
         letsencrypt_manager.ensure_webroot()
         nginx_manager.generate_config(ssl_ready=True)
         nginx_manager.reload()

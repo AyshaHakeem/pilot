@@ -18,6 +18,36 @@ if TYPE_CHECKING:
     from pilot.core.site import Site
 
 _CERT_EXPIRY_THRESHOLD_DAYS = 30
+# certbot renews from 30 days left, so a certificate this close to expiry is failing to renew.
+_CERT_ALERT_DAYS = 14
+_RENEWAL_TIMER = """\
+[Unit]
+Description=certificate renewal timer
+
+[Timer]
+OnBootSec=15min
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+"""
+_RENEWAL_SERVICE = """\
+[Unit]
+Description=certificate renewal and expiry check
+
+[Service]
+Type=oneshot
+WorkingDirectory={cli_root}
+Environment=PYTHONPATH={cli_root}
+ExecStart={python} -m pilot.managers.letsencrypt
+StandardOutput=append:{cli_root}/system/logs/certificates.log
+StandardError=append:{cli_root}/system/logs/certificates.log
+
+[Install]
+WantedBy=default.target
+"""
 
 
 def _nginx_reload_hook() -> str:
@@ -63,6 +93,24 @@ def certificate_domain_names(cert_file: Path) -> set[str]:
 def has_domain_coverage(cert_file: Path, domains: list[str]) -> bool:
     """True if the on-disk cert's SAN list already includes every domain."""
     return set(domains) <= certificate_domain_names(cert_file)
+
+
+def certificate_days_left(cert_file: Path) -> int | None:
+    """Whole days until the on-disk cert expires, or None when it cannot be read."""
+    import subprocess
+    from datetime import datetime
+
+    result = subprocess.run(
+        _privileged(["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)]),
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    if result.returncode != 0:
+        return None
+    date_str = result.stdout.strip().replace("notAfter=", "")
+    expiry = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
+    return (expiry - datetime.now(tz=UTC)).days
 
 
 def letsencrypt_active(bench: "Bench") -> bool:
@@ -271,19 +319,85 @@ class LetsEncryptManager:
         return self._is_near_expiry_cert(nginx_manager.cert_path(site))
 
     def _is_near_expiry_cert(self, cert_file: Path) -> bool:
-        import subprocess
-        from datetime import datetime
+        days_left = certificate_days_left(cert_file)
+        return days_left is None or days_left < _CERT_EXPIRY_THRESHOLD_DAYS
 
-        result = subprocess.run(
-            _privileged(["openssl", "x509", "-enddate", "-noout", "-in", str(cert_file)]),
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-        if result.returncode != 0:
-            return True
+    def expiring_certificates(self) -> list[tuple[str, int]]:
+        """(certificate name, days left) for this bench's certificates close to expiry."""
+        from pilot.managers.nginx import NginxManager
 
-        date_str = result.stdout.strip().replace("notAfter=", "")
-        expiry = datetime.strptime(date_str, "%b %d %H:%M:%S %Y %Z").replace(tzinfo=UTC)
-        now = datetime.now(tz=UTC)
-        return (expiry - now).days < _CERT_EXPIRY_THRESHOLD_DAYS
+        nginx = NginxManager(self.bench)
+        certificates = []
+        for site in self.bench.sites():
+            if nginx.has_cert(site.config):
+                certificates.append((self.bench.certificate_name(site.config), nginx.cert_path(site.config)))
+        if self.bench.config.admin.tls and nginx.has_admin_cert:
+            certificates.append((self.bench.config.admin.domain, nginx.admin_cert_path))
+        expiring = []
+        for name, path in certificates:
+            days_left = certificate_days_left(path)
+            if days_left is not None and days_left < _CERT_ALERT_DAYS:
+                expiring.append((name, days_left))
+        return expiring
+
+    def alert_expiring_certificates(self) -> None:
+        """Warn in the bench's feed and its alert sinks while a certificate fails to renew."""
+        from pilot.core.alerts import notify
+        from pilot.core.notification.events import record_alert
+
+        for name, days_left in self.expiring_certificates():
+            payload = {
+                "event": "certificate_expiry",
+                "message": f"The certificate for {name} expires in {days_left} days and has not renewed.",
+                "context": {"bench": self.bench.config.name, "certificate": name, "days_left": days_left},
+            }
+            title = f"Certificate for {name} is not renewing"
+            record_alert(self.bench, payload, category="Sites", severity="Warning", title=title)
+            notify(self.bench, payload)
+
+
+def install_renewal_timer() -> bool:
+    """Install the host-wide daily timer that renews certificates and warns before one
+    expires. Pilot owns renewal: Fedora and Arch do not enable certbot's own timer.
+    Returns whether it was installed now."""
+    from pilot.managers.environment import AdminEnvManager
+    from pilot.managers.systemd_user import install_user_timer, user_timer_installed
+    from pilot.utils import cli_root
+
+    if user_timer_installed("pilot-certificates.timer"):
+        return False
+    root = cli_root()
+    (root / "system" / "logs").mkdir(parents=True, exist_ok=True)
+    install_user_timer(
+        unit_dir=root / "system" / "certificates",
+        unit_name="pilot-certificates.service",
+        unit_text=_RENEWAL_SERVICE.format(cli_root=root, python=AdminEnvManager(root).python),
+        timer_unit_name="pilot-certificates.timer",
+        timer_text=_RENEWAL_TIMER,
+    )
+    return True
+
+
+def main() -> None:
+    """Entry point of the renewal timer: renew once for the host, then check every bench."""
+    from pilot.core.bench import Bench
+    from pilot.exceptions import CommandError
+    from pilot.utils import cli_root, iter_sibling_benches
+
+    benches = [
+        Bench(config, path)
+        for path, config in iter_sibling_benches(cli_root() / "benches" / ".certificates-placeholder")
+        if config.production.enabled and config.letsencrypt.email
+    ]
+    if not benches:
+        return
+    try:
+        LetsEncryptManager(benches[0]).renew()
+    except CommandError as error:
+        print(f"certbot renew failed: {error}")
+    for bench in benches:
+        LetsEncryptManager(bench).alert_expiring_certificates()
+
+
+if __name__ == "__main__":
+    main()
