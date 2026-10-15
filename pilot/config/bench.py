@@ -267,6 +267,7 @@ class BenchConfig:
         self.redis.validate()
         self.workers.validate()
         self.letsencrypt.validate()
+        self.mariadb.validate()
         self.gunicorn.validate()
         self.build.validate()
         self.lite_mode.validate()

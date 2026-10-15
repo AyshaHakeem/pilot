@@ -1272,6 +1272,15 @@ def test_size_for_host_sizes_again_when_the_memory_moved_by_100_mb(
         assert f"MemoryMax={expected.memory_max_mb}M" in unit_path.read_text()
 
 
+def test_a_larger_memory_share_gives_mariadb_more_of_the_host(tmp_path) -> None:
+    default = calculate_mariadb_memory(8192)
+    larger = calculate_mariadb_memory(8192, memory_share=0.7)
+
+    assert larger.memory_max_mb > default.memory_max_mb
+    assert larger.innodb_buffer_pool_mb > default.innodb_buffer_pool_mb
+    assert calculate_mariadb_memory(8192, 0.5) == default
+
+
 def test_tune_to_host_drops_a_buffer_pool_size_saved_on_a_larger_host(tmp_path) -> None:
     manager = _manager()
     with (

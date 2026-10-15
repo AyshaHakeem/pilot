@@ -10,7 +10,6 @@ _MIN_BUFFER_POOL_MB = 128
 _MIN_MEMORY_MAX_MB = 512
 _MIN_MEMORY_LIMIT_GAP_MB = 128
 _MEMORY_HIGH_HEADROOM_SHARE = 0.1
-_MAX_HOST_MEMORY_SHARE = 0.5
 _MIN_MAX_CONNECTIONS = 10
 _MIN_BUFFER_POOL_SHARE = 0.2
 _MAX_BUFFER_POOL_SHARE = 0.7
@@ -23,6 +22,7 @@ class MariaDBMemorySizing:
     """Startup values for MariaDB instance"""
 
     total_memory_mb: int
+    memory_share: float
     mariadb_memory_mb: int
     innodb_buffer_pool_mb: int
     max_connections: int
@@ -44,12 +44,13 @@ class MariaDBVariableLimits:
     max_connections_recommended: int
 
 
-def calculate_mariadb_memory(total_memory_mb: int) -> MariaDBMemorySizing:
+def calculate_mariadb_memory(total_memory_mb: int, memory_share: float = 0.5) -> MariaDBMemorySizing:
+    """Size MariaDB for `memory_share` of the host's memory; the benches keep the rest."""
     if total_memory_mb <= 0:
         raise ValueError("total_memory_mb must be greater than zero")
 
     real_memory_mb = _HARDWARE_MEMORY_FACTOR * total_memory_mb - _HARDWARE_MEMORY_RESERVE_MB
-    mariadb_memory_mb = real_memory_mb / 2 - _MARIADB_OPERATING_RESERVE_MB
+    mariadb_memory_mb = real_memory_mb * memory_share - _MARIADB_OPERATING_RESERVE_MB
 
     recommended_connections = 5 * round(total_memory_mb / 1024)
     max_connections = max(50, recommended_connections)
@@ -66,8 +67,8 @@ def calculate_mariadb_memory(total_memory_mb: int) -> MariaDBMemorySizing:
     )
 
     # Pilot shares the VM with web, worker, and Redis processes. Keep the
-    # startup floor, but never let it claim more than half of a small host.
-    host_share_cap_mb = max(1, int(total_memory_mb * _MAX_HOST_MEMORY_SHARE))
+    # startup floor, but never let it claim more than its share of a small host.
+    host_share_cap_mb = max(1, int(total_memory_mb * memory_share))
     memory_max_mb = min(
         host_share_cap_mb,
         max(_MIN_MEMORY_MAX_MB, round(mariadb_memory_mb)),
@@ -76,6 +77,7 @@ def calculate_mariadb_memory(total_memory_mb: int) -> MariaDBMemorySizing:
 
     return MariaDBMemorySizing(
         total_memory_mb=total_memory_mb,
+        memory_share=memory_share,
         mariadb_memory_mb=max(0, int(mariadb_memory_mb)),
         innodb_buffer_pool_mb=innodb_buffer_pool_mb,
         max_connections=max_connections,
@@ -93,9 +95,9 @@ def memory_high_for(memory_max_mb: int) -> int:
     return max(1, memory_max_mb - headroom_mb)
 
 
-def calculate_mariadb_variable_limits(total_memory_mb: int) -> MariaDBVariableLimits:
+def calculate_mariadb_variable_limits(total_memory_mb: int, memory_share: float = 0.5) -> MariaDBVariableLimits:
     """Adapt Press's MariaDB guards to Pilot's shared-VM memory ceiling."""
-    sizing = calculate_mariadb_memory(total_memory_mb)
+    sizing = calculate_mariadb_memory(total_memory_mb, memory_share)
     pool_min_mb = min(
         sizing.innodb_buffer_pool_mb,
         max(
@@ -154,7 +156,7 @@ def live_sizing_values(
 
     An option in `overrides` (managed.cnf names) keeps its value, as it does at startup.
     """
-    limits = calculate_mariadb_variable_limits(sizing.total_memory_mb)
+    limits = calculate_mariadb_variable_limits(sizing.total_memory_mb, sizing.memory_share)
     # innodb_buffer_pool_size_max is read-only, so a larger pool waits for the next start.
     pool = min(sizing.innodb_buffer_pool_mb * _MEBIBYTE, pool_max)
     pool_values = [

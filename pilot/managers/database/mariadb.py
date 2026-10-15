@@ -157,8 +157,8 @@ class MariaDBManager(UserOwnedDBManager):
         """Write every server setting into our own my.cnf so mariadbd, launched
         with --defaults-file, never falls back to reading /etc/mysql/my.cnf."""
         total_memory_mb = self._total_memory_mb()
-        sizing = calculate_mariadb_memory(total_memory_mb)
-        limits = calculate_mariadb_variable_limits(total_memory_mb)
+        sizing = calculate_mariadb_memory(total_memory_mb, self.config.memory_share)
+        limits = calculate_mariadb_variable_limits(total_memory_mb, self.config.memory_share)
         self.config_dir.mkdir(parents=True, exist_ok=True)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self._ensure_managed_cnf()
@@ -503,8 +503,12 @@ class MariaDBManager(UserOwnedDBManager):
                 )
             return True
 
+    @property
+    def host_memory_mb(self) -> int:
+        return self._total_memory_mb()
+
     def variable_limits(self) -> MariaDBVariableLimits:
-        return calculate_mariadb_variable_limits(self._total_memory_mb())
+        return calculate_mariadb_variable_limits(self._total_memory_mb(), self.config.memory_share)
 
     def innodb_buffer_pool_size_mb(self) -> int:
         return self._read_global_integer("innodb_buffer_pool_size") // _MEBIBYTE

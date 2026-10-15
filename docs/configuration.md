@@ -164,6 +164,7 @@ admin_user = "root"
 root_password = ""
 socket_path = ""
 existing = false
+memory_share = 0.5
 
 [postgres]
 host = "localhost"
@@ -221,6 +222,8 @@ Central endpoint and authentication data come from instance metadata. While Cent
 Before it applies the Central credential, bootstrap sizes Pilot's MariaDB for the VM's memory, because an image built on another host keeps that host's sizing. It writes `my.cnf` and the unit for the next start, then applies the values to the running server without a restart: the buffer pool and its automatic minimum, `innodb_log_file_size`, `key_buffer_size`, and `max_connections`. An option set in `managed.cnf` keeps its value. The buffer pool cannot grow above the running `innodb_buffer_pool_size_max`, so a larger pool waits for the next start. Higher unit memory limits apply before MariaDB grows. Lower limits apply only after MariaDB uses less than the new `MemoryHigh`. The unit file is written last, after the limits apply; if the usage stays higher or cannot be read for a minute, the old unit stays and a later attempt tries again.
 
 The same sizing runs again when the host's memory changes, for example after a VM resize. `my.cnf` records the memory it was sized for. The user unit `pilot-mariadb-sizing.service` runs before every start of `pilot-mariadb.service`; when the host memory differs from the recorded value by 100 MB or more, it writes `my.cnf` and the unit for the new memory and sets the new memory limits for this start. MariaDB then starts with the new buffer pool, with no restart. A buffer pool size saved in `managed.cnf` that is larger than the new host allows is removed, so the automatic sizing takes over.
+
+`mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
 
 The domain provider controls the edge route for each hostname. Its route policy gives Pilot the public scheme, origin scheme, and client IP source.
 
