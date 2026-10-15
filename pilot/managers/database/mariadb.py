@@ -356,7 +356,9 @@ class MariaDBManager(UserOwnedDBManager):
         memory_high_mb = memory_high_for(current_max)
         if memory_high_mb <= current_high:
             return False
-        unit = re.sub(r"^MemoryHigh=.*$", f"MemoryHigh={memory_high_mb}M", self.unit_path.read_text(), flags=re.M)
+        unit = re.sub(
+            r"^MemoryHigh=.*$", f"MemoryHigh={memory_high_mb}M", self.unit_path.read_text(), flags=re.M
+        )
         self.unit_path.write_text(unit)
         env = self._systemctl_env()
         run_command(self._systemctl("daemon-reload"), env=env)
@@ -382,6 +384,7 @@ class MariaDBManager(UserOwnedDBManager):
         result = run_command(
             self._systemctl("show", self._UNIT_NAME, f"--property={name}", "--value"),
             env=self._systemctl_env(),
+            timeout=30,
         )
         value = result.stdout.strip()
         # systemd prints "[not set]" for an unknown value and "infinity" for no limit.
@@ -844,7 +847,8 @@ class MariaDBManager(UserOwnedDBManager):
         swap_limits = "MemorySwapMax=100M\n"
         if preserve_swap_limit:
             swap_limits = "".join(
-                f"{line}\n" for line in self.unit_path.read_text().splitlines()
+                f"{line}\n"
+                for line in self.unit_path.read_text().splitlines()
                 if line.strip().startswith("MemorySwapMax=")
             )
         content = (
@@ -925,7 +929,7 @@ class MariaDBManager(UserOwnedDBManager):
         socket_path = self._detect_socket()
         if socket_path:
             cmd.append(f"--socket={socket_path}")
-        else:
+        elif not is_macos():
             cmd += ["-h", self.config.host, "-P", str(self.config.port)]
         return cmd
 

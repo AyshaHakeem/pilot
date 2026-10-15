@@ -1237,3 +1237,12 @@ def test_an_existing_unit_gets_its_memory_high_raised_live(tmp_path: Path, monke
 
     limits["MemoryHigh"] = 2658
     assert manager.raise_memory_high() is False
+
+
+def test_client_command_uses_homebrew_default_socket_on_macos() -> None:
+    manager = _manager()
+
+    with patch(f"{MODULE}.is_macos", return_value=True):
+        command = manager._client_command()
+
+    assert command == ["mariadb", "--connect-timeout=5", "-u", "root", "--batch"]
