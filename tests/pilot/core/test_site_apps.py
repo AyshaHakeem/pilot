@@ -86,6 +86,32 @@ def test_uninstall_app_clears_cache_after_success(tmp_path: Path) -> None:
     assert commands[1][-1] == "clear-cache"
 
 
+@pytest.mark.parametrize(
+    "committed, expected",
+    [(["frappe"], ["frappe"]), (None, ["frappe", "erpnext"])],
+)
+def test_uninstall_puts_back_the_committed_app_list(tmp_path: Path, committed, expected) -> None:
+    """Frappe can copy a stale cached list to site_config.json after an uninstall; the
+    committed setting wins. An unreadable database leaves the file as it is."""
+    import json
+
+    site, app = make_site_and_app(tmp_path)
+    site.path.mkdir(parents=True)
+    config_path = site.path / "site_config.json"
+    config_path.write_text(json.dumps({"db_name": "site1", "installed_apps": ["frappe", "erpnext"]}))
+
+    with (
+        patch("pilot.core.site.apps.run_command"),
+        patch("pilot.core.site.config.query_installed_apps_setting_via_db", return_value=committed),
+        patch.object(Bench, "reload_workers"),
+    ):
+        site.uninstall_app(app)
+
+    config = json.loads(config_path.read_text())
+    assert config["installed_apps"] == expected
+    assert config["db_name"] == "site1"
+
+
 def test_uninstall_app_clears_cache_after_failure(tmp_path: Path) -> None:
     site, app = make_site_and_app(tmp_path)
 

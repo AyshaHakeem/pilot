@@ -65,8 +65,23 @@ class SiteApps:
             cmd.append("--force")
         try:
             run_command(cmd, cwd=self.site.bench.sites_path, stream_output=True)
+            self.restore_installed_apps_copy()
         finally:
             self._clear_cache()
+
+    def restore_installed_apps_copy(self) -> None:
+        """Frappe clears its installed apps cache before it commits an uninstall, so a process
+        that reads in between caches the old list, and Frappe copies it to site_config.json."""
+        from pilot.core.site.config import query_installed_apps_setting_via_db, set_site_config_values
+
+        if not (self.site.path / "site_config.json").exists():
+            return
+        copy = self._site_config().get("installed_apps")
+        if not isinstance(copy, list):
+            return
+        committed = query_installed_apps_setting_via_db(self.site.bench.path, self.site.config.name)
+        if committed is not None and committed != copy:
+            set_site_config_values(self.site.bench.sites_path, self.site.config.name, {"installed_apps": committed})
 
     def disabled_apps(self) -> list[str]:
         from pilot.core.site.config import query_disabled_apps_via_db
