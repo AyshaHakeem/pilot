@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 from typing import TYPE_CHECKING
 
@@ -14,6 +15,18 @@ if TYPE_CHECKING:
     from pilot.internal.git import GitRepo
 
 _FETCH_TIMEOUT_SECONDS = 30
+# Changes `frappe migrate` syncs into the database, as Frappe Cloud decides a migrate deploy.
+_MIGRATE_PATHS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\w+/patches\.txt",
+        r"\w+/hooks\.py",
+        r"\w+/fixtures/",
+        r"\w+/\w+/custom/",
+        r"frappe/geo/languages\.json",
+        r"\w+/\w+/\w+/(.+)/\1\.json",
+    )
+)
 
 
 class AppRepository:
@@ -61,6 +74,17 @@ class AppRepository:
             return None
         tip = self.repo.remote_branch_sha(self.app.config.branch)
         return RevisionPin(kind="commit", ref=tip) if tip else None
+
+    def has_migrate_changes(self, pin: RevisionPin) -> bool:
+        """Whether moving to `pin` changes anything migrate syncs. True when the diff is unknown."""
+        repo = self.repo
+        if not repo.has_commit(pin.ref):
+            self._sync_remote_url()
+            repo.fetch(pin.ref, timeout=_FETCH_TIMEOUT_SECONDS)
+        files = repo.get_changed_files(self.installed_hash, pin.ref)
+        if files is None:
+            return True
+        return any(pattern.match(path) for pattern in _MIGRATE_PATHS for path in files)
 
     @property
     def marketplace_entry(self) -> dict | None:

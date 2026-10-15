@@ -100,6 +100,13 @@ class GitRepo:
         commit is missing locally, so callers must fetch before trusting it."""
         return self._run("merge-base", "--is-ancestor", ancestor, descendant).returncode == 0
 
+    def get_changed_files(self, old: str, new: str) -> list[str] | None:
+        """Paths that differ between two commits, or None when either is missing locally."""
+        result = self._run("diff", "--name-only", "--no-renames", "-z", old, new)
+        if result.returncode != 0:
+            return None
+        return [path for path in result.stdout.split("\0") if path]
+
     def tracking_sha(self, branch: str) -> str:
         """SHA of the locally-cached remote branch tip (no network)."""
         if not branch:
