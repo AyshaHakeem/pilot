@@ -40,7 +40,7 @@ A new bench deploys one bench process plus admin and the two redis servers, beca
 socketio, admin, workers, and redis - see [Lite Mode](configuration.md#lite-mode).
 Supervisor also runs a `schedule` process; systemd's worker pool runs the scheduler itself.
 
-With systemd, the Node socketio process listens on the Unix socket `config/socketio.sock` in the bench, and nginx proxies `/socket.io` to it, so realtime does not answer on a public port. Supervisor, the Python backend, and a Frappe that does not read `FRAPPE_SOCKETIO_UDS` (before v16) keep `socketio_port`.
+With systemd, the Node socketio process listens on the Unix socket `config/socketio.sock` in the bench, and nginx proxies `/socket.io` to it, so realtime does not answer on a public port. Supervisor, the Python backend, and a Frappe that does not read `FRAPPE_SOCKETIO_UDS` (before v16) keep `socketio_port`. With systemd, nginx tries the socket first and then `socketio_port`, so realtime answers when the realtime process and nginx were configured for different Frappe versions.
 
 Each workload unit sets `LimitNOFILE=65535`. A systemd user unit gets 1024
 descriptors by default, which is too few for a lite-mode bench process and for

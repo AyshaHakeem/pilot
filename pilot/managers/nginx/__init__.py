@@ -317,10 +317,10 @@ class NginxConfigRenderer:
             "admin_client_max_body_size": max(
                 nginx.client_max_body_size, ADMIN_CLIENT_MAX_BODY_SIZE, key=parse_nginx_size
             ),
+            "realtime_socket": (socket := self.bench.realtime_socket_path),
+            "realtime_port": self.bench.realtime_port,
             "socketio_upstream": (
-                f"http://unix:{socket}:"
-                if (socket := self.bench.realtime_socket)
-                else f"http://127.0.0.1:{self.bench.realtime_port}"
+                f"http://realtime-{config.name}" if socket else f"http://127.0.0.1:{self.bench.realtime_port}"
             ),
             "sites_root": f"{self.bench.path}/sites",
             "logs_path": str(self.bench.logs_path),

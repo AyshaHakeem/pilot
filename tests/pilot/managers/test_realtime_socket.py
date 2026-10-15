@@ -80,16 +80,39 @@ def test_supervisor_keeps_the_realtime_port(tmp_path: Path) -> None:
     assert bench.realtime_socket is None
 
 
-def test_nginx_proxies_realtime_to_the_socket(tmp_path: Path) -> None:
-    bench = make_bench(tmp_path)
+def nginx_config(bench: Bench) -> str:
     renderer = NginxConfigRenderer(bench)
     renderer._proxy_servers_cache = []
     site = SiteConfig(name="site1.example.com", apps=["frappe"])
+    return renderer.generate_bench_config([(site, [])], admin_ssl=False)
 
-    config = renderer.generate_bench_config([(site, [])], admin_ssl=False)
 
-    assert f"proxy_pass         http://unix:{bench.config_path / 'socketio.sock'}:;" in config
-    assert "127.0.0.1:9000" not in config
+def test_nginx_proxies_realtime_to_the_socket_before_the_port(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+
+    config = nginx_config(bench)
+
+    assert f"server unix:{bench.config_path / 'socketio.sock'} max_fails=0;\n    server 127.0.0.1:9000 backup;" in config
+    assert "proxy_pass         http://realtime-test-bench;" in config
+
+
+def test_nginx_keeps_both_realtime_targets_whatever_frappe_supports(tmp_path: Path) -> None:
+    """The realtime unit can be written for other Frappe code than nginx; either target must answer."""
+    bench = make_bench(tmp_path)
+    with_socket = nginx_config(bench)
+    write_node_utils(bench, "conf.socketio_port = 9000;")
+
+    assert nginx_config(bench) == with_socket
+
+
+def test_nginx_proxies_realtime_to_the_port_without_a_socket(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.config.production.process_manager = "supervisor"
+
+    config = nginx_config(bench)
+
+    assert "upstream realtime-" not in config
+    assert "proxy_pass         http://127.0.0.1:9000;" in config
 
 
 def test_a_long_socket_path_keeps_the_port(tmp_path: Path) -> None:
