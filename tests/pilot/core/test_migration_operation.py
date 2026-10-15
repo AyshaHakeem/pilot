@@ -209,6 +209,7 @@ def test_update_operation_records_app_repository(tmp_path: Path) -> None:
     app.config.repo = "https://github.com/frappe/frappe.git"
     app.installed_hash = "1111111"
     app.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+    app.has_migrate_changes.return_value = True
     mock_bench.apps.return_value = [app]
     mock_bench.sites.return_value = []
 
@@ -236,6 +237,7 @@ def test_update_operation_captures_tag_pinned_target(tmp_path: Path) -> None:
     app.config.repo = "https://github.com/frappe/helpdesk.git"
     app.installed_hash = "aaaaaaa"
     app.update_target.return_value = RevisionPin(kind="tag", ref="v2.0.0")
+    app.has_migrate_changes.return_value = True
     mock_bench.apps.return_value = [app]
     mock_bench.sites.return_value = []
 
@@ -270,7 +272,8 @@ def test_create_update_only_includes_sites_with_a_selected_app(tmp_path: Path) -
     hrms.config.name = "hrms"
     hrms.config.repo = ""
     hrms.installed_hash = "1111111"
-    hrms.update_target.return_value = None
+    hrms.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+    hrms.has_migrate_changes.return_value = True
     mock_bench.apps.return_value = [hrms]
     mock_bench.sites.return_value = [
         _site_with_apps("with-hrms.local", ["frappe", "hrms"]),
@@ -293,7 +296,8 @@ def test_create_update_includes_a_site_when_its_apps_cannot_be_determined(tmp_pa
     hrms.config.name = "hrms"
     hrms.config.repo = ""
     hrms.installed_hash = "1111111"
-    hrms.update_target.return_value = None
+    hrms.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+    hrms.has_migrate_changes.return_value = True
     mock_bench.apps.return_value = [hrms]
     mock_bench.sites.return_value = [_site_with_apps("unknown.local", [])]
 
@@ -303,6 +307,57 @@ def test_create_update_includes_a_site_when_its_apps_cannot_be_determined(tmp_pa
         operation = MigrationStore(mock_bench).create_update({"hrms"})
 
     assert [site.name for site in operation.sites] == ["unknown.local"]
+
+
+def test_create_update_skips_backup_and_migrate_when_no_app_needs_a_migrate(tmp_path: Path) -> None:
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    hrms = MagicMock()
+    hrms.config.name = "hrms"
+    hrms.config.repo = ""
+    hrms.installed_hash = "1111111"
+    hrms.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+    hrms.has_migrate_changes.return_value = False
+    mock_bench.apps.return_value = [hrms]
+    mock_bench.sites.return_value = [_site_with_apps("with-hrms.local", ["frappe", "hrms"])]
+
+    from pilot.core.bench.migration.store import MigrationStore
+
+    with patch.object(Marketplace, "registry", return_value=[]):
+        operation = MigrationStore(mock_bench).create_update({"hrms"})
+    with patch("pilot.tasks.update.UpdateTask.queue", return_value="task-1"):
+        operation.begin()
+
+    assert operation.sites == []
+    assert operation.state == "updating"
+    assert [step["command"] for step in operation.chain] == ["update"]
+    mock_bench.site.return_value.set_maintenance_mode.assert_not_called()
+
+
+def test_create_update_migrates_only_sites_with_an_app_that_needs_it(tmp_path: Path) -> None:
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    apps = []
+    for name, has_migrate_changes in (("hrms", True), ("crm", False)):
+        app = MagicMock()
+        app.config.name = name
+        app.config.repo = ""
+        app.installed_hash = "1111111"
+        app.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+        app.has_migrate_changes.return_value = has_migrate_changes
+        apps.append(app)
+    mock_bench.apps.return_value = apps
+    mock_bench.sites.return_value = [
+        _site_with_apps("hr.local", ["frappe", "hrms"]),
+        _site_with_apps("sales.local", ["frappe", "crm"]),
+    ]
+
+    from pilot.core.bench.migration.store import MigrationStore
+
+    with patch.object(Marketplace, "registry", return_value=[]):
+        operation = MigrationStore(mock_bench).create_update()
+
+    assert [site.name for site in operation.sites] == ["hr.local"]
 
 
 def test_operation_site_lifecycle(tmp_path: Path) -> None:

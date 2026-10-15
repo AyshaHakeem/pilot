@@ -21,11 +21,13 @@ class MigrationStore:
         self.root = bench.path / "migrations"
 
     def create_update(self, apps_filter: set[str] | None = None) -> MigrationOperation:
+        """Only sites with an app whose change needs a migrate are backed up and migrated."""
         selected = [
             app for app in self.bench.apps() if apps_filter is None or app.config.name in apps_filter
         ]
         apps = [self._revision(app) for app in selected]
-        sites = self.sites_for_apps({app.config.name for app in selected})
+        migrating = {revision.name for revision in apps if revision.has_migrate_changes}
+        sites = self.sites_for_apps(migrating) if migrating else []
         return self._create(
             "update",
             apps=apps,
@@ -53,6 +55,7 @@ class MigrationStore:
             repository_url=app.config.repo,
             target_sha=pin.ref if pin else None,
             target_kind=pin.kind if pin else "commit",
+            has_migrate_changes=pin is not None and app.has_migrate_changes(pin),
         )
 
     def create_site_migrate(

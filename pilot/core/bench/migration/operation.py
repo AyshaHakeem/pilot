@@ -56,6 +56,7 @@ class AppRevision:
     target_sha: str | None = None  # ref (commit or tag) captured at create time; None when unresolved
     target_kind: Literal["tag", "commit"] = "commit"  # how to check target_sha out
     branch: str = ""  # branch to return to on revert, set when a branch switch changed it
+    has_migrate_changes: bool = True  # False when only code or assets change: no backup or migrate
 
     @property
     def compare_url(self) -> str | None:
