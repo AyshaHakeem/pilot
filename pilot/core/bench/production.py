@@ -68,6 +68,8 @@ class BenchProduction:
 
         name = self.bench.config.name
         self.bench.ensure_no_sites()
+        if not self.bench.config.production.enabled:
+            self._ensure_dev_bench_stopped()
         self.remove_production(on_progress)
         self._release_admin_domain()
 
@@ -77,6 +79,16 @@ class BenchProduction:
         on_progress(f"Deleting {self.bench.path}...")
         shutil.rmtree(self.bench.path, ignore_errors=True)
         on_progress(f"\nBench '{name}' dropped.")
+
+    def _ensure_dev_bench_stopped(self) -> None:
+        """A running `pilot start` (or setup wizard) would outlive its deleted bench."""
+        from pilot.exceptions import BenchError
+        from pilot.managers.processes.local import ProcessManager
+
+        manager = ProcessManager(self.bench)
+        if manager.is_running() or manager.is_admin_running():
+            name = self.bench.config.name
+            raise BenchError(f"Bench '{name}' is running. Stop it with 'pilot -b {name} stop', then retry.")
 
     def setup_nginx(self, on_progress: Callable[[str], None]) -> None:
         from pilot.exceptions import ConfigError

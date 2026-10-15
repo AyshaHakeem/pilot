@@ -1307,8 +1307,25 @@ def test_drop_bench_deletes_directory_with_no_sites(tmp_path: Path) -> None:
     bench_dir.mkdir(parents=True)
     bench = Bench(_drop_config("one"), bench_dir)
 
-    DropBenchCommand(bench, skip_confirm=True).run()
+    with patch("pilot.managers.processes.local._tcp_port_open", return_value=False):
+        DropBenchCommand(bench, skip_confirm=True).run()
     assert not bench_dir.exists()
+
+
+def test_drop_bench_refuses_while_the_dev_bench_runs(tmp_path: Path) -> None:
+    """A running setup wizard has no pid file, only its admin port."""
+    from pilot.commands.bench.delete import DropBenchCommand
+
+    bench_dir = tmp_path / "benches" / "one"
+    bench_dir.mkdir(parents=True)
+    bench = Bench(_drop_config("one"), bench_dir)
+
+    with (
+        patch("pilot.managers.processes.local._tcp_port_open", return_value=True),
+        pytest.raises(BenchError, match="pilot -b one stop"),
+    ):
+        DropBenchCommand(bench, skip_confirm=True).run()
+    assert bench_dir.exists()
 
 
 def test_build_admin_rejects_old_node(monkeypatch: pytest.MonkeyPatch) -> None:

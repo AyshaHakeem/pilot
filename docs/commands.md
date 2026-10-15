@@ -10,7 +10,7 @@ Use `pilot --help` and `pilot <command> --help` for exact flags. `pilot --versio
 - `pilot start` on an uninitialized bench serves the setup wizard and prints a one-hour `?sid=` sign-in link for it.
 - `pilot init`: initialize a bench from `bench.toml`. This is what the setup wizard runs. `--no-dev` skips apps' `dev` extras. When an app's `dev` extra does not install, for example because its dependencies conflict, Pilot warns and installs the app without it.
 - `pilot ls`: list benches in the fixed benches directory.
-- `pilot drop --bench NAME`: remove a bench.
+- `pilot drop --bench NAME`: remove a bench. The bench must have no sites. A development bench must be stopped first (`pilot -b NAME stop`), including a setup wizard that is still open.
 
 Bench commands with `--bench NAME` can run from outside the bench directory. `Bench("name")` resolves the same fixed benches directory in Python code.
 
