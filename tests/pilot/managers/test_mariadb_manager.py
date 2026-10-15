@@ -799,7 +799,7 @@ def _tune(manager, tmp_path, current_max_mb):
         patch.object(manager, "_unit_memory_mb", return_value=current_max_mb),
         patch.object(manager, "_apply_live_sizing", order.live_sizing),
         patch.object(manager, "_set_runtime_memory_limits", order.set_limits),
-        patch.object(manager, "_lower_runtime_memory_limits", order.lower_limits),
+        patch.object(manager, "_has_released_memory", order.released_memory),
         patch.object(manager, "_restart_and_wait_healthy") as restart,
     ):
         sizing = manager.tune_to_host()
@@ -826,7 +826,7 @@ def test_tune_to_host_raises_the_limits_before_the_server_grows(tmp_path) -> Non
 def test_tune_to_host_lowers_the_limits_after_the_server_shrinks(tmp_path) -> None:
     _sizing, _config, calls = _tune(_manager(), tmp_path, current_max_mb=1_000_000)
 
-    assert calls == ["live_sizing", "lower_limits"]
+    assert calls == ["live_sizing", "released_memory", "set_limits"]
 
 
 MIB = 1024 * 1024
@@ -883,13 +883,8 @@ def test_runtime_memory_limits_wait_until_the_memory_is_released() -> None:
     with (
         patch.object(manager, "_unit_memory_mb", side_effect=usage),
         patch(f"{MODULE}.time.sleep"),
-        patch(f"{MODULE}.run_command") as run,
     ):
-        manager._lower_runtime_memory_limits(sizing)
-
-    command = run.call_args.args[0]
-    assert "set-property" in command and "--runtime" in command
-    assert f"MemoryMax={sizing.memory_max_mb}M" in command
+        assert manager._has_released_memory(sizing)
 
 
 def test_runtime_memory_limits_wait_for_the_next_start_while_memory_stays_high() -> None:
@@ -899,11 +894,8 @@ def test_runtime_memory_limits_wait_for_the_next_start_while_memory_stays_high()
         patch.object(manager, "_unit_memory_mb", return_value=sizing.memory_high_mb + 100),
         patch(f"{MODULE}.time.monotonic", side_effect=[0, 0, 61]),
         patch(f"{MODULE}.time.sleep"),
-        patch(f"{MODULE}.run_command") as run,
     ):
-        manager._lower_runtime_memory_limits(sizing)
-
-    run.assert_not_called()
+        assert not manager._has_released_memory(sizing)
 
 
 def test_runtime_memory_limits_wait_for_the_next_start_when_memory_is_unknown() -> None:
@@ -913,11 +905,8 @@ def test_runtime_memory_limits_wait_for_the_next_start_when_memory_is_unknown() 
         patch.object(manager, "_unit_memory_mb", return_value=None),
         patch(f"{MODULE}.time.monotonic", side_effect=[0, 0, 61]),
         patch(f"{MODULE}.time.sleep"),
-        patch(f"{MODULE}.run_command") as run,
     ):
-        manager._lower_runtime_memory_limits(sizing)
-
-    run.assert_not_called()
+        assert not manager._has_released_memory(sizing)
 
 
 def test_tune_to_host_keeps_manual_options(tmp_path) -> None:
@@ -932,7 +921,8 @@ def test_tune_to_host_keeps_manual_options(tmp_path) -> None:
         patch.object(manager, "_wait_until_healthy"),
         patch.object(manager, "_unit_memory_mb", return_value=None),
         patch.object(manager, "_apply_live_sizing"),
-        patch.object(manager, "_lower_runtime_memory_limits"),
+        patch.object(manager, "_has_released_memory"),
+        patch.object(manager, "_set_runtime_memory_limits"),
     ):
         manager.config_dir.mkdir(parents=True)
         manager.managed_cnf_path.write_text("[mysqld]\nmax-connections = 80\n")
@@ -1316,7 +1306,8 @@ def test_tune_to_host_drops_a_buffer_pool_size_saved_on_a_larger_host(tmp_path) 
         patch.object(manager, "_wait_until_healthy"),
         patch.object(manager, "_unit_memory_mb", return_value=None),
         patch.object(manager, "_apply_live_sizing"),
-        patch.object(manager, "_lower_runtime_memory_limits"),
+        patch.object(manager, "_has_released_memory"),
+        patch.object(manager, "_set_runtime_memory_limits"),
     ):
         manager.config_dir.mkdir(parents=True)
         manager.managed_cnf_path.write_text(
@@ -1341,7 +1332,7 @@ def test_tune_to_host_keeps_the_old_unit_while_the_shrink_waits(tmp_path) -> Non
         patch.object(manager, "_wait_until_healthy"),
         patch.object(manager, "_unit_memory_mb", return_value=1_000_000),
         patch.object(manager, "_apply_live_sizing"),
-        patch.object(manager, "_lower_runtime_memory_limits", return_value=False),
+        patch.object(manager, "_has_released_memory", return_value=False),
     ):
         manager.tune_to_host()
 

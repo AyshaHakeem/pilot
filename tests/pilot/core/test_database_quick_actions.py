@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -271,10 +271,26 @@ def test_setting_the_memory_share_saves_it_for_every_bench_and_sizes_mariadb(tmp
     from pilot.config.common import CommonConfig
 
     manager = _manager()
+    manager.database_action_lock.return_value = MagicMock()
     actions = DatabaseQuickActions(_config(), manager)
     with patch(f"{MODULE}.is_linux", return_value=True):
         actions.set_memory_share(0.65, tmp_path)
 
     assert CommonConfig.read(tmp_path).mariadb.memory_share == 0.65
     assert actions.config.mariadb.memory_share == 0.65
-    manager.tune_to_host.assert_called_once()
+    manager.tune_to_host_locked.assert_called_once()
+
+
+def test_a_memory_share_that_fails_to_apply_is_not_saved(tmp_path) -> None:
+    """Another bench can hold the database lock; the saved share must match the server."""
+    from pilot.config.common import CommonConfig
+    from pilot.exceptions import DatabaseError
+
+    manager = _manager()
+    manager.database_action_lock.side_effect = DatabaseError("Another database action is already running.")
+    actions = DatabaseQuickActions(_config(), manager)
+    with patch(f"{MODULE}.is_linux", return_value=True), pytest.raises(DatabaseError):
+        actions.set_memory_share(0.65, tmp_path)
+
+    assert CommonConfig.read(tmp_path).mariadb.memory_share != 0.65
+    manager.tune_to_host_locked.assert_not_called()

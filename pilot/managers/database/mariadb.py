@@ -297,20 +297,26 @@ class MariaDBManager(UserOwnedDBManager):
         """
         self._require_linux_managed_server()
         with self.database_action_lock():
-            self._drop_oversized_buffer_pool_override()
-            sizing = self._write_config()
-            self._wait_until_healthy()
-            current_max = self._unit_memory_mb("MemoryMax")
-            # Raise the limits before MariaDB grows, and lower them only after it shrinks.
-            if current_max is not None and sizing.memory_max_mb >= current_max:
-                self._set_runtime_memory_limits(sizing)
-                self._apply_live_sizing(sizing)
-            else:
-                self._apply_live_sizing(sizing)
-                if not self._lower_runtime_memory_limits(sizing):
-                    return sizing
-            # Last, so a failed or deferred attempt leaves the old unit for the next sizing to retry.
-            self._install_unit(sizing)
+            return self.tune_to_host_locked()
+
+    def tune_to_host_locked(self) -> MariaDBMemorySizing:
+        """`tune_to_host` for a caller that already holds `database_action_lock`."""
+        self._require_linux_managed_server()
+        self._drop_oversized_buffer_pool_override()
+        sizing = self._write_config()
+        self._wait_until_healthy()
+        current_max = self._unit_memory_mb("MemoryMax")
+        # Raise the limits before MariaDB grows, and lower them only after it shrinks.
+        if current_max is not None and sizing.memory_max_mb >= current_max:
+            self._set_runtime_memory_limits(sizing)
+            self._apply_live_sizing(sizing)
+        else:
+            self._apply_live_sizing(sizing)
+            if not self._has_released_memory(sizing):
+                return sizing
+            self._set_runtime_memory_limits(sizing)
+        # Last, so a failed or deferred attempt leaves the old unit for the next sizing to retry.
+        self._install_unit(sizing)
         return sizing
 
     @property
@@ -391,12 +397,9 @@ class MariaDBManager(UserOwnedDBManager):
         finally:
             connection.close()
 
-    def _lower_runtime_memory_limits(self, sizing: MariaDBMemorySizing) -> bool:
-        """Lower the unit memory limits once MariaDB uses less than the new soft limit.
-
-        A smaller buffer pool releases its memory gradually, and the hard limit must not kill
-        the server first. Returns False when the memory stays high or cannot be read.
-        """
+    def _has_released_memory(self, sizing: MariaDBMemorySizing) -> bool:
+        """Wait until MariaDB uses less than the new soft limit, so a lower hard limit cannot
+        kill it. False when the memory stays high or cannot be read."""
         deadline = time.monotonic() + _MEMORY_RELEASE_TIMEOUT
         while (usage := self._unit_memory_mb("MemoryCurrent")) is None or usage >= sizing.memory_high_mb:
             if time.monotonic() >= deadline:
@@ -406,7 +409,6 @@ class MariaDBManager(UserOwnedDBManager):
                 )
                 return False
             time.sleep(1)
-        self._set_runtime_memory_limits(sizing)
         return True
 
     def raise_memory_high(self) -> bool:

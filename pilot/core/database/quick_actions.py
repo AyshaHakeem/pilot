@@ -100,10 +100,12 @@ class DatabaseQuickActions:
         from pilot.config.common import CommonConfig
 
         self.require_memory_share(memory_share)
-        with CommonConfig.open(benches_root) as common:
-            common.mariadb.memory_share = memory_share
-        self.config.mariadb.memory_share = memory_share
-        self._manager().tune_to_host()
+        manager = self._manager()
+        with manager.database_action_lock():
+            self.config.mariadb.memory_share = memory_share
+            manager.tune_to_host_locked()
+            with CommonConfig.open(benches_root) as common:
+                common.mariadb.memory_share = memory_share
 
     def require_memory_share(self, memory_share: float) -> dict:
         low, high = MEMORY_SHARE_RANGE
