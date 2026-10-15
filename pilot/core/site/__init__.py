@@ -229,7 +229,7 @@ class Site:
         app_names: list[str],
         force: bool = False,
         on_progress: Callable[[str], None] = lambda message: None,
-        remove_from_bench: bool = False,
+        remove_from_bench: bool = True,
     ) -> None:
         from pilot.core.site.apps import SiteApps
 

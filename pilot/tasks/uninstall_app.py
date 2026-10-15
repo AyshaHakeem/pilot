@@ -14,7 +14,7 @@ class UninstallAppTask(Task):
     site: str
     app: str
     force: bool = False
-    remove_from_bench: bool = False
+    remove_from_bench: bool = True
 
     def run(self) -> None:
         self.uninstall()

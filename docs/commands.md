@@ -33,7 +33,7 @@ For public development URLs, see [Development sites behind a proxy](development-
 - `pilot get-app REPO_OR_NAME`: clone and install an app into the bench. `--skip-assets` skips asset setup for the app and its missing dependencies. `--commit SHA` installs that commit and keeps `--branch` checked out, so Pilot can download the [prebuilt assets](prebuilt-assets.md) of that branch. Example: `pilot get-app https://github.com/frappe/crm --branch main --commit <sha>`.
 - `pilot list-apps`: list apps present in the bench.
 - `pilot install-app SITE APP [APP ...]`: install apps on a site. An app the site only has disabled is enabled instead, bringing back anything it requires first.
-- `pilot uninstall-app SITE APP [APP ...]`: uninstall apps from a site, dropping their data. The apps stay on the bench; `--remove-from-bench` also removes an app that no site uses afterwards. Use `pilot remove-app` to remove an app from the bench.
+- `pilot uninstall-app SITE APP [APP ...]`: uninstall apps from a site, dropping their data. An app that no site uses afterwards is also removed from the bench; `--keep-on-bench` keeps it. Use `pilot remove-app` to remove an app from the bench.
 - `pilot remove-app APP`: remove an app from the bench when no site needs it.
 
 Long app operations should use task classes from `pilot.tasks`.

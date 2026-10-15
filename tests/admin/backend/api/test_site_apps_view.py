@@ -418,7 +418,17 @@ def test_delete_site_app_queues_uninstall(tmp_path: Path) -> None:
     body = response.get_json()
     assert response.status_code == 202
     assert body["command"] == "uninstall-app"
-    assert body["args"] == {"site": "site1.localhost", "app": "suite", "force": False, "remove_from_bench": False}
+    assert body["args"] == {"site": "site1.localhost", "app": "suite", "force": False, "remove_from_bench": True}
+
+
+def test_delete_site_app_keeps_the_app_on_the_bench_when_asked(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site1.localhost", ["suite"])
+    client = _client(bench_root)
+
+    response = _delete_app(client, "site1.localhost", "suite", remove_from_bench="false")
+
+    assert response.get_json()["args"]["remove_from_bench"] is False
 
 
 def test_delete_site_app_passes_force_flag(tmp_path: Path) -> None:

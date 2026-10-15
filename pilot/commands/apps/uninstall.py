@@ -12,13 +12,13 @@ if TYPE_CHECKING:
 @dataclass(kw_only=True)
 class UninstallAppCommand(Command):
     name: ClassVar[str] = "uninstall-app"
-    help: ClassVar[str] = "Uninstall one or more apps from a site. The apps stay on the bench."
+    help: ClassVar[str] = "Uninstall one or more apps from a site."
 
     site_name: Annotated[str, Arg(help="Site name.", metavar="site")]
     app_names: Annotated[list[str], Arg(help="App name(s) to uninstall.", metavar="apps")]
     force: Annotated[bool, Arg(help="Uninstall even if not tracked as installed.")] = False
-    remove_from_bench: Annotated[
-        bool, Arg(help="Also remove an app from the bench when no site uses it any more.")
+    keep_on_bench: Annotated[
+        bool, Arg(help="Keep an app on the bench when no site uses it any more.")
     ] = False
 
     def __post_init__(self) -> None:
@@ -26,5 +26,5 @@ class UninstallAppCommand(Command):
 
     def run(self) -> None:
         self.site.uninstall_apps(
-            self.app_names, force=self.force, on_progress=self.report, remove_from_bench=self.remove_from_bench
+            self.app_names, force=self.force, on_progress=self.report, remove_from_bench=not self.keep_on_bench
         )

@@ -167,10 +167,10 @@ class SiteApps:
         app_names: list[str],
         force: bool,
         on_progress: Callable[[str], None],
-        remove_from_bench: bool = False,
+        remove_from_bench: bool = True,
     ) -> None:
-        """Uninstall apps from this site. The apps stay on the bench unless
-        `remove_from_bench` asks to remove one that no site uses any more."""
+        """Uninstall apps from this site, and remove from the bench an app that no site uses
+        any more. `remove_from_bench=False` keeps it on the bench."""
         if not self.site.exists:
             raise BenchError(f"Site '{self.site.config.name}' does not exist.")
 
