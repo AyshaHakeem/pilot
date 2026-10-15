@@ -761,19 +761,7 @@ ensure_admin_venv() {
     [ -f "$admin_venv/bin/python" ] && return 0
     echo "Setting up admin environment..."
     uv venv "$admin_venv" --quiet
-    if command -v python3 >/dev/null 2>&1; then
-        admin_deps=$(python3 -c "
-import tomllib
-with open('$PILOT_DIR/pyproject.toml', 'rb') as f:
-    project = tomllib.load(f)
-print(' '.join(project.get('project', {}).get('optional-dependencies', {}).get('admin', [])))
-" 2>/dev/null)
-    fi
-    if [ -z "$admin_deps" ]; then
-        admin_deps="flask>=3.0 psutil>=5.9 pymysql>=1.1 gunicorn>=21.2 pyjwt[crypto]>=2.8"
-    fi
-    # shellcheck disable=SC2086 # admin_deps is a space-separated list
-    uv pip install --python "$admin_venv/bin/python" --quiet $admin_deps
+    uv pip install --python "$admin_venv/bin/python" --quiet -r "$PILOT_DIR/pyproject.toml" --extra admin
     echo "Admin environment ready."
 }
 
