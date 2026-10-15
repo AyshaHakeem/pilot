@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -153,15 +154,22 @@ class GitRepo:
         """Create (or reset) `branch` to start at `start_point` and check it out."""
         return self._run("checkout", "-B", branch, start_point).returncode == 0
 
-    def discard_changes(self, paths: list[str]) -> None:
-        """Put tracked paths back to HEAD and delete untracked ones."""
+    def discard_changes(self, paths: list[str]) -> Path | None:
+        """Put tracked paths back to HEAD and delete untracked ones. Returns the folder in the git
+        directory that keeps a copy of each discarded file, so no edit is lost."""
         if not paths:
-            return
+            return None
+        backup = Path(self._text("rev-parse", "--absolute-git-dir")) / "pilot-discarded"
+        for path in paths:
+            if (self.path / path).is_file():
+                (backup / path).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(self.path / path, backup / path)
         tracked = {path for path in self._text("ls-files", "-z", "--", *paths).split("\0") if path}
         if tracked:
             self._run("checkout", "--", *tracked)
         for path in set(paths) - tracked:
             (self.path / path).unlink(missing_ok=True)
+        return backup
 
     def set_remote_url(self, url: str) -> bool:
         """Point origin at *url*; returns False instead of raising on failure."""

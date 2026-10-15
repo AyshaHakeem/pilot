@@ -170,7 +170,8 @@ class App:
     @contextlib.contextmanager
     def restore_lockfiles_on_failure(self) -> Iterator[None]:
         """Undo the lockfile edits of a failed build's own installs. Otherwise the app looks
-        locally changed, and the next build refuses its prebuilt assets."""
+        locally changed, and the next build refuses its prebuilt assets. A copy of each restored
+        file stays in the git directory, in case a person edited it during the build."""
         from pilot.core.app.node_packages import PACKAGE_MANAGERS
 
         repo = self._repository.repo
@@ -179,9 +180,10 @@ class App:
             yield
         except BaseException:
             lockfiles = {manager.lockfile for manager in PACKAGE_MANAGERS}
-            repo.discard_changes(
-                [path for path in repo.changed_paths if path not in before and Path(path).name in lockfiles]
-            )
+            changed = [path for path in repo.changed_paths if path not in before and Path(path).name in lockfiles]
+            backup = repo.discard_changes(changed)
+            if backup:
+                print(f"  Restored {', '.join(changed)} after the failed build. Copies of the changed files are in {backup}.")
             raise
 
     @property

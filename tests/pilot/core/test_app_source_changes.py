@@ -88,6 +88,9 @@ def test_a_failed_build_restores_the_lockfiles_its_installs_changed(app: App) ->
     assert (app.path / "yarn.lock").read_text() == "lock"
     assert not (app.path / "frontend/yarn.lock").exists()
     assert app.has_source_changes is False
+    backup = app.path / ".git" / "pilot-discarded"
+    assert (backup / "yarn.lock").read_text() == "rewritten by yarn install"
+    assert (backup / "frontend/yarn.lock").read_text() == "created by yarn install"
 
 
 def test_a_failed_build_keeps_lockfile_edits_made_before_it(app: App) -> None:
