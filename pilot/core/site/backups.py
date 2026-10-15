@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 from pilot.config.site_backup import clear_retention, read_retention, write_retention
 from pilot.core.site.retention import BackupRetentionPolicy
 from pilot.integrations.s3.backups import OffsiteBackup
+from pilot.internal.atomic_file import exclusive_file_lock
 
 if TYPE_CHECKING:
     from pilot.core.site import Site
@@ -29,6 +30,11 @@ class SiteBackups:
     def directory(self) -> Path:
         """Outside private/backups, which Frappe prunes by age and by its backup limit."""
         return self.site.path / "backups"
+
+    @property
+    def runs_lock_path(self) -> Path:
+        """Held while a run moves in or retention deletes runs."""
+        return self.site.path / "backup_runs"
 
     def take(self, with_files: bool = True) -> tuple[str, list[Path]]:
         """Run `frappe backup` and return the run it made. Each run is written in its own
@@ -54,11 +60,22 @@ class SiteBackups:
                 argv.append("--with-files")
             # cwd matters: frappe's bench helper reads apps.txt from the current dir.
             run_command(argv, cwd=self.site.bench.sites_path, stream_output=True)
-            files = [path.rename(self.directory / path.name) for path in sorted(Path(staging).iterdir())]
+            files = self._publish(sorted(Path(staging).iterdir()))
         timestamp = parse_backup_timestamp(files[0].name) if files else None
         if not timestamp:
             raise BenchError(f"The backup of {self.site.config.name} produced no files.")
         return timestamp, files
+
+    def _publish(self, staged: list[Path]) -> list[Path]:
+        """Move a run in under the backups lock, so retention sees all of it or none of it."""
+        from pilot.exceptions import BenchError
+
+        with exclusive_file_lock(self.runs_lock_path):
+            if any((self.directory / path.name).exists() for path in staged):
+                raise BenchError(
+                    f"A backup of {self.site.config.name} from the same second already exists. Try again."
+                )
+            return [path.rename(self.directory / path.name) for path in staged]
 
     def fetch_run(self, timestamp: str, destination: Path) -> list[Path]:
         """One run's files on local disk, downloaded into `destination` when only the
@@ -86,12 +103,12 @@ class SiteBackups:
 
         offsite = self._offsite()
         offsite_runs = offsite.list_backups(self.site.config.name) if offsite else {}
-        timestamps = sorted(set(self._local_timestamps()) | set(offsite_runs))
-
         policy = BackupRetentionPolicy(config)
-        return [
-            ts for ts in policy.select_deletions(timestamps) if self._delete_run(offsite, offsite_runs, ts)
-        ]
+        with exclusive_file_lock(self.runs_lock_path):
+            timestamps = sorted(set(self._local_timestamps()) | set(offsite_runs))
+            return [
+                ts for ts in policy.select_deletions(timestamps) if self._delete_run(offsite, offsite_runs, ts)
+            ]
 
     def resolve_file(self, filename: str) -> Path:
         """A path inside this site's own backup directory. These names arrive from API
