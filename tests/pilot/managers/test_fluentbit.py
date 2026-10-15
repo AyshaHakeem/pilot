@@ -156,6 +156,7 @@ def test_logs_setup_installs_fluent_bit_when_missing(tmp_path: Path) -> None:
     with (
         patch("pilot.managers.fluentbit.is_linux", return_value=True),
         patch("pilot.managers.fluentbit.shutil.which", return_value=None),
+        patch("pilot.managers.fluentbit.Path.exists", return_value=False),
         patch("pilot.managers.fluentbit.get_package_manager", return_value=manager),
         patch("pilot.managers.fluentbit.run_command"),
     ):
@@ -174,6 +175,21 @@ def test_logs_setup_skips_install_when_fluent_bit_present(tmp_path: Path) -> Non
         patch("pilot.managers.fluentbit.shutil.which", return_value="/usr/bin/fluent-bit"),
         patch("pilot.managers.fluentbit.get_package_manager", return_value=manager),
         patch("pilot.managers.fluentbit.run_command"),
+    ):
+        configurator.setup()
+
+    manager.install.assert_not_called()
+
+
+def test_logs_setup_skips_install_when_fluent_bit_is_only_in_opt(tmp_path: Path) -> None:
+    configurator = _configurator(tmp_path)
+    manager = MagicMock()
+
+    with (
+        patch("pilot.managers.fluentbit.is_linux", return_value=True),
+        patch("pilot.managers.fluentbit.shutil.which", return_value=None),
+        patch("pilot.managers.fluentbit.Path.exists", return_value=True),
+        patch("pilot.managers.fluentbit.get_package_manager", return_value=manager),
     ):
         configurator.setup()
 

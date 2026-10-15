@@ -67,7 +67,7 @@ class LogsConfigurator(SystemdUserMixin):
     def setup(self) -> None:
         if not is_linux():
             raise BenchError("Log shipping is only supported on linux based machines.")
-        if shutil.which("fluent-bit") is None:
+        if self.binary_path is None:
             get_package_manager().install("fluent-bit")
         self.state_dir.mkdir(parents=True, exist_ok=True)
 
@@ -113,20 +113,17 @@ class LogsConfigurator(SystemdUserMixin):
         atomic_write_private_text(self.conf_dir / "token.env", f"DATUM_LOG_TOKEN={token}")
 
     def _render_unit(self) -> str:
-        return UNIT_TEMPLATE.format(
-            cli_root=cli_root(),
-            fluent_bit=self._fluent_bit_binary,
-            conf_dir=self.conf_dir,
-        )
+        if not (binary := self.binary_path):
+            raise BenchError("fluent-bit binary not found. Install it before setting up log shipping.")
+        return UNIT_TEMPLATE.format(cli_root=cli_root(), fluent_bit=binary, conf_dir=self.conf_dir)
 
     @property
-    def _fluent_bit_binary(self) -> str:
+    def binary_path(self) -> str | None:
+        """fluent-bit on PATH, else where the official package installs it."""
         if found := shutil.which("fluent-bit"):
             return found
         default_path = Path("/opt/fluent-bit/bin/fluent-bit")
-        if default_path.exists():
-            return str(default_path)
-        raise BenchError("fluent-bit binary not found. Install it before setting up log shipping.")
+        return str(default_path) if default_path.exists() else None
 
     def _restart_service(self) -> None:
         env = self._systemctl_env()
