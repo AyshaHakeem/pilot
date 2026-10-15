@@ -108,6 +108,24 @@ def test_edge_tls_site_sets_ssl_without_obtaining_a_certificate(tmp_path: Path) 
     obtain_cert.assert_not_called()
 
 
+def test_a_new_site_calls_pilot_over_loopback_and_gives_the_browser_the_admin_domain(tmp_path: Path) -> None:
+    provisioner = _provisioner(tmp_path)
+    provisioner.bench.config.admin.domain = "admin.local"
+    site = provisioner.bench.site("site1.example.com")
+    site.path.mkdir(parents=True)
+    (site.path / "site_config.json").write_text("{}")
+
+    with patch("admin.backend.internal.session.Session.issue_pilot_token", return_value="site-token"):
+        provisioner.write_pilot_communication_config(site)
+
+    assert json.loads((site.path / "site_config.json").read_text()) == {
+        "pilot_endpoint": f"http://127.0.0.1:{provisioner.bench.config.admin.internal_port}",
+        "cloud_server_url": "http://admin.local",
+        "cloud_settings_embed_url": "http://admin.local",
+        "pilot_auth_token": "site-token",
+    }
+
+
 def test_enable_scheduler_runs_frappe_for_the_site(tmp_path: Path) -> None:
     bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
