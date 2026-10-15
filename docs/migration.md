@@ -213,6 +213,8 @@ Pilot stops before updating code, records the failed site, and restores every si
 
 Pilot moves the operation to `needs_attention`. Sites remain protected while the user investigates or chooses a recovery action.
 
+A backup, update or migrate task that is cancelled, or whose process dies, has the same result: its failure callback moves the operation to `needs_attention` with the diagnosis "The task stopped before it finished", so the user can retry or revert. A stopped backup also restores the sites' maintenance settings. The callback does nothing when the task had already queued the next task.
+
 Every app is checked out to its target revision first, then validated as a group, before anything is installed or built.
 A failure there means no app has been reinstalled yet, so `RevertAppsTask` only has commits to check back out. See
 [App Dependencies](app-dependencies.md) for which checks an update runs.

@@ -50,11 +50,13 @@ class AppRepository:
         return pin is not None and not self.is_on_revision(pin)
 
     def update_target(self) -> RevisionPin | None:
-        """The fixed revision this app would update to, or None when there is none. (forward only)"""
-        entry = self.marketplace_entry
-        if entry:
-            release = self.forward_release(entry)
-            return RevisionPin.from_marketplace_release(release) if release else None
+        """The fixed revision this app would update to, or None (forward only). A marketplace
+        app follows the registry's releases, or its branch tip with `follow_branch` or no release."""
+        entry = None if self.app.config.follow_branch else self.marketplace_entry
+        release = self.newest_release(entry) if entry else None
+        if release is not None:
+            is_newer = self._is_ahead_of_installed(release["commit"], release.get("version", ""))
+            return RevisionPin.from_marketplace_release(release) if is_newer else None
         if not self.app.config.branch:
             return None
         tip = self.repo.remote_branch_sha(self.app.config.branch)
@@ -72,22 +74,18 @@ class AppRepository:
             return None
         return entry
 
-    def forward_release(self, marketplace_entry: dict) -> dict | None:
-        """The newest release advertised for this app's branch, when git says it
-        is ahead of the checked-out commit. Releases arrive newest-first."""
+    def newest_release(self, marketplace_entry: dict) -> dict | None:
+        """The newest release the registry advertises for this app's branch."""
         from pilot.integrations.marketplace import Marketplace
 
-        newest = next(
+        return next(
             (
-                r
-                for r in Marketplace.releases(marketplace_entry["name"])
-                if r.get("branch") == self.app.config.branch
+                release
+                for release in Marketplace.releases(marketplace_entry["name"])
+                if release.get("branch") == self.app.config.branch and release.get("commit")
             ),
             None,
         )
-        if newest is None or not newest.get("commit"):
-            return None
-        return newest if self._is_ahead_of_installed(newest["commit"], newest.get("version", "")) else None
 
     def _is_ahead_of_installed(self, commit: str, version: str) -> bool:
         """Whether `commit` descends from HEAD. A stale registry can advertise an older

@@ -467,6 +467,18 @@ create_bench_user() {
     echo "Creating user '$1'..."
     useradd -m -s /bin/bash "$1"
     usermod -aG "$(admin_group)" "$1" 2>/dev/null || true
+    add_user_bus_env "$1"
+}
+
+# `su` and `sudo -iu` open no login session, so `systemctl --user` finds no
+# runtime directory or D-Bus socket without these.
+add_user_bus_env() {
+    rc="$(getent passwd "$1" | cut -d: -f6)/.bashrc"
+    cat >>"$rc" <<'EOF'
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+EOF
+    chown "$1:" "$rc"
 }
 
 # Bench services are `systemctl --user` units, which need this user's systemd
@@ -576,6 +588,55 @@ install_sudoers_grants() {
 "$1 ALL=(ALL) NOPASSWD: $certbot_bin,$mkdir_bin,$test_bin,$openssl_bin"
 }
 
+# Asset builds of large frontends need more memory than a small host without swap
+# has. The bench user may add this swap file for the length of a build; the count
+# lets concurrent builds share it, and a reboot (the file is not in fstab) resets it.
+install_build_swap_helper() {
+    [ "$(uname)" = "Linux" ] || return 0
+    command -v swapon >/dev/null 2>&1 || return 0
+    helper=/usr/local/sbin/pilot-build-swap
+    cat > "$helper" <<'HELPER'
+#!/bin/sh
+set -eu
+dir=/var/lib/pilot
+swapfile=$dir/build.swap
+size_mb=2048
+mkdir -p "$dir"
+exec 9>"$dir/build-swap.lock"
+flock 9
+active() { grep -q "^$swapfile " /proc/swaps; }
+count=$(cat "$dir/build-swap.count" 2>/dev/null || echo 0)
+active || count=0
+case "${1:-}" in
+on)
+    echo $((count + 1)) > "$dir/build-swap.count"
+    [ "$count" -eq 0 ] || exit 0
+    [ "$(awk '/^SwapTotal:/ {print $2}' /proc/meminfo)" -eq 0 ] || exit 0
+    if [ "$(df -Pm "$dir" | awk 'NR == 2 {print $4}')" -lt $((size_mb + 1024)) ]; then
+        echo "Not enough free disk for the build swap file." >&2
+        exit 0
+    fi
+    fallocate -l "${size_mb}M" "$swapfile" 2>/dev/null || dd if=/dev/zero of="$swapfile" bs=1M count="$size_mb" status=none
+    chmod 600 "$swapfile"
+    mkswap "$swapfile" >/dev/null
+    swapon --priority -10 "$swapfile"
+    ;;
+off)
+    if [ "$count" -gt 0 ]; then count=$((count - 1)); fi
+    echo "$count" > "$dir/build-swap.count"
+    if [ "$count" -eq 0 ] && active; then swapoff "$swapfile"; fi
+    if [ "$count" -eq 0 ]; then rm -f "$swapfile"; fi
+    ;;
+*)
+    echo "usage: pilot-build-swap on|off" >&2
+    exit 2
+    ;;
+esac
+HELPER
+    chmod 755 "$helper"
+    write_sudoers_file "$1-pilot-build-swap" "$1 ALL=(root) NOPASSWD: $helper on,$helper off"
+}
+
 # A malformed file in /etc/sudoers.d breaks sudo for every user, including the
 # recovery path, so validate before installing. sudo-rs (Ubuntu 26.04) rejects
 # wildcards in arguments; the optional third grant names the same commands bare.
@@ -604,6 +665,7 @@ prepare_host() {
     set_nginx_worker_user "$BENCH_USER"
     install_logrotate "$BENCH_USER"
     install_sudoers_grants "$BENCH_USER"
+    install_build_swap_helper "$BENCH_USER"
 
     echo ""
     echo "========================================================================"
