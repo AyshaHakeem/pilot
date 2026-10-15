@@ -204,6 +204,7 @@ class BenchConfig:
                 repo=a.get("repo", ""),
                 branch=a.get("branch", ""),
                 branches=a.get("branches", []),
+                follow_branch=bool(a.get("follow_branch", False)),
             )
             for a in data.get("apps", [])
         ]
@@ -547,6 +548,8 @@ class BenchConfig:
             app_data: ConfigDict = {"name": app.name, "repo": app.repo, "branch": app.branch}
             if app.branches:
                 app_data["branches"] = app.branches
+            if app.follow_branch:
+                app_data["follow_branch"] = True
             apps.append(app_data)
         return apps
 

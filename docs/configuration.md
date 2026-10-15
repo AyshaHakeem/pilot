@@ -61,6 +61,16 @@ branch = "version-15"
 branches = ["version-15", "develop"]
 ```
 
+An app that the marketplace registry lists updates to the registry's newest release for its branch. It updates to the branch tip instead when the registry has no release for that branch, or when the entry sets `follow_branch = true`, for example a developer who pushes to the app's own repository:
+
+```toml
+[[apps]]
+name = "myapp"
+repo = "https://github.com/frappe/myapp"
+branch = "develop"
+follow_branch = true
+```
+
 `[redis]` defines separate cache and queue ports. `[[workers]]` defines queue groups and their process counts.
 
 ## Runtime modes
