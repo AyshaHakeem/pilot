@@ -21,6 +21,11 @@ class FrappeCommand(Command):
     args: tuple[str, ...] = ()
 
     def run(self) -> None:
+        if "drop-site" in self.args:
+            raise BenchError(
+                "Run 'pilot drop-site SITE' instead. Frappe's drop-site leaves the site in "
+                "bench.toml, nginx and the backup schedule."
+            )
         python = self.bench.env_path / "bin" / "python"
         if not python.exists():
             raise BenchError("Frappe environment not found. Run 'pilot init' first.")
