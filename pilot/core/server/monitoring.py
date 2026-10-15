@@ -11,6 +11,7 @@ from pathlib import Path
 import psutil
 
 from pilot.core.alerts import ALERT_SUSTAINED_SECONDS, SustainedAlerts, notify
+from pilot.core.bench.telemetry import DatumCredential
 from pilot.core.notification.events import record_alert
 from pilot.core.server.monitoring_config import MonitorConfigurator
 from pilot.core.server.monitoring_datum import MetricShipper
@@ -372,7 +373,12 @@ def main() -> None:
         monitor.sample_io()
     time.sleep(CPU_SAMPLE_INTERVAL)
 
-    shipper = MetricShipper(monitors[0].bench.config.telemetry)
+    # Before the shipper and Fluent Bit read the token, so both ship with the rotated one.
+    bench = monitors[0].bench
+    if bench.config.central.enabled:
+        DatumCredential(bench, bench.config.telemetry.token, on_progress=print).rotate_if_expiring()
+
+    shipper = MetricShipper(bench.config.telemetry)
     for monitor in monitors:
         monitor.compute_cpu()
         monitor.compute_io()
