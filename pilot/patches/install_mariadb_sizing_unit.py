@@ -11,7 +11,6 @@ def run(benches_root: Path) -> None:
     from pilot.config import BenchConfig
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.database import MariaDBManager
-    from pilot.managers.platform import is_macos
 
     for bench_dir in sorted(benches_root.glob("*")):
         if not bench_dir.is_dir() or not (bench_dir / "bench.toml").exists():
@@ -20,15 +19,21 @@ def run(benches_root: Path) -> None:
             continue
         config = BenchConfig.read(bench_dir)
         manager = MariaDBManager(config.mariadb)
-        if (
-            config.db_type == "mariadb"
-            and not is_macos()
-            and not config.mariadb.existing
-            and manager.unit_path.exists()
-        ):
+        if _runs_own_mariadb(config, manager):
             manager.install_sizing_unit()
             print("Installed the MariaDB sizing unit.")
         mark_applied(bench_dir, PATCH_NAME)
+
+
+def _runs_own_mariadb(config, manager) -> bool:
+    from pilot.managers.platform import is_macos
+
+    return (
+        config.db_type == "mariadb"
+        and not is_macos()
+        and not config.mariadb.existing
+        and manager.unit_path.exists()
+    )
 
 
 if __name__ == "__main__":

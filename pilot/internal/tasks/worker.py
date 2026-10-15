@@ -15,7 +15,6 @@ from pilot.internal.tasks.worker_state import WorkerIntent, WorkerStatus, Worker
 
 _CONTROL_POLL_SECONDS = 0.2
 _ERROR_BACKOFF_SECONDS = 1.0
-# At boot the Admin can start before the database, which reports itself started early.
 _DATABASE_START_TIMEOUT_SECONDS = 120.0
 _DATABASE_POLL_SECONDS = 1.0
 
