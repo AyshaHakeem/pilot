@@ -203,6 +203,26 @@ def test_direct_exposure_keeps_default_xff(tmp_path: Path) -> None:
     assert "X-Forwarded-For    $proxy_add_x_forwarded_for" in config
 
 
+def test_cloudflare_proxy_takes_the_client_ip_from_cf_connecting_ip(tmp_path: Path) -> None:
+    renderer = _renderer(tmp_path)
+    renderer.bench.config.proxy.cloudflare = True
+    config = renderer.generate_bench_config([(_BASE_SITE, _BASE_SITE.all_domains)], admin_ssl=False)
+
+    assert config.count("set_real_ip_from   173.245.48.0/20;") == 2
+    assert "set_real_ip_from   2400:cb00::/32;" in config
+    assert config.count("real_ip_header     CF-Connecting-IP;") == 2
+    assert "if ($bench_from_proxy = 0)" not in config
+
+
+def test_edge_proxy_routes_keep_their_own_real_ip_with_cloudflare_on(tmp_path: Path) -> None:
+    renderer = _renderer(tmp_path, proxy_servers=["203.0.113.5"])
+    renderer.bench.config.proxy.cloudflare = True
+    config = renderer.generate_bench_config([(_BASE_SITE, [])], admin_ssl=False)
+
+    assert "real_ip_header     X-Forwarded-For;" in config
+    assert "CF-Connecting-IP" not in config
+
+
 def test_trusted_proxies_gate_peer_and_trust_xff(tmp_path: Path) -> None:
     config = _site_config(tmp_path, _BASE_SITE, proxy_servers=["203.0.113.5", "203.0.113.6"])
 

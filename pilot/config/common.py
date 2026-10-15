@@ -166,7 +166,7 @@ class CommonConfig:
                 ],
             }
         if self.proxy != ProxyConfig():
-            data["proxy"] = {"protocol_v2": self.proxy.protocol_v2}
+            data["proxy"] = asdict(self.proxy)
         if self.telemetry != TelemetryConfig():
             data["telemetry"] = {
                 "endpoint": self.telemetry.endpoint,

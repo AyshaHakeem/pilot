@@ -10,6 +10,7 @@ import urllib.request
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+from pilot.config.proxy import is_cloudflare_address
 from pilot.config.route import RoutePolicy
 from pilot.exceptions import BenchError, DomainConflictError, DomainProviderError
 from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
@@ -222,15 +223,24 @@ class DomainRouteProvider:
         return domain
 
     def _verify(self, site_name: str, domain: str) -> None:
-        """Raise unless the domain resolves to this server."""
+        """Raise unless the domain resolves to this server or to Cloudflare's proxy."""
         candidate = self._resolve(domain)
         if not candidate:
             raise DomainConflictError(f"{domain} doesn't resolve yet. Retry once DNS has updated.")
         expected = self._resolve(site_name)
         if ip := self._server_ip():
             expected.add(ip)
-        if not (candidate & expected):
-            raise DomainConflictError(f"{domain} doesn't point here yet. Retry once DNS has updated.")
+        if candidate & expected:
+            return
+
+        if all(is_cloudflare_address(address) for address in candidate):
+            print(
+                f"Warning: {domain} resolves to Cloudflare's proxy, so Pilot cannot check that it "
+                "points here. Use the Full (strict) SSL mode in Cloudflare.",
+                file=sys.stderr,
+            )
+            return
+        raise DomainConflictError(f"{domain} doesn't point here yet. Retry once DNS has updated.")
 
     @staticmethod
     def _server_ip() -> str:

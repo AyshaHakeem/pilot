@@ -203,6 +203,10 @@ pattern = "vm-*.par-1.frappe.cloud"
 target = "admin.local"
 redirect = true
 
+[proxy]
+protocol_v2 = false
+cloudflare = false
+
 [telemetry]
 endpoint = "https://telemetry-svc.par-1.frappe.cloud"
 token = ""
@@ -238,6 +242,8 @@ The same sizing runs again when the host's memory changes, for example after a V
 The domain provider controls the edge route for each hostname. Its route policy gives Pilot the public scheme, origin scheme, and client IP source.
 
 Pilot configures PROXY protocol v2 when an HTTPS origin needs it. See [Per-domain TLS](#per-domain-tls).
+
+Set `proxy.cloudflare = true` when site domains use Cloudflare's proxy. nginx then takes the client IP from the `CF-Connecting-IP` header, but only from [Cloudflare's addresses](https://www.cloudflare.com/ips/). A domain that resolves to Cloudflare's addresses passes the add-domain DNS check with a warning, because Pilot cannot see the server behind the proxy. This check does not need the setting. In Cloudflare, use the Full (strict) SSL mode. In Flexible mode, Cloudflare sends requests to Pilot over HTTP, Pilot redirects them to HTTPS, and the browser loops. Let's Encrypt checks the domain over HTTP, so turn off Always Use HTTPS in Cloudflare until Pilot issues the certificate.
 
 ### Frappe Cloud
 

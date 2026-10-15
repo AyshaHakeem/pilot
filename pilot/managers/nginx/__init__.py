@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+from pilot.config.proxy import CLOUDFLARE_NETWORKS
 from pilot.config.waf import parse_nginx_size
 from pilot.exceptions import CommandError
 from pilot.internal.template import Template
@@ -321,6 +322,7 @@ class NginxConfigRenderer:
             "error_dir": self.bench.config_path / "nginx" / "error_pages",
             "error_codes": list(ERROR_PAGES),
             "proxy_servers": self._proxy_servers,
+            "cloudflare_networks": CLOUDFLARE_NETWORKS if config.proxy.cloudflare else (),
             "proxy_gate_variable": "$bench_"
             + re.sub(r"[^a-zA-Z0-9_]", "_", config.name)
             + "_from_proxy",
