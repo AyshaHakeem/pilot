@@ -31,25 +31,32 @@ class SiteBackups:
         return self.site.path / "backups"
 
     def take(self, with_files: bool = True) -> tuple[str, list[Path]]:
-        """Run `frappe backup` into this directory and return the run it made."""
+        """Run `frappe backup` and return the run it made. Each run is written in its own
+        staging directory first, so a backup running at the same time (manual and
+        scheduled) never returns this run's files, and retention never sees a half-written run."""
+        import tempfile
+
         from pilot.exceptions import BenchError
         from pilot.utils import run_command
 
-        argv = [
-            *self.site.bench.frappe_call,
-            "frappe",
-            "--site",
-            self.site.config.name,
-            "backup",
-            "--backup-path",
-            str(self.directory),
-        ]
-        if with_files:
-            argv.append("--with-files")
-        # cwd matters: frappe's bench helper reads apps.txt from the current dir.
-        run_command(argv, cwd=self.site.bench.sites_path, stream_output=True)
-        timestamp, files = self.latest_run()
-        if not files:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        with tempfile.TemporaryDirectory(prefix=".backup-", dir=self.directory) as staging:
+            argv = [
+                *self.site.bench.frappe_call,
+                "frappe",
+                "--site",
+                self.site.config.name,
+                "backup",
+                "--backup-path",
+                staging,
+            ]
+            if with_files:
+                argv.append("--with-files")
+            # cwd matters: frappe's bench helper reads apps.txt from the current dir.
+            run_command(argv, cwd=self.site.bench.sites_path, stream_output=True)
+            files = [path.rename(self.directory / path.name) for path in sorted(Path(staging).iterdir())]
+        timestamp = parse_backup_timestamp(files[0].name) if files else None
+        if not timestamp:
             raise BenchError(f"The backup of {self.site.config.name} produced no files.")
         return timestamp, files
 
@@ -70,19 +77,6 @@ class SiteBackups:
             offsite.download(self.site.config.name, timestamp, filename, destination / filename)
             paths.append(destination / filename)
         return paths
-
-    def latest_run(self) -> tuple[str, list[Path]]:
-        """Timestamp and files of the most recently created backup run for this site."""
-        groups: dict[str, list[Path]] = {}
-        if self.directory.is_dir():
-            for path in self.directory.iterdir():
-                timestamp = parse_backup_timestamp(path.name)
-                if timestamp:
-                    groups.setdefault(timestamp, []).append(path)
-        if not groups:
-            return "", []
-        latest = max(groups)
-        return latest, groups[latest]
 
     def prune(self) -> list[str]:
         """Delete runs rejected by this site's retention policy."""
