@@ -36,6 +36,7 @@ from pilot.tasks.install_app import InstallAppTask
 from pilot.tasks.uninstall_app import UninstallAppTask
 
 if TYPE_CHECKING:
+    from admin.backend.api.v1.types.site_apps import SiteApp
     from pilot.core.app import App
 
 # frappe's CLI prints a traceback, so its reason arrives behind the exception class.
@@ -56,9 +57,9 @@ def site_apps(name: str):
 
     bench = Bench(bench_root)
     provider = AppProvider(bench_root)
-    result = []
+    result: list[SiteApp] = []
     for app_name in site.active_apps:
-        entry = {
+        entry: SiteApp = {
             "name": app_name,
             "title": app_name,
             "description": "",
