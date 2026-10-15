@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import logging
+import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pilot.exceptions import BenchError
 
 BUILD_MEMORY_SHARE = 0.85
 MIN_BUILD_MEMORY_MB = 512
+# Installed by install.sh's root phase; adds a swap file while a build runs.
+BUILD_SWAP_HELPER = Path("/usr/local/sbin/pilot-build-swap")
+# A large frontend build (Helpdesk) needs more than 2 GB.
+BUILD_SWAP_BELOW_MB = 3072
 
 
 def can_read_memory(meminfo: Path = Path("/proc/meminfo")) -> bool:
@@ -49,3 +57,28 @@ def build_memory_limit_mb(override_mb: int = 0) -> int:
             f"need at least {MIN_BUILD_MEMORY_MB}MB."
         )
     return limit_mb
+
+
+@contextmanager
+def build_swap() -> Iterator[None]:
+    """Add swap while a build runs on a host with little free memory, so a large frontend
+    builds instead of hitting the cap. MariaDB's unit limits its own swap, so the database
+    stays in memory. Without the helper (an install before it) the build runs as before."""
+    if not BUILD_SWAP_HELPER.exists() or not can_read_memory() or available_memory_mb() >= BUILD_SWAP_BELOW_MB:
+        yield
+        return
+    added = _run_build_swap_helper("on")
+    try:
+        yield
+    finally:
+        if added:
+            _run_build_swap_helper("off")
+
+
+def _run_build_swap_helper(action: str) -> bool:
+    result = subprocess.run(
+        ["sudo", "-n", str(BUILD_SWAP_HELPER), action], capture_output=True, text=True, timeout=120
+    )
+    if result.returncode != 0:
+        logging.warning("Could not turn build swap %s: %s", action, result.stderr.strip())
+    return result.returncode == 0

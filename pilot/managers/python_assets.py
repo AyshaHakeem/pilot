@@ -29,6 +29,12 @@ class PythonAssetBuilder:
     def run_compiler(self, argv: list[str], **kwargs) -> None:
         """Run a compiler capped at a share of host memory, so a runaway build
         fails instead of exhausting the machine. Uncapped where the host cannot cap."""
+        from pilot.core.build_memory import build_swap
+
+        with build_swap():
+            self._run_capped(argv, **kwargs)
+
+    def _run_capped(self, argv: list[str], **kwargs) -> None:
         from pilot.core.build_memory import build_memory_limit_mb, build_swap_limit_mb, can_read_memory
 
         limit_mb = build_memory_limit_mb(self.bench.config.build.memory_limit_mb) if can_read_memory() else 0
