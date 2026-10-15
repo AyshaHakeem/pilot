@@ -70,8 +70,8 @@ def test_small_vm_limits_leave_memory_for_other_pilot_processes() -> None:
     assert sizing.memory_max_mb < sizing.total_memory_mb
 
 
-@pytest.mark.parametrize(("total_memory_mb", "buffer_pool_mb"), [(960, 64), (1024, 64), (1279, 64), (1280, 128), (1536, 128)])
-def test_a_host_of_about_1_gb_gets_the_small_buffer_pool(total_memory_mb: int, buffer_pool_mb: int) -> None:
+@pytest.mark.parametrize(("total_memory_mb", "buffer_pool_mb"), [(512, 64), (799, 64), (800, 128), (1024, 128)])
+def test_a_host_under_800_mb_gets_the_small_buffer_pool(total_memory_mb: int, buffer_pool_mb: int) -> None:
     assert calculate_mariadb_memory(total_memory_mb).innodb_buffer_pool_mb == buffer_pool_mb
 
 
@@ -109,7 +109,7 @@ def test_larger_vm_variable_limits_preserve_press_memory_guards() -> None:
     assert limits.max_connections_recommended == 50
 
 
-@pytest.mark.parametrize("total_memory_mb", [512, 960, 1024, 2048, 3072, 4096, 8192, 16384, 32768])
+@pytest.mark.parametrize("total_memory_mb", [512, 768, 1024, 2048, 3072, 4096, 8192, 16384, 32768])
 def test_startup_values_are_inside_configurable_ranges(total_memory_mb: int) -> None:
     sizing = calculate_mariadb_memory(total_memory_mb)
     limits = calculate_mariadb_variable_limits(total_memory_mb)
