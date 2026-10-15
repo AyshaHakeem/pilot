@@ -8,7 +8,7 @@ Use `pilot --help` and `pilot <command> --help` for exact flags.
 
 - `pilot new NAME`: create a new bench. Sets the Admin password from `--admin-password`, else prompts on a terminal, else generates and prints one.
 - `pilot start` on an uninitialized bench serves the setup wizard and prints a one-hour `?sid=` sign-in link for it.
-- `pilot init`: initialize a bench from `bench.toml`. This is what the setup wizard runs. `--no-dev` skips apps' `dev` extras.
+- `pilot init`: initialize a bench from `bench.toml`. This is what the setup wizard runs. `--no-dev` skips apps' `dev` extras. When an app's `dev` extra does not install, for example because its dependencies conflict, Pilot warns and installs the app without it.
 - `pilot ls`: list benches in the fixed benches directory.
 - `pilot drop --bench NAME`: remove a bench.
 
