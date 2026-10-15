@@ -201,8 +201,7 @@ class NginxConfigRenderer:
             error_codes=list(ERROR_PAGES),
         )
 
-    @property
-    def _proxy_servers(self) -> list[str]:
+    def get_proxy_servers(self) -> list[str]:
         """Edge-proxy IPs in front of this bench, if any; looked up once."""
         if self._proxy_servers_cache is None:
             from pilot.core.adapters.domain_provider import DomainRouteProvider
@@ -225,7 +224,7 @@ class NginxConfigRenderer:
                 "proxy_protocol_v2"
                 if ssl and self.bench.config.proxy.protocol_v2
                 else "x_forwarded_for"
-                if self._proxy_servers
+                if self.get_proxy_servers()
                 else "direct"
             )
             public_scheme = route.public_scheme if route else self._unrouted_scheme(client_ip_source)
@@ -280,7 +279,7 @@ class NginxConfigRenderer:
             "proxy_protocol_v2"
             if ssl and self.bench.config.proxy.protocol_v2
             else "x_forwarded_for"
-            if self._proxy_servers
+            if self.get_proxy_servers()
             else "direct"
         )
         client_ip_source = route.client_ip_source if admin.route else legacy_source
@@ -328,7 +327,7 @@ class NginxConfigRenderer:
             "acme_root": config.letsencrypt.webroot_path,
             "error_dir": self.bench.config_path / "nginx" / "error_pages",
             "error_codes": list(ERROR_PAGES),
-            "proxy_servers": self._proxy_servers,
+            "proxy_servers": self.get_proxy_servers(),
             "cloudflare_networks": CLOUDFLARE_NETWORKS if config.proxy.cloudflare else (),
             "proxy_gate_variable": "$bench_"
             + re.sub(r"[^a-zA-Z0-9_]", "_", config.name)
@@ -406,6 +405,8 @@ class NginxManager:
         Every bench shares one nginx, so `nginx -t` must not see another bench's untested files."""
         from pilot.utils import benches_dir
 
+        # The domain provider is a subprocess; ask it before every bench waits on this lock.
+        self._renderer.get_proxy_servers()
         benches_dir().mkdir(parents=True, exist_ok=True)
         with exclusive_file_lock(benches_dir() / "nginx"):
             yield

@@ -1276,9 +1276,19 @@ def test_a_config_change_holds_the_host_lock_until_nginx_accepts_it(tmp_path: Pa
     manager = NginxManager(_bench_with_site(tmp_path, _BASE_DATA))
     lock_file = tmp_path / "benches" / ".nginx.lock"
     locked_at_reload: list[bool] = []
+    locked_at_provider: list[bool] = []
 
-    with patch.object(manager, "reload", side_effect=lambda: locked_at_reload.append(_is_locked(lock_file))):
+    def proxy_servers() -> list[str]:
+        locked_at_provider.append(lock_file.exists() and _is_locked(lock_file))
+        return []
+
+    with (
+        patch("pilot.core.adapters.domain_provider.DomainRouteProvider.proxy_servers", side_effect=proxy_servers),
+        patch.object(manager, "reload", side_effect=lambda: locked_at_reload.append(_is_locked(lock_file))),
+    ):
         manager.apply_config(ssl_ready=False)
 
+    # The provider is a subprocess, so it is asked before every bench waits on the lock.
+    assert locked_at_provider == [False]
     assert locked_at_reload == [True]
     assert not _is_locked(lock_file)

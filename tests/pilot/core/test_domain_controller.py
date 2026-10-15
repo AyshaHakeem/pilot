@@ -270,3 +270,18 @@ def test_set_primary_waits_for_the_site_config_lock(tmp_path: Path, monkeypatch)
     writer.join(timeout=5)
 
     assert json.loads(path.read_text())["host_name"] == "http://shop.example.com"
+
+
+def test_a_provider_that_does_not_answer_fails_within_its_timeout(monkeypatch) -> None:
+    import subprocess
+
+    from pilot.core.adapters import domain_provider
+
+    def hang(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(domain_provider, "which", lambda name: "/usr/local/bin/bench-domain-provider")
+    monkeypatch.setattr(domain_provider.subprocess, "run", hang)
+
+    with pytest.raises(DomainProviderError, match="did not answer within 30 seconds"):
+        DomainRouteProvider.proxy_servers()

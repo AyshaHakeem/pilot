@@ -23,6 +23,16 @@ if TYPE_CHECKING:
 # Optional managed-hosting hook. Failures surface stderr as the user error.
 # Data verbs return one JSON value on stdout; register/deregister stdout is ignored.
 _PROVIDER_BIN = "bench-domain-provider"
+_PROVIDER_TIMEOUT_SECONDS = 30
+
+
+def _run_provider(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=_PROVIDER_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        raise DomainProviderError(
+            f"{_PROVIDER_BIN} {argv[1]} did not answer within {_PROVIDER_TIMEOUT_SECONDS} seconds."
+        ) from error
 
 
 class DomainRouteProvider:
@@ -113,7 +123,7 @@ class DomainRouteProvider:
         exe = which(_PROVIDER_BIN)
         if not exe:
             return []
-        result = subprocess.run([exe, verb], capture_output=True, text=True)
+        result = _run_provider([exe, verb])
         if result.returncode != 0:
             raise DomainProviderError(result.stderr.strip() or f"{_PROVIDER_BIN} {verb} failed.")
         out = result.stdout.strip()
@@ -174,7 +184,7 @@ class DomainRouteProvider:
         if not exe:
             return False, None
         argv = [exe, action, *([site] if site else []), *([domain] if domain else [])]
-        result = subprocess.run(argv, capture_output=True, text=True)
+        result = _run_provider(argv)
         if result.returncode == 2:
             raise DomainConflictError(result.stderr.strip() or f"{domain or site} was declined.")
         if result.returncode != 0:
