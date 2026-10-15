@@ -38,6 +38,10 @@ class BackupKeys:
         return f"sites/{self.site_name}/backups_metadata/{date[:4]}-{date[4:6]}.json"
 
     @property
+    def file_prefix(self) -> str:
+        return f"sites/{self.site_name}/backups/"
+
+    @property
     def month_prefix(self) -> str:
         return f"sites/{self.site_name}/backups_metadata/"
 
@@ -127,6 +131,15 @@ class OffsiteBackup:
             if limit is not None and len(runs) >= limit:
                 break
         return runs
+
+    def get_file_sizes(self, site_name: str) -> dict[tuple[str, str], int]:
+        """Size in bytes of each uploaded backup file, keyed by (timestamp, filename)."""
+        keys = BackupKeys(site_name)
+        sizes = {}
+        for key, size in self.s3.get_object_sizes(self.bucket, keys.file_prefix).items():
+            date, time, filename = key.removeprefix(keys.file_prefix).split("/", 2)
+            sizes[(f"{date}_{time}", filename)] = size
+        return sizes
 
     def get_backup(self, site_name: str, timestamp: str) -> dict[str, str] | None:
         """Return one offsite backup run from its monthly metadata file."""
