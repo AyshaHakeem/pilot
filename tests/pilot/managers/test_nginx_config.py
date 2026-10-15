@@ -627,6 +627,25 @@ def test_install_config_rolls_back_symlink_when_reload_fails(tmp_path: Path) -> 
     assert mock_run.call_args[0][0][-2:] == ["unlink", str(symlink_path)]
 
 
+def test_a_rejected_change_keeps_a_published_bench_serving_its_previous_config(tmp_path: Path) -> None:
+    """reload() puts the previous files back, so unpublishing would drop working sites."""
+    bench = _make_bench(tmp_path, _BASE_DATA)
+    manager = NginxManager(bench)
+    manager.include_path.parent.mkdir(parents=True, exist_ok=True)
+    manager.include_path.write_text("previous, tested config")
+    symlink_path = tmp_path / "test-bench.conf"
+    symlink_path.symlink_to(manager.include_path)
+
+    with (
+        patch.object(manager, "reload", side_effect=CommandError("nginx -t failed", returncode=1)),
+        patch.object(manager, "_unpublish") as unpublish,
+        pytest.raises(CommandError),
+    ):
+        manager._reload_or_rollback(symlink_path)
+
+    unpublish.assert_not_called()
+
+
 def test_stage_and_copy_creates_missing_nginx_config_dir(tmp_path: Path) -> None:
     """install() sets up sudo before creating config/nginx."""
     bench = _make_bench(tmp_path, _BASE_DATA)

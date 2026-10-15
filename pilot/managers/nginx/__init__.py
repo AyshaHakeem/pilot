@@ -613,17 +613,20 @@ class NginxManager:
                 run_command(_privileged(["unlink", str(entry)]))
 
     def _reload_or_rollback(self, symlink_path: Path) -> None:
-        """Unpublish this bench if reload fails, then re-raise."""
+        """Reload, or unpublish this bench when no tested config is left for it, then re-raise.
+        A failed reload puts back the previous files, so a published bench keeps serving them."""
         try:
             self.reload()
         except Exception:
-            self._unpublish(symlink_path)
+            if not self.include_path.exists():
+                self._unpublish(symlink_path)
             raise
 
     def _unpublish(self, symlink_path: Path) -> None:
         """Take this bench's vhost out of nginx's view, however it got there."""
         if self.has_shared_include:
-            self.include_path.rename(self.include_path.with_name("include.conf.broken"))
+            if self.include_path.exists():
+                self.include_path.rename(self.include_path.with_name("include.conf.broken"))
         elif symlink_path.exists() or symlink_path.is_symlink():
             run_command(_privileged(["unlink", str(symlink_path)]))
 
