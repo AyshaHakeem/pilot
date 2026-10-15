@@ -78,6 +78,9 @@ class LogsConfigurator(SystemdUserMixin):
         Fluent Bit reads its token only at start, so a changed config or token restarts it.
         """
         if not config.is_shipping_logs or self.binary_path is None:
+            # In case it's still running remove it the config is gone.
+            if self.is_running:
+                self.remove()
             return
         if self.is_running and self._read_files() == self._render_files(config):
             return
@@ -168,4 +171,3 @@ class LogsConfigurator(SystemdUserMixin):
 
         parsed = urlparse(endpoint)
         return str(parsed.port or (443 if parsed.scheme == "https" else 80))
-
