@@ -26,23 +26,17 @@ class BenchRuntime:
     def __init__(self, bench: "Bench") -> None:
         self.bench = bench
 
-    def wait_for_database(self, timeout: float) -> bool:
-        """Wait until the database that Pilot runs for this production bench is reachable.
-        True at once for an existing server, SQLite or a development bench."""
-        from pilot.exceptions import DatabaseError
+    @property
+    def is_database_ready(self) -> bool:
+        """Whether the database that Pilot runs for this production bench is reachable.
+        True for an existing server, SQLite or a development bench."""
         from pilot.managers.database import MariaDBManager, PostgresManager
 
         config = self.bench.config
         if not config.production.enabled or config.db_type == "sqlite":
             return True
         manager = PostgresManager(config.postgres) if config.db_type == "postgres" else MariaDBManager(config.mariadb)
-        if manager.config.existing:
-            return True
-        try:
-            manager.wait_until_reachable(timeout)
-        except DatabaseError:
-            return False
-        return True
+        return manager.config.existing or manager.is_reachable()
 
     def start(self, on_progress: Callable[[str], None]) -> None:
         initialized = self.bench.is_initialized

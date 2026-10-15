@@ -6,7 +6,6 @@ from unittest.mock import patch
 import pytest
 
 from pilot.core.bench.runtime import BenchRuntime
-from pilot.exceptions import DatabaseError
 from pilot.managers.database import MariaDBManager
 from tests.pilot.commands.test_commands import make_bench
 
@@ -19,21 +18,16 @@ def _runtime(tmp_path: Path, production: bool = True, existing: bool = False) ->
 
 
 @pytest.mark.parametrize("reachable", [True, False])
-def test_a_production_bench_waits_for_its_own_database(tmp_path: Path, reachable: bool) -> None:
-    wait = patch.object(
-        MariaDBManager, "wait_until_reachable", side_effect=None if reachable else DatabaseError("down")
-    )
-    with wait as wait_until_reachable:
-        assert _runtime(tmp_path).wait_for_database(120) is reachable
-
-    wait_until_reachable.assert_called_once_with(120)
+def test_a_production_bench_is_ready_when_its_own_database_is(tmp_path: Path, reachable: bool) -> None:
+    with patch.object(MariaDBManager, "is_reachable", return_value=reachable):
+        assert _runtime(tmp_path).is_database_ready is reachable
 
 
 @pytest.mark.parametrize("production, existing", [(False, False), (True, True)])
-def test_no_wait_for_a_development_bench_or_an_existing_server(
+def test_a_development_bench_or_an_existing_server_is_always_ready(
     tmp_path: Path, production: bool, existing: bool
 ) -> None:
-    with patch.object(MariaDBManager, "wait_until_reachable") as wait_until_reachable:
-        assert _runtime(tmp_path, production, existing).wait_for_database(120)
+    with patch.object(MariaDBManager, "is_reachable") as is_reachable:
+        assert _runtime(tmp_path, production, existing).is_database_ready
 
-    wait_until_reachable.assert_not_called()
+    is_reachable.assert_not_called()

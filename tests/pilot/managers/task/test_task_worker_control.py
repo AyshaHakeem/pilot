@@ -72,18 +72,35 @@ def test_worker_control_wake_starts_the_admin_without_a_local_worker(tmp_path: P
     for_bench.return_value.wake_admin.assert_called_once_with()
 
 
+def _worker_with_database(tmp_path: Path, monkeypatch, ready: list[bool]):
+    from pilot.core.bench.runtime import BenchRuntime
+    from pilot.internal.tasks import worker as worker_module_internal
+
+    events: list[str] = []
+    monkeypatch.setattr("pilot.core.bench.Bench", lambda root: root)
+    monkeypatch.setattr(BenchRuntime, "is_database_ready", property(lambda self: events.append("check") or ready.pop(0)))
+    monkeypatch.setattr(worker_module_internal, "_DATABASE_POLL_SECONDS", 0.01)
+    monkeypatch.setattr(worker_module_internal.TaskWorker, "_work", lambda self, pid: events.append("work"))
+    return worker_module_internal.TaskWorker(tmp_path), events
+
+
 def test_the_worker_waits_for_the_database_before_its_first_task(tmp_path: Path, monkeypatch) -> None:
     """At boot the Admin can start before MariaDB, and a task run then would fail."""
-    from pilot.core.bench.runtime import BenchRuntime
-    from pilot.internal.tasks.worker import TaskWorker
+    worker, events = _worker_with_database(tmp_path, monkeypatch, [False, False, True])
 
-    order: list[str] = []
-    monkeypatch.setattr("pilot.core.bench.Bench", lambda root: root)
-    monkeypatch.setattr(BenchRuntime, "wait_for_database", lambda self, timeout: order.append("database") or True)
-    monkeypatch.setattr(TaskWorker, "_work", lambda self, pid: order.append("work"))
-
-    worker = TaskWorker(tmp_path)
     worker.start()
     worker.join(5)
 
-    assert order == ["database", "work"]
+    assert events == ["check", "check", "check", "work"]
+
+
+def test_a_drain_ends_the_database_wait(tmp_path: Path, monkeypatch) -> None:
+    """Stopping the Admin must not wait for a database that is down."""
+    worker, events = _worker_with_database(tmp_path, monkeypatch, [False] * 1000)
+
+    worker.request_drain()
+    worker.start()
+    worker.join(5)
+
+    assert not worker.is_alive()
+    assert events == ["check", "work"]

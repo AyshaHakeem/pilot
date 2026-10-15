@@ -170,7 +170,7 @@ def test_provision_initialises_and_installs_unit_when_fresh(tmp_path) -> None:
         patch.object(m, "_install_unit") as install_unit,
         patch.object(m, "install_sizing_unit") as install_sizing_unit,
         patch.object(m, "_reset_failed_state") as reset_failed_state,
-        patch.object(m, "wait_until_reachable"),
+        patch.object(m, "_wait_until_reachable"),
         patch.object(m, "secure_installation") as secure,
         patch(f"{MODULE}.run_command") as rc,
     ):
@@ -996,7 +996,7 @@ def test_wait_until_reachable_raises_after_timeout() -> None:
         patch(f"{BASE_MODULE}.time.sleep"),
         pytest.raises(DatabaseError, match="did not become reachable"),
     ):
-        m.wait_until_reachable(timeout=0.01)
+        m._wait_until_reachable(timeout=0.01)
 
 
 def test_provision_resets_failed_state_before_restarting_stopped_unit() -> None:
@@ -1006,7 +1006,7 @@ def test_provision_resets_failed_state_before_restarting_stopped_unit() -> None:
         patch.object(m, "install"),
         patch.object(m, "is_provisioned", return_value=True),
         patch.object(m, "is_running", return_value=False),
-        patch.object(m, "wait_until_reachable"),
+        patch.object(m, "_wait_until_reachable"),
         patch.object(m, "secure_installation"),
         patch(f"{MODULE}.run_command") as rc,
         patch(f"{BASE_MODULE}.subprocess.run") as reset_run,
@@ -1026,7 +1026,7 @@ def test_provision_reuses_already_provisioned_server() -> None:
         patch.object(m, "is_running", return_value=True),
         patch.object(m, "_write_config") as write_config,
         patch.object(m, "_install_unit") as install_unit,
-        patch.object(m, "wait_until_reachable"),
+        patch.object(m, "_wait_until_reachable"),
         patch.object(m, "secure_installation") as secure,
         patch(f"{MODULE}.run_command") as rc,
     ):

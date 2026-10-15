@@ -117,7 +117,7 @@ class MariaDBManager(UserOwnedDBManager):
     def _provision_macos(self):
         if not self.is_running():
             self.start()
-        self.wait_until_reachable()
+        self._wait_until_reachable()
         self.secure_installation()
 
     def provision(self) -> None:
@@ -138,7 +138,7 @@ class MariaDBManager(UserOwnedDBManager):
             self._reset_failed_state()
             run_command(self._systemctl("start", self._UNIT_NAME), env=self._systemctl_env())
 
-        self.wait_until_reachable()
+        self._wait_until_reachable()
         self.secure_installation()
         return None
 

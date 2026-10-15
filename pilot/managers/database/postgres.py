@@ -93,7 +93,7 @@ class PostgresManager(UserOwnedDBManager):
                 self.start()
         else:
             self._provision_user_owned()
-        self.wait_until_reachable()
+        self._wait_until_reachable()
         self.secure()
 
     def _provision_user_owned(self) -> None:

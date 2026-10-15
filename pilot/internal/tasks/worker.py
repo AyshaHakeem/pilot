@@ -5,6 +5,7 @@ import os
 import signal
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 from pilot.internal.tasks.process import TaskProcess, TaskProcessStartError
@@ -16,6 +17,7 @@ _CONTROL_POLL_SECONDS = 0.2
 _ERROR_BACKOFF_SECONDS = 1.0
 # At boot the Admin can start before the database, which reports itself started early.
 _DATABASE_START_TIMEOUT_SECONDS = 120.0
+_DATABASE_POLL_SECONDS = 1.0
 
 
 class TaskWorker:
@@ -74,13 +76,17 @@ class TaskWorker:
         from pilot.core.bench.runtime import BenchRuntime
         from pilot.exceptions import BenchError
 
+        deadline = time.monotonic() + _DATABASE_START_TIMEOUT_SECONDS
         try:
-            ready = BenchRuntime(Bench(self._bench_root)).wait_for_database(_DATABASE_START_TIMEOUT_SECONDS)
+            runtime = BenchRuntime(Bench(self._bench_root))
+            while not runtime.is_database_ready:
+                if time.monotonic() >= deadline:
+                    logging.warning("The database is not reachable; queued tasks run anyway.")
+                    return
+                if self._drain.wait(_DATABASE_POLL_SECONDS):
+                    return
         except (BenchError, OSError) as error:
             logging.warning("Could not check the database before running tasks: %s", error)
-            return
-        if not ready:
-            logging.warning("The database is not reachable; queued tasks run anyway.")
 
     def _work(self, pid: int) -> None:
         """Survive a failed cycle instead of ending the thread."""
