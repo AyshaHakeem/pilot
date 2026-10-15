@@ -72,11 +72,11 @@ class BackupProvider:
             return {}
 
         offsite = OffsiteBackup.from_config(self._bench.config.s3, self._bench.path)
-        sizes = offsite.get_file_sizes(self._site_name)
         backups = {}
         for timestamp, files_by_type in offsite.list_backups(self._site_name, limit=limit).items():
+            sizes = offsite.get_file_sizes(self._site_name, timestamp)
             files = [
-                self.get_offsite_file(timestamp, file_type, filename, sizes.get((timestamp, filename), 0))
+                self.get_offsite_file(timestamp, file_type, filename, sizes.get(filename, 0))
                 for file_type, filename in files_by_type.items()
             ]
             created_at = self._get_timestamp_or_now(timestamp)

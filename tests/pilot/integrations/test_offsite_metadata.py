@@ -74,7 +74,7 @@ def test_concurrent_add_and_remove_do_not_corrupt(tmp_path) -> None:
     assert s3.max_active == 1
 
 
-def test_uploaded_file_sizes_are_keyed_by_run_and_filename(tmp_path) -> None:
+def test_uploaded_file_sizes_list_only_the_run(tmp_path) -> None:
     from unittest.mock import Mock
 
     from pilot.integrations.s3.backups import OffsiteBackup
@@ -85,10 +85,7 @@ def test_uploaded_file_sizes_are_keyed_by_run_and_filename(tmp_path) -> None:
         "sites/site/backups/20260701/020000/20260701_020000-site-files.tar": 10,
     }
 
-    sizes = OffsiteBackup(s3, "bucket", tmp_path).get_file_sizes("site")
+    sizes = OffsiteBackup(s3, "bucket", tmp_path).get_file_sizes("site", "20260701_020000")
 
-    s3.get_object_sizes.assert_called_once_with("bucket", "sites/site/backups/")
-    assert sizes == {
-        ("20260701_020000", "20260701_020000-site-database.sql.gz"): 2048,
-        ("20260701_020000", "20260701_020000-site-files.tar"): 10,
-    }
+    s3.get_object_sizes.assert_called_once_with("bucket", "sites/site/backups/20260701/020000/")
+    assert sizes == {"20260701_020000-site-database.sql.gz": 2048, "20260701_020000-site-files.tar": 10}

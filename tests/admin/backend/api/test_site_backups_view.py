@@ -315,7 +315,7 @@ def test_list_backups_reports_the_size_of_an_uploaded_file(tmp_path: Path) -> No
     client = _client(bench_root)
     offsite = Mock()
     offsite.list_backups.return_value = {"20240101_000000": {"database": "20240101_000000-database.sql.gz"}}
-    offsite.get_file_sizes.return_value = {("20240101_000000", "20240101_000000-database.sql.gz"): 2048}
+    offsite.get_file_sizes.return_value = {"20240101_000000-database.sql.gz": 2048}
 
     with (
         patch("pilot.config.s3.S3Config.is_configured", new_callable=PropertyMock, return_value=True),
@@ -324,3 +324,4 @@ def test_list_backups_reports_the_size_of_an_uploaded_file(tmp_path: Path) -> No
         response = client.get("/api/v1/sites/site.localhost/backups")
 
     assert response.get_json()[0]["files"][0]["size_bytes"] == 2048
+    offsite.get_file_sizes.assert_called_once_with("site.localhost", "20240101_000000")
