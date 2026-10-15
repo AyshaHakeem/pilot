@@ -405,21 +405,32 @@ class NginxManager:
         Every bench shares one nginx, so `nginx -t` must not see another bench's untested files."""
         from pilot.utils import benches_dir
 
-        # The domain provider is a subprocess; ask it before every bench waits on this lock.
-        self._renderer.get_proxy_servers()
         benches_dir().mkdir(parents=True, exist_ok=True)
         with exclusive_file_lock(benches_dir() / "nginx"):
             yield
 
+    @contextmanager
+    def _render_lock(self) -> Iterator[None]:
+        # The domain provider is a subprocess, so ask it before every bench waits on the lock.
+        # Removing a bench's routes renders nothing, so it never depends on the provider.
+        self._renderer.get_proxy_servers()
+        with self.config_lock():
+            yield
+
+    def write_config(self, ssl_ready: bool = False) -> None:
+        """Write this bench's config without a reload; the next reload tests it."""
+        with self._render_lock():
+            self.generate_config(ssl_ready=ssl_ready)
+
     def apply_config(self, ssl_ready: bool = True) -> None:
         """Write this bench's config, test it and reload nginx, or put the old files back."""
-        with self.config_lock():
+        with self._render_lock():
             self.generate_config(ssl_ready=ssl_ready)
             self.reload()
 
     def publish_config(self, ssl_ready: bool = False) -> None:
         """Write this bench's config and include it in nginx, then test and reload."""
-        with self.config_lock():
+        with self._render_lock():
             self.generate_config(ssl_ready=ssl_ready)
             self.install_config()
 

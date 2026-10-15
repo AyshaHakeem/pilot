@@ -1292,3 +1292,24 @@ def test_a_config_change_holds_the_host_lock_until_nginx_accepts_it(tmp_path: Pa
     assert locked_at_provider == [False]
     assert locked_at_reload == [True]
     assert not _is_locked(lock_file)
+
+
+def test_removing_a_bench_from_nginx_does_not_ask_the_domain_provider(tmp_path: Path, monkeypatch) -> None:
+    """A failing provider must not keep a dropped bench's routes in nginx."""
+    from pilot.exceptions import DomainProviderError
+
+    monkeypatch.setattr(NginxManager, "config_lock", _REAL_CONFIG_LOCK)
+    monkeypatch.setattr("pilot.utils.benches_dir", lambda: tmp_path / "benches")
+    manager = NginxManager(_bench_with_site(tmp_path, _BASE_DATA))
+
+    with (
+        patch(
+            "pilot.core.adapters.domain_provider.DomainRouteProvider.proxy_servers",
+            side_effect=DomainProviderError("provider is down"),
+        ),
+        patch.object(manager, "_unpublish") as unpublish,
+        patch.object(manager, "reload"),
+    ):
+        manager.uninstall_config()
+
+    unpublish.assert_called_once()
