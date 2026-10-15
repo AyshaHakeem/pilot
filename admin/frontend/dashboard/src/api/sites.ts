@@ -219,8 +219,10 @@ export const sitesApi = {
   domains: {
     list: (name: string): Promise<SiteDomains> =>
       request.get(`sites/${encodeURIComponent(name)}/domains`).json(),
-    add: (name: string, domain: string): Promise<TaskPayload> =>
-      request.post(`sites/${encodeURIComponent(name)}/domains`, { json: { domain } }).json(),
+    add: (name: string, domain: string, email = ''): Promise<TaskPayload> =>
+      request
+        .post(`sites/${encodeURIComponent(name)}/domains`, { json: email ? { domain, email } : { domain } })
+        .json(),
     remove: (name: string, domain: string): Promise<TaskPayload> =>
       request
         .delete(`sites/${encodeURIComponent(name)}/domains/${encodeURIComponent(domain)}`)

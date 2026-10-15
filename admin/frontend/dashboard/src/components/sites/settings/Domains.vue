@@ -34,6 +34,7 @@ const { nginxEnabled, reload } = useSite(props.siteName)
 
 const domains = ref<SiteDomain[]>([])
 const primaryDomain = ref('')
+const certificateEmailRequired = ref(false)
 const loading = ref(false)
 const error = ref('')
 
@@ -72,6 +73,7 @@ const loadDomains = async () => {
     const data = await sitesApi.domains.list(props.siteName)
     domains.value = data.domains || []
     primaryDomain.value = data.primary || ''
+    certificateEmailRequired.value = Boolean(data.certificate_email_required)
   } catch (e) {
     error.value = errorMessage(e, 'Failed to load domains.')
   } finally {
@@ -158,7 +160,12 @@ watch(nginxEnabled, (enabled) => {
     </template>
   </div>
 
-  <AddDomainDialog v-model="showAdd" :site-name="siteName" @added="loadDomains" />
+  <AddDomainDialog
+    v-model="showAdd"
+    :site-name="siteName"
+    :email-required="certificateEmailRequired"
+    @added="loadDomains"
+  />
   <RemoveDomainDialog
     v-model="showRemove"
     :site-name="siteName"
