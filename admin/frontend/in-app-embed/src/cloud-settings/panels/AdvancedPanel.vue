@@ -1,44 +1,19 @@
 <script setup lang="ts">
 import { useTranslation } from '../translation'
-import { getAccountUrl } from '@frappe/cloud-sdk/api'
 import { Button, ErrorMessage, SettingsRow } from 'frappe-ui'
-import { ref } from 'vue'
 import Panel from '../components/Panel.vue'
 import { openExternal } from '../external'
-import { useErrorMessage, type Store } from '../store'
+import type { Store } from '../store'
 
 const __ = useTranslation()
-const getErrorMessage = useErrorMessage()
 
 interface Props {
   store: Store
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 
-type AccountLink = 'server' | 'billing'
-
-const opening = ref<AccountLink | ''>('')
-const openError = ref('')
-
-const open = async (link: AccountLink) => {
-  if (opening.value) return
-
-  opening.value = link
-  openError.value = ''
-
-  try {
-    const links = await getAccountUrl()
-
-    if (!links?.[link]) throw new Error(__('Central is not configured.'))
-
-    openExternal(links[link])
-  } catch (exception) {
-    openError.value = getErrorMessage(exception)
-  } finally {
-    opening.value = ''
-  }
-}
+props.store.loadAccountLinks()
 </script>
 
 <template>
@@ -52,9 +27,9 @@ const open = async (link: AccountLink) => {
       >
         <Button
           icon-right="lucide-arrow-up-right"
-          :disabled="Boolean(opening)"
-          :label="opening === 'server' ? __('Opening server') : __('Open server')"
-          @click="open('server')"
+          :disabled="!store.state.accountLinks"
+          :label="__('Open server')"
+          @click="openExternal(store.state.accountLinks?.server)"
         />
       </SettingsRow>
 
@@ -68,13 +43,13 @@ const open = async (link: AccountLink) => {
       >
         <Button
           icon-right="lucide-arrow-up-right"
-          :disabled="Boolean(opening)"
-          :label="opening === 'billing' ? __('Opening billing') : __('Manage billing')"
-          @click="open('billing')"
+          :disabled="!store.state.accountLinks"
+          :label="__('Manage billing')"
+          @click="openExternal(store.state.accountLinks?.billing)"
         />
       </SettingsRow>
     </div>
 
-    <ErrorMessage :message="openError" class="mt-2" />
+    <ErrorMessage :message="store.state.accountLinksError" class="mt-2" />
   </Panel>
 </template>
