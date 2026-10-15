@@ -70,7 +70,12 @@ def test_small_vm_limits_leave_memory_for_other_pilot_processes() -> None:
     assert sizing.memory_max_mb < sizing.total_memory_mb
 
 
-def test_a_host_under_1_gb_gets_a_smaller_mariadb() -> None:
+@pytest.mark.parametrize(("total_memory_mb", "buffer_pool_mb"), [(960, 64), (1024, 64), (1279, 64), (1280, 128), (1536, 128)])
+def test_a_host_of_about_1_gb_gets_the_small_buffer_pool(total_memory_mb: int, buffer_pool_mb: int) -> None:
+    assert calculate_mariadb_memory(total_memory_mb).innodb_buffer_pool_mb == buffer_pool_mb
+
+
+def test_a_512_mb_host_gets_a_smaller_mariadb() -> None:
     """Measured on one lite bench: MariaDB holds about 90 MB plus its buffer pool."""
     sizing = calculate_mariadb_memory(512)
 

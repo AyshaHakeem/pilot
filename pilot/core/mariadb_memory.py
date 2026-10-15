@@ -7,8 +7,8 @@ _HARDWARE_MEMORY_RESERVE_MB = 218
 _MARIADB_OPERATING_RESERVE_MB = 700
 _MEMORY_PER_CONNECTION_MB = 35
 _MIN_BUFFER_POOL_MB = 128
-# Below 1 GB, one bench and its site share the host with MariaDB, so it gets a smaller floor.
-_SMALL_HOST_MB = 1024
+# A VM of up to about 1 GB (reported as 950-1024 MB) runs one bench with MariaDB, so it gets a smaller floor.
+_SMALL_HOST_MB = 1280
 _SMALL_HOST_BUFFER_POOL_MB = 64
 _SMALL_HOST_KEY_BUFFER_MB = 8
 _SMALL_HOST_MAX_CONNECTIONS = 20
