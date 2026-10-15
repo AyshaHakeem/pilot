@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -230,3 +231,15 @@ def test_memory_is_capped_only_where_a_trial_scope_starts(
     assert systemd_user.can_cap_memory() is expected
     assert trials[0][0] == "systemd-run"
     assert trials[0][-1] == "true"
+
+
+@pytest.mark.parametrize("error", [OSError("sudo missing"), subprocess.TimeoutExpired("sudo", 120)])
+def test_a_failing_swap_helper_only_warns(monkeypatch: pytest.MonkeyPatch, error: Exception) -> None:
+    """Swap is optional, so the build must not fail when the helper cannot run."""
+
+    def raise_error(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(build_memory.subprocess, "run", raise_error)
+
+    assert build_memory._has_switched_build_swap("on") is False
