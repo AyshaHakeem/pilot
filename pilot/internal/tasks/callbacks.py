@@ -103,7 +103,7 @@ def _fail_migration_step(meta: dict, args: dict) -> None:
     from pilot.core.bench import Bench
 
     operation = Bench(Path(meta["bench_root"])).migrations.get(args["operation_id"])
-    operation.fail_stopped_step(args["phase"], args.get("site"))
+    operation.fail_stopped_step(meta["task_id"], args["phase"], args.get("site"))
 
 
 _OPERATIONS: dict[str, CallbackOperation] = {

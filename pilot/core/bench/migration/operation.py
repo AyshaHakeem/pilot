@@ -35,6 +35,7 @@ _CHAIN_TASKS = {
     "revert-site": "pilot.tasks.revert_site.RevertSiteTask",
     "restart-services": "pilot.tasks.restart_services.RestartServicesTask",
 }
+_CHAIN_PHASES = ("backing_up", "updating", "migrating")
 
 
 def _now() -> str:
@@ -256,15 +257,18 @@ class MigrationOperation:
         if self.next_migrate_site() is None:
             self._complete(on_step)
 
-    def fail_stopped_step(self, phase: str, site_name: str | None) -> None:
+    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
         """Pause for the user when a chain task stopped without its own failure handling:
-        killed, or its process died. A no-op once its step is done or the operation left
-        that phase, because the next task may already run."""
-        if self.state != phase or self._is_step_done(phase, site_name):
+        killed, or its process died. A no-op once the task queued the next one or the
+        operation left the chain phases."""
+        if self.chain[-1]["task_id"] != task_id or self.state not in _CHAIN_PHASES:
             return
-        if phase == "backing_up" and site_name:
+        if self.state != phase or self._is_step_done(phase, site_name):
+            # The step finished, but the task stopped before it queued the next task.
+            phase, site_name = str(self.state), None
+        elif phase == "backing_up" and site_name:
             self.site(site_name).backup_status = "failed"
-        if phase == "migrating" and site_name:
+        elif phase == "migrating" and site_name:
             site = self.site(site_name)
             site.migration_status = "failed"
             # A revert must restore what the stopped attempt touched too.

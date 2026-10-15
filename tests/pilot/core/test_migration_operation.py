@@ -826,7 +826,7 @@ def _backing_up_operation(tmp_path: Path):
 def test_a_killed_backup_task_pauses_the_operation_for_a_retry(tmp_path: Path) -> None:
     operation, mock_bench = _backing_up_operation(tmp_path)
 
-    operation.fail_stopped_step("backing_up", "site1.localhost")
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost")
 
     assert operation.state == "needs_attention"
     assert operation.site("site1.localhost").backup_status == "failed"
@@ -839,12 +839,13 @@ def test_a_killed_backup_task_pauses_the_operation_for_a_retry(tmp_path: Path) -
     assert operation.next_backup_site() == "site1.localhost"
 
 
-def test_a_stopped_task_callback_leaves_an_operation_that_moved_on(tmp_path: Path) -> None:
+def test_a_stopped_task_callback_leaves_the_operation_to_the_next_task(tmp_path: Path) -> None:
     operation, _mock_bench = _backing_up_operation(tmp_path)
     operation.back_up_site("site1.localhost")
+    operation.chain.append({"command": "migrate", "task_id": "task-102", "site": "site1.localhost"})
     state = operation.state
 
-    operation.fail_stopped_step("backing_up", "site1.localhost")
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost")
 
     assert operation.state == state != "needs_attention"
 
@@ -862,14 +863,18 @@ def test_chain_tasks_register_the_stopped_step_callback() -> None:
     assert validate_callback({"operation": "fail-migration-step", "args": {}})["operation"] == "fail-migration-step"
 
 
-def test_a_task_killed_after_its_backup_finished_leaves_the_chain_alone(tmp_path: Path) -> None:
+def test_a_task_killed_before_it_queued_the_next_step_pauses_for_a_retry(tmp_path: Path) -> None:
     operation, _mock_bench = _backing_up_operation(tmp_path)
     operation.sites.append(SiteProgress(name="site2.localhost"))
     operation.site("site1.localhost").backup_status = "backed_up"
 
-    operation.fail_stopped_step("backing_up", "site1.localhost")
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost")
 
+    assert (operation.state, operation.failed_site) == ("needs_attention", None)
+    operation.retry()
     assert operation.state == "backing_up"
+    assert operation.site("site1.localhost").backup_status == "backed_up"
+    assert operation.next_backup_site() == "site2.localhost"
 
 
 def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path) -> None:
@@ -881,7 +886,7 @@ def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path)
     operation.state = get_state("migrating")
     operation.site("site1.localhost").migration_status = "running"
 
-    operation.fail_stopped_step("migrating", "site1.localhost")
+    operation.fail_stopped_step("task-101", "migrating", "site1.localhost")
 
     site = operation.site("site1.localhost")
     assert operation.state == "needs_attention"
