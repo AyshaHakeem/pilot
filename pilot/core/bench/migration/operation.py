@@ -266,13 +266,8 @@ class MigrationOperation:
         if self.state != phase or self._is_step_done(phase, site_name):
             # The step finished, but the task stopped before it queued the next task.
             phase, site_name = str(self.state), None
-        elif phase == "backing_up" and site_name:
-            self.site(site_name).backup_status = "failed"
-        elif phase == "migrating" and site_name:
-            site = self.site(site_name)
-            site.migration_status = "failed"
-            # A revert must restore what the stopped attempt touched too.
-            self._union_touched_tables(site)
+        elif site_name:
+            self._fail_site_step(phase, site_name)
         self.diagnosis = {
             "phase": phase,
             "message": "The task stopped before it finished. Retry it, or revert.",
@@ -281,6 +276,15 @@ class MigrationOperation:
         self._enter_needs_attention(phase, site_name)
         if phase == "backing_up":
             self._restore_maintenance()
+
+    def _fail_site_step(self, phase: str, site_name: str) -> None:
+        site = self.site(site_name)
+        if phase == "backing_up":
+            site.backup_status = "failed"
+        elif phase == "migrating":
+            site.migration_status = "failed"
+            # A revert must restore what the stopped attempt touched too.
+            self._union_touched_tables(site)
 
     def _is_step_done(self, phase: str, site_name: str | None) -> bool:
         if phase == "updating":
