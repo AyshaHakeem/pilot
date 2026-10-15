@@ -14,6 +14,8 @@ from pilot.internal.tasks.worker_state import WorkerIntent, WorkerStatus, Worker
 
 _CONTROL_POLL_SECONDS = 0.2
 _ERROR_BACKOFF_SECONDS = 1.0
+# At boot the Admin can start before the database, which reports itself started early.
+_DATABASE_START_TIMEOUT_SECONDS = 120.0
 
 
 class TaskWorker:
@@ -59,10 +61,26 @@ class TaskWorker:
             self._worker.write_pid(pid)
             self._write_state(WorkerStatus.STARTING, pid)
             try:
+                self._wait_for_database()
                 self._work(pid)
             finally:
                 self._write_state(WorkerStatus.STOPPED, None)
                 self._worker.write_pid(None)
+
+    def _wait_for_database(self) -> None:
+        """Hold the first task until the bench's database is up, so a task queued before a
+        reboot does not fail on it. After the timeout, tasks run and report their own errors."""
+        from pilot.core.bench import Bench
+        from pilot.core.bench.runtime import BenchRuntime
+        from pilot.exceptions import BenchError
+
+        try:
+            ready = BenchRuntime(Bench(self._bench_root)).wait_for_database(_DATABASE_START_TIMEOUT_SECONDS)
+        except (BenchError, OSError) as error:
+            logging.warning("Could not check the database before running tasks: %s", error)
+            return
+        if not ready:
+            logging.warning("The database is not reachable; queued tasks run anyway.")
 
     def _work(self, pid: int) -> None:
         """Survive a failed cycle instead of ending the thread."""

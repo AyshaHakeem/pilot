@@ -70,3 +70,20 @@ def test_worker_control_wake_starts_the_admin_without_a_local_worker(tmp_path: P
     bench.assert_called_once_with(tmp_path)
     for_bench.assert_called_once_with(bench.return_value)
     for_bench.return_value.wake_admin.assert_called_once_with()
+
+
+def test_the_worker_waits_for_the_database_before_its_first_task(tmp_path: Path, monkeypatch) -> None:
+    """At boot the Admin can start before MariaDB, and a task run then would fail."""
+    from pilot.core.bench.runtime import BenchRuntime
+    from pilot.internal.tasks.worker import TaskWorker
+
+    order: list[str] = []
+    monkeypatch.setattr("pilot.core.bench.Bench", lambda root: root)
+    monkeypatch.setattr(BenchRuntime, "wait_for_database", lambda self, timeout: order.append("database") or True)
+    monkeypatch.setattr(TaskWorker, "_work", lambda self, pid: order.append("work"))
+
+    worker = TaskWorker(tmp_path)
+    worker.start()
+    worker.join(5)
+
+    assert order == ["database", "work"]

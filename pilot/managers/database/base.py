@@ -26,7 +26,7 @@ class UserOwnedDBManager(SystemdUserMixin):
     def is_reachable(self) -> bool:
         raise NotImplementedError
 
-    def _wait_until_reachable(self, timeout: float = 30.0) -> None:
+    def wait_until_reachable(self, timeout: float = 30.0) -> None:
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             if self.is_reachable():

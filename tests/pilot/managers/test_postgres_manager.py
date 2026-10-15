@@ -181,7 +181,7 @@ def test_provision_orchestrates_steps_on_linux() -> None:
         patch(f"{MODULE}.is_macos", return_value=False),
         patch.object(m, "install") as ins,
         patch.object(m, "_provision_user_owned") as prov,
-        patch.object(m, "_wait_until_reachable"),
+        patch.object(m, "wait_until_reachable"),
         patch.object(m, "secure") as sec,
     ):
         m.provision()
