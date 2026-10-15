@@ -121,6 +121,7 @@ def list_domains(name: str):
                 "domains": rows,
                 "primary": primary,
                 "certificate_email_required": domains.is_certificate_email_required,
+                "certificate_pending": domains.is_certificate_pending,
             }
         )
     except BenchError as error:

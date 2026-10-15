@@ -87,6 +87,17 @@ class SiteDomains:
         return bench_config.production.enabled and not bench_config.letsencrypt.email and self.is_tls_enabled
 
     @property
+    def is_certificate_pending(self) -> bool:
+        """Whether a certificate task for this bench is still queued or running."""
+        from pilot.managers.task import TaskReader
+        from pilot.tasks.setup_letsencrypt import SetupLetsEncryptTask
+
+        return any(
+            task.command == SetupLetsEncryptTask.command and task.status.is_active
+            for task in TaskReader(self.site.bench.path).list_tasks(limit=None)
+        )
+
+    @property
     def is_tls_enabled(self) -> bool:
         try:
             config = json.loads((self.site.path / "site_config.json").read_text())

@@ -141,3 +141,22 @@ def test_default_configs_do_not_share_common_settings() -> None:
     first.letsencrypt.email = "ops@example.com"
 
     assert BenchConfig.default("second").letsencrypt.email == ""
+
+
+def test_a_certificate_is_pending_only_while_its_task_is_active(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from pilot.managers.task import TaskStatus
+
+    domains = _domains(tmp_path, {"ssl": True})
+
+    def tasks(*entries: tuple[str, TaskStatus]):
+        return [SimpleNamespace(command=command, status=status) for command, status in entries]
+
+    with patch("pilot.managers.task.TaskReader.list_tasks") as list_tasks:
+        list_tasks.return_value = tasks(("setup-letsencrypt", TaskStatus.RUNNING))
+        assert domains.is_certificate_pending
+
+        list_tasks.return_value = tasks(("setup-letsencrypt", TaskStatus.SUCCESS), ("setup-nginx", TaskStatus.QUEUED))
+        assert not domains.is_certificate_pending

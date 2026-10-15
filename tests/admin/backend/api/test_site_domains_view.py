@@ -125,6 +125,7 @@ def test_list_domains_reports_public_tls_per_hostname(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert [row["tls"] for row in response.get_json()["domains"]] == [True, True]
+    assert response.get_json()["certificate_pending"] is False
 
 
 def test_get_domain_reports_a_custom_domain(tmp_path: Path) -> None:
