@@ -135,7 +135,7 @@ When you tag a commit after its push, its files stay from then on, if the workfl
 | `pilot build --force` | No, always builds |
 | Admin **Build assets** for a site or the bench | No, always builds |
 
-Pilot also builds on the server when the app has local changes in git, because the published files do not include those changes. Files that the asset build itself writes do not count as local changes: each declared `out_dir` and `index_html_path`, and any `components.d.ts` that Vue generates. A build that changes other tracked files, such as `yarn.lock`, makes the app build on the server from then on, so keep the build from changing them.
+Pilot also builds on the server when the app has local changes in git, because the published files do not include those changes. Files that the asset build itself writes do not count as local changes: each declared `out_dir` and `index_html_path`, and any `components.d.ts` that Vue generates. A build that changes other tracked files, such as `yarn.lock`, makes the app build on the server from then on, so keep the build from changing them. When a server build fails, Pilot puts back the lockfiles that the build's own installs changed or created, so a failed build does not rule out prebuilt assets for the next build.
 
 ## Download Results
 

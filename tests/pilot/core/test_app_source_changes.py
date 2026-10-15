@@ -77,3 +77,30 @@ def test_an_app_with_a_frappe_ui_page_has_page_islands(app: App) -> None:
     (page / "board.island.js").write_text("export default {}")
 
     assert app.has_page_islands is True
+
+
+def test_a_failed_build_restores_the_lockfiles_its_installs_changed(app: App) -> None:
+    with pytest.raises(RuntimeError), app.restore_lockfiles_on_failure():
+        (app.path / "yarn.lock").write_text("rewritten by yarn install")
+        (app.path / "frontend/yarn.lock").write_text("created by yarn install")
+        raise RuntimeError("build ran out of memory")
+
+    assert (app.path / "yarn.lock").read_text() == "lock"
+    assert not (app.path / "frontend/yarn.lock").exists()
+    assert app.has_source_changes is False
+
+
+def test_a_failed_build_keeps_lockfile_edits_made_before_it(app: App) -> None:
+    (app.path / "yarn.lock").write_text("edited by a developer")
+
+    with pytest.raises(RuntimeError), app.restore_lockfiles_on_failure():
+        raise RuntimeError("build failed")
+
+    assert (app.path / "yarn.lock").read_text() == "edited by a developer"
+
+
+def test_a_successful_build_keeps_its_lockfile_changes(app: App) -> None:
+    with app.restore_lockfiles_on_failure():
+        (app.path / "yarn.lock").write_text("updated")
+
+    assert (app.path / "yarn.lock").read_text() == "updated"

@@ -94,6 +94,10 @@ class PythonAssetBuilder:
                     self.build_page_islands()
                 return
 
+        with app.restore_lockfiles_on_failure():
+            self.build_app_from_source(app)
+
+    def build_app_from_source(self, app: "App") -> None:
         # Frappe's build runs the app's build script, which can build `frontend`/`roster`, so
         # their node_modules must be installed before it.
         for packages in get_app_packages(app.path, self.frontend_dirs(app)):

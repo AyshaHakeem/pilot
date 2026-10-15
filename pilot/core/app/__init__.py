@@ -3,7 +3,7 @@ from __future__ import annotations
 import contextlib
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -166,6 +166,23 @@ class App:
             and not any(path == output or path.startswith(f"{output}/") for output in outputs)
             for path in repo.changed_paths
         )
+
+    @contextlib.contextmanager
+    def restore_lockfiles_on_failure(self) -> Iterator[None]:
+        """Undo the lockfile edits of a failed build's own installs. Otherwise the app looks
+        locally changed, and the next build refuses its prebuilt assets."""
+        from pilot.core.app.node_packages import PACKAGE_MANAGERS
+
+        repo = self._repository.repo
+        before = set(repo.changed_paths)
+        try:
+            yield
+        except BaseException:
+            lockfiles = {manager.lockfile for manager in PACKAGE_MANAGERS}
+            repo.discard_changes(
+                [path for path in repo.changed_paths if path not in before and Path(path).name in lockfiles]
+            )
+            raise
 
     @property
     def has_page_islands(self) -> bool:
