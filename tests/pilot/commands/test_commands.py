@@ -974,16 +974,15 @@ def test_drop_site_removes_from_toml_when_no_sites_key(tmp_path: Path) -> None:
     site._remove_from_bench_toml()  # no raise
 
 
-def test_restart_dev_bench_prints_guidance(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_restart_dev_bench_fails_with_guidance(tmp_path: Path) -> None:
     from pilot.commands.runtime.restart import RestartCommand
 
     bench = make_bench(tmp_path)  # production disabled by default
-    RestartCommand(bench).run()
-    out = capsys.readouterr().out
-    assert "only for production benches" in out
+    with pytest.raises(BenchError, match="only for production benches"):
+        RestartCommand(bench).run()
 
 
-def test_restart_production_incomplete_prints_repair(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_restart_production_incomplete_fails_with_repair(tmp_path: Path) -> None:
     from pilot.commands.runtime.restart import RestartCommand
 
     bench = make_bench(tmp_path)
@@ -993,9 +992,8 @@ def test_restart_production_incomplete_prints_repair(tmp_path: Path, capsys: pyt
         mgr = MagicMock()
         mgr.is_configured.return_value = False
         create.return_value = mgr
-        RestartCommand(bench).run()
-    out = capsys.readouterr().out
-    assert "deployment is incomplete" in out
+        with pytest.raises(BenchError, match="deployment is incomplete"):
+            RestartCommand(bench).run()
     mgr.restart.assert_not_called()
 
 

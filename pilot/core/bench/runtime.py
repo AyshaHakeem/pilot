@@ -54,16 +54,16 @@ class BenchRuntime:
         on_progress(f"Stopped bench {self.bench.config.name}.")
 
     def restart_workload(self, include_admin: bool, on_progress: Callable[[str], None]) -> None:
+        """Restart production processes. Fails when there is nothing to restart, so a script
+        does not take a skipped restart for a done one."""
         if not self.bench.config.production.enabled:
-            on_progress(_DEV_RESTART_MESSAGE)
-            return
+            raise BenchError(_DEV_RESTART_MESSAGE)
 
         from pilot.managers.processes.local import ProcessManager
 
         manager = cast("ManagedProcessManager", ProcessManager.for_bench(self.bench))
         if not manager.is_configured():
-            on_progress(incomplete_production_message(self.bench))
-            return
+            raise BenchError(incomplete_production_message(self.bench))
 
         manager.write_config()
         manager.reload_manager_config()
