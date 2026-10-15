@@ -112,3 +112,43 @@ def test_a_failure_names_the_certificate_domain_not_only_the_site(tmp_path: Path
     output = capsys.readouterr().out
     assert "'shop.customer.com'" in output
     assert "site 'site-a1.zone.example'" in output
+
+
+@pytest.mark.parametrize(
+    ("certificate_names", "reissues"),
+    [
+        ({"site.example.com", "shop.example.com"}, False),
+        ({"site.example.com", "shop.example.com", "removed.example.com"}, True),
+        ({"site.example.com"}, True),
+    ],
+)
+def test_a_certificate_is_reissued_unless_it_names_exactly_the_site_domains(
+    tmp_path: Path, certificate_names: set[str], reissues: bool
+) -> None:
+    from pilot.managers.nginx import NginxManager
+
+    bench = _bench(tmp_path)
+    bench.config.letsencrypt.email = "ops@example.com"
+    site = SiteConfig(name="site.example.com", apps=[], ssl=True, domains=["shop.example.com"])
+
+    with (
+        patch.object(NginxManager, "has_cert", return_value=True),
+        patch.object(LetsEncryptManager, "_is_near_expiry", return_value=False),
+        patch("pilot.managers.letsencrypt.certificate_domain_names", return_value=certificate_names),
+        patch("pilot.managers.letsencrypt.run_command") as certbot,
+    ):
+        LetsEncryptManager(bench).obtain(site)
+
+    assert certbot.called is reissues
+
+
+def test_certificate_domain_names_reads_only_the_dns_names(tmp_path: Path) -> None:
+    from types import SimpleNamespace
+
+    from pilot.managers.letsencrypt import certificate_domain_names
+
+    openssl_output = "X509v3 Subject Alternative Name: \n    DNS:erp.example.com, DNS:site1.example.com\n"
+    with patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout=openssl_output)):
+        names = certificate_domain_names(tmp_path / "fullchain.pem")
+
+    assert names == {"erp.example.com", "site1.example.com"}

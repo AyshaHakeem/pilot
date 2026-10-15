@@ -80,7 +80,9 @@ Every `/sites/<name>/...` route accepts the site's directory name or any hostnam
 
 `DELETE /sites/<name>` queues `drop-site`. Frappe takes a full backup before the drop; pass `?no_backup=1` to skip it on large sites you do not need to keep.
 
-`GET /sites/<name>/domains` returns one row for each hostname. Each row has `domain`, `is_site`, `is_primary`, `public_scheme`, and `tls`.
+`GET /sites/<name>/domains` returns one row for each hostname. Each row has `domain`, `is_site`, `is_primary`, `public_scheme`, and `tls`. For a hostname that this host serves directly, `tls` is true only when the certificate covers it. The response also has `certificate_email_required`: true when the site uses TLS, the bench is in production, and no Let's Encrypt email is set.
+
+`POST /sites/<name>/domains` takes `{"domain": "..."}` and an optional `email`. The email is saved as the Let's Encrypt account email before certificates are issued; an invalid one returns `422` with `{"needs_email": true}`. Without any email, the domain is attached and served over HTTP until an email is set.
 
 `POST /sites/<name>/login` returns `{"url": ...}` plus an optional `hint` when the URL's host does not resolve on the server - the UI surfaces it so the user knows to add a hosts entry or use a `*.localhost` name.
 

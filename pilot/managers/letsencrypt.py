@@ -43,8 +43,8 @@ def certificate_domains(site: "SiteConfig") -> list[str]:
     return [domain for domain in site.tls_domains if is_public_domain(domain)]
 
 
-def has_domain_coverage(cert_file: Path, domains: list[str]) -> bool:
-    """True if the on-disk cert's SAN list already includes every domain."""
+def certificate_domain_names(cert_file: Path) -> set[str]:
+    """The DNS names in the on-disk cert's SAN list, or none when it cannot be read."""
     import subprocess
 
     result = subprocess.run(
@@ -54,9 +54,15 @@ def has_domain_coverage(cert_file: Path, domains: list[str]) -> bool:
         timeout=10,
     )
     if result.returncode != 0:
-        return False
-    sans = {token.strip().removeprefix("DNS:") for token in result.stdout.replace(",", " ").split()}
-    return all(domain in sans for domain in domains)
+        return set()
+    # The output starts with an "X509v3 Subject Alternative Name:" header line.
+    tokens = result.stdout.replace(",", " ").split()
+    return {token.removeprefix("DNS:") for token in tokens if token.startswith("DNS:")}
+
+
+def has_domain_coverage(cert_file: Path, domains: list[str]) -> bool:
+    """True if the on-disk cert's SAN list already includes every domain."""
+    return set(domains) <= certificate_domain_names(cert_file)
 
 
 def letsencrypt_active(bench: "Bench") -> bool:
@@ -148,12 +154,13 @@ class LetsEncryptManager:
             return  # nothing certbot can validate that this host terminates
 
         nginx_manager = NginxManager(self.bench)
+        # An exact match: a removed domain left in the certificate fails its renewal for every domain.
         if (
             nginx_manager.has_cert(site)
             and not self._is_near_expiry(site)
-            and self._has_domain_coverage(nginx_manager.cert_path(site), domains)
+            and certificate_domain_names(nginx_manager.cert_path(site)) == set(domains)
         ):
-            print(f"Certificate for {site.name} already covers all domains and is not near expiry. Skipping.")
+            print(f"Certificate for {site.name} matches its domains and is not near expiry. Skipping.")
             return
 
         domain_args = []
@@ -200,7 +207,9 @@ class LetsEncryptManager:
                     self.obtain(site.config)
             except CommandError as exc:
                 domains = ", ".join(f"'{domain}'" for domain in certificate_domains(site.config))
-                print(f"Could not obtain a certificate for {domains} (site '{site.config.name}'), skipping: {exc}")
+                print(
+                    f"Could not obtain a certificate for {domains} (site '{site.config.name}'), skipping: {exc}"
+                )
                 failed.append(site.config.name)
         if self.bench.config.admin.tls and is_public_domain(self.bench.config.admin.domain):
             try:
@@ -254,9 +263,6 @@ class LetsEncryptManager:
 
     def renew(self) -> None:
         run_command(_privileged(["certbot", "renew", "--quiet"]))
-
-    def _has_domain_coverage(self, cert_file: Path, domains: list[str]) -> bool:
-        return has_domain_coverage(cert_file, domains)
 
     def _is_near_expiry(self, site: "SiteConfig") -> bool:
         from pilot.managers.nginx import NginxManager
