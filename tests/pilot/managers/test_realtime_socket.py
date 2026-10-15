@@ -32,7 +32,14 @@ def make_bench(tmp_path: Path, **config) -> Bench:
         tmp_path,
     )
     bench.config.production.process_manager = "systemd"
+    write_node_utils(bench, "if (process.env.FRAPPE_SOCKETIO_UDS) {}")
     return bench
+
+
+def write_node_utils(bench: Bench, content: str) -> None:
+    node_utils = bench.apps_path / "frappe" / "node_utils.js"
+    node_utils.parent.mkdir(parents=True, exist_ok=True)
+    node_utils.write_text(content)
 
 
 def socketio(bench: Bench, dev: bool = False):
@@ -89,3 +96,11 @@ def test_a_long_socket_path_keeps_the_port(tmp_path: Path) -> None:
     bench = make_bench(tmp_path / ("é" * 48))
 
     assert bench.realtime_socket is None
+
+
+def test_a_frappe_without_socket_support_keeps_the_port(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    write_node_utils(bench, "conf.socketio_port = 9000;")
+
+    assert bench.realtime_socket is None
+    assert socketio(bench).env == {}

@@ -40,6 +40,8 @@ def calls(monkeypatch) -> list[str]:
 def _bench(root: Path, name: str, production: bool) -> None:
     (root / name).mkdir(parents=True)
     (root / name / "bench.toml").write_text(_TOML.format(name=name, production=str(production).lower()))
+    (root / name / "apps" / "frappe").mkdir(parents=True)
+    (root / name / "apps" / "frappe" / "node_utils.js").write_text("process.env.FRAPPE_SOCKETIO_UDS")
 
 
 def test_production_benches_move_realtime_to_the_socket_once(tmp_path: Path, calls: list[str]) -> None:
