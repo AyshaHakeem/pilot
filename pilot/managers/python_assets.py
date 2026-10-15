@@ -94,7 +94,7 @@ class PythonAssetBuilder:
                     self.build_page_islands()
                 return
 
-        with app.restore_lockfiles_on_failure():
+        with app.record_lockfiles_on_failure():
             self.build_app_from_source(app)
 
     def build_app_from_source(self, app: "App") -> None:

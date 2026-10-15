@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import re
 import shutil
 from collections.abc import Callable, Iterator
@@ -161,18 +163,37 @@ class App:
         if repo.has_unpushed_commits:
             return True
         outputs = build_output_paths(self)
+        build_lockfiles = self.failed_build_lockfiles
         return any(
             Path(path).name != "components.d.ts"
             and not any(path == output or path.startswith(f"{output}/") for output in outputs)
+            and build_lockfiles.get(path) != self._content_hash(path)
             for path in repo.changed_paths
         )
 
+    @property
+    def failed_build_lockfiles(self) -> dict[str, str]:
+        """Content hashes of the lockfiles that failed builds' own installs changed."""
+        try:
+            return json.loads(self._failed_build_lockfiles_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    @property
+    def _failed_build_lockfiles_path(self) -> Path:
+        return self._repository.repo.git_dir / "pilot-failed-build-lockfiles.json"
+
+    def _content_hash(self, path: str) -> str:
+        file = self.path / path
+        return hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else ""
+
     @contextlib.contextmanager
-    def restore_lockfiles_on_failure(self) -> Iterator[None]:
-        """Undo the lockfile edits of a failed build's own installs. Otherwise the app looks
-        locally changed, and the next build refuses its prebuilt assets. A copy of each restored
-        file stays in the git directory, in case a person edited it during the build."""
+    def record_lockfiles_on_failure(self) -> Iterator[None]:
+        """Record the lockfiles that a failed build's own installs changed, so they do not count
+        as local changes and rule out prebuilt assets. The files stay as they are, because a
+        person can edit one while the build runs. A later edit changes the hash and counts."""
         from pilot.core.app.node_packages import PACKAGE_MANAGERS
+        from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
 
         repo = self._repository.repo
         before = set(repo.changed_paths)
@@ -180,10 +201,15 @@ class App:
             yield
         except BaseException:
             lockfiles = {manager.lockfile for manager in PACKAGE_MANAGERS}
-            changed = [path for path in repo.changed_paths if path not in before and Path(path).name in lockfiles]
-            backup = repo.discard_changes(changed)
-            if backup:
-                print(f"  Restored {', '.join(changed)} after the failed build. Copies of the changed files are in {backup}.")
+            changed = {
+                path: self._content_hash(path)
+                for path in repo.changed_paths
+                if path not in before and Path(path).name in lockfiles and (self.path / path).is_file()
+            }
+            if changed:
+                with exclusive_file_lock(self._failed_build_lockfiles_path):
+                    recorded = self.failed_build_lockfiles | changed
+                    replace_private_text_locked(self._failed_build_lockfiles_path, json.dumps(recorded))
             raise
 
     @property
