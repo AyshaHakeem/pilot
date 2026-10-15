@@ -262,7 +262,7 @@ class Site:
         on_progress(f"Dropping site '{self.config.name}'...")
         with SiteCommands(self).setup_credentials(self.db_type) as credentials:
             run_command(cmd + credentials, cwd=self.bench.sites_path, stream_output=True)
-        # The site directory is archived now, so only the cron entry is left to remove.
+        # The site directory is archived, so only the cron entry remains.
         try:
             CronManager(self.bench.path).remove_schedule(self.config.name)
         except CronError as error:

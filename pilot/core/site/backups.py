@@ -37,9 +37,7 @@ class SiteBackups:
         return self.site.path / "backup_runs"
 
     def take(self, with_files: bool = True) -> tuple[str, list[Path]]:
-        """Run `frappe backup` and return the run it made. Each run is written in its own
-        staging directory first, so a backup running at the same time (manual and
-        scheduled) never returns this run's files, and retention never sees a half-written run."""
+        """Run `frappe backup` in its own staging directory and return the run it made."""
         import tempfile
 
         from pilot.exceptions import BenchError
@@ -182,7 +180,7 @@ class SiteBackups:
         return retention_from_payload(block)
 
     def _delete_offsite_run(self, offsite, offsite_runs: dict, timestamp: str) -> bool:
-        """Delete one run offsite. False keeps its local files, because the offsite delete failed."""
+        """Delete one run offsite. False when that fails, so its local files stay."""
         if timestamp in offsite_runs:
             try:
                 self._delete_offsite(offsite, timestamp, offsite_runs[timestamp])

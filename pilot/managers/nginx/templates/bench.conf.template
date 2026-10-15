@@ -4,8 +4,7 @@ upstream bench-{{ upstream_name }} {
 }
 
 {% if realtime_socket %}
-# The realtime unit and this file can be written for different Frappe code, so try both targets.
-# max_fails=0 tries the socket every time, so realtime answers as soon as it restarts.
+# The realtime unit may use either target. max_fails=0 retries the socket on every request.
 upstream realtime-{{ upstream_name }} {
     server unix:{{ realtime_socket }} max_fails=0;
     server 127.0.0.1:{{ realtime_port }} backup;

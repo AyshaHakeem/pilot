@@ -498,7 +498,6 @@ def test_systemd_admin_service_runs_gunicorn_with_idle_timeout(tmp_path: Path) -
     assert "KillMode=process" in service
     # Not PartOf the target - stopping the workload must not stop the admin.
     assert "PartOf=" not in service
-    # Starts at boot so tasks queued before a reboot run.
     assert "[Install]\nWantedBy=default.target" in service
 
 

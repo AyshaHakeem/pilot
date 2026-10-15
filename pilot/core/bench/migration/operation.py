@@ -258,9 +258,8 @@ class MigrationOperation:
             self._complete(on_step)
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
-        """Pause for the user when a chain task stopped without its own failure handling:
-        killed, or its process died. A no-op once the task queued the next one or the
-        operation left the chain phases."""
+        """Pause for the user when a chain task stopped without its failure handling. A no-op
+        once the chain moved on."""
         if self.chain[-1]["task_id"] != task_id or self.state not in _CHAIN_PHASES:
             return
         if self.state != phase or self._is_step_done(phase, site_name):

@@ -61,9 +61,8 @@ def build_memory_limit_mb(override_mb: int = 0) -> int:
 
 @contextmanager
 def build_swap() -> Iterator[None]:
-    """Add swap while a build runs on a host with little free memory, so a large frontend
-    builds instead of hitting the cap. MariaDB's unit limits its own swap, so the database
-    stays in memory. Without the helper (an install before it) the build runs as before."""
+    """Add swap while a build runs on a host with little free memory. Without the
+    install.sh helper, the build runs without it."""
     if not BUILD_SWAP_HELPER.exists() or not can_read_memory() or available_memory_mb() >= BUILD_SWAP_BELOW_MB:
         yield
         return

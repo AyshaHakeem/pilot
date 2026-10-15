@@ -71,8 +71,8 @@ class SiteDomains:
         return self._description(config, attached_domain, is_primary)
 
     def apply_task(self, idempotency_key: str | None = None, email: str = "") -> str:
-        """Regenerate nginx for the domain change, and issue certificates when the site
-        needs them and an email can register them. Without an email, nginx still changes."""
+        """Regenerate nginx for the domain change, and issue certificates when the site needs
+        them and has an email."""
         from pilot.tasks.setup_letsencrypt import SetupLetsEncryptTask
         from pilot.tasks.setup_nginx import SetupNginxTask
 

@@ -21,8 +21,8 @@ def systemctl_env() -> dict:
 
 
 def can_cap_memory() -> bool:
-    """Whether a build can run in a memory-capped scope. A trial scope catches a host without a
-    user bus or user manager, where systemd-run fails before it starts the build."""
+    """Whether a build can run in a memory-capped scope. A trial scope catches a host without
+    a user bus."""
     controllers = Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/cgroup.controllers")
     try:
         if not shutil.which("systemd-run") or "memory" not in controllers.read_text().split():

@@ -71,7 +71,7 @@ class SystemdRenderer(ServiceRenderer):
             f"KillMode=process\n"
             f"StandardOutput=append:{pd.log_file}\n"
             f"StandardError=append:{pd.log_file}.error.log\n\n"
-            # Starts at boot so the worker runs tasks queued before a reboot; idle-stops after.
+            # Start at boot to run tasks queued before a reboot.
             f"[Install]\n"
             f"WantedBy=default.target\n"
         )

@@ -167,8 +167,7 @@ class PythonEnvManager:
         return env
 
     def install_app(self, app: "App") -> None:
-        """Install the app editable. A dev extra that does not resolve, such as frappe
-        version-16's pypika-stubs against its own PyPika fork, must not block the app."""
+        """Install the app editable. A dev extra that does not resolve does not block it."""
         target = app.editable_target
         try:
             self._install_editable(target)

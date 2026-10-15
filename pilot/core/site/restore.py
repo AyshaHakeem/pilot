@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 RESTORE_PARTS = ("database", "public", "private", "config")
 # The end of tar's error output says why it failed.
 _STDERR_TAIL_BYTES = 4096
-# Keys that tie a config to its own database, cache, domains, host or Pilot, so they stay as this site has them.
+# Keys that belong to this site's own database, cache, domains, host or Pilot.
 LOCAL_CONFIG_PREFIXES = ("db_", "redis_", "pilot_", "atlas_")
 LOCAL_CONFIG_KEYS = PROTECTED_CONFIG_KEYS | {
     "rds_db",

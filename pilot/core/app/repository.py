@@ -50,12 +50,8 @@ class AppRepository:
         return pin is not None and not self.is_on_revision(pin)
 
     def update_target(self) -> RevisionPin | None:
-        """The fixed revision this app would update to, or None when there is none. (forward only)
-
-        A marketplace app follows the registry's releases for its branch. It follows the
-        branch tip instead when it sets `follow_branch`, or when the registry has no
-        release for its branch, as for a developer's own branch.
-        """
+        """The fixed revision this app would update to, or None (forward only). A marketplace
+        app follows the registry's releases, or its branch tip with `follow_branch` or no release."""
         entry = None if self.app.config.follow_branch else self.marketplace_entry
         release = self.newest_release(entry) if entry else None
         if release is not None:
@@ -79,8 +75,7 @@ class AppRepository:
         return entry
 
     def newest_release(self, marketplace_entry: dict) -> dict | None:
-        """The newest release the registry advertises for this app's branch. Releases
-        arrive newest-first."""
+        """The newest release the registry advertises for this app's branch."""
         from pilot.integrations.marketplace import Marketplace
 
         return next(

@@ -80,8 +80,7 @@ class BenchSettings:
                 "Settings were saved, but running services could not be restarted.",
             ) from error
         finally:
-            # Ports and the process manager decide where nginx sends traffic. A timed-out
-            # restart still finishes in the process manager, so nginx follows the saved config.
+            # A timed-out restart still finishes, so nginx follows the saved config.
             if self.bench.config.production.enabled:
                 self._apply_nginx()
 

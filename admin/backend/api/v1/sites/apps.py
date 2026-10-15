@@ -89,7 +89,7 @@ def site_apps(name: str):
                 "is_marketplace": app.is_marketplace,
             }
         except (BenchError, OSError, ValueError, subprocess.SubprocessError) as error:
-            # One unreadable app must not hide the site's other apps; the row keeps its name.
+            # An unreadable app keeps its row, with its name only.
             current_app.logger.warning("Could not read details of app %s: %s", app_name, error)
         result.append(entry)
 

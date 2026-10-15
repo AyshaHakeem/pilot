@@ -34,7 +34,7 @@ class ProxyConfig:
 
     # The edge may stream custom TLS domains with PROXY protocol v2.
     protocol_v2: bool = False
-    # Direct domains may sit behind Cloudflare's proxy; take the client IP from CF-Connecting-IP.
+    # Take the client IP from CF-Connecting-IP.
     cloudflare: bool = False
 
     @classmethod

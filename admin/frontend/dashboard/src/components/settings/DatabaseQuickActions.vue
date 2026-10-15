@@ -256,7 +256,6 @@ const runSizingAction = async () => {
   }
 }
 
-// Memory split: the database's share of host memory, previewed per step from the server.
 const memoryShare = computed(() => capabilities.value?.actions.memory_share ?? null)
 const memorySplitOpen = ref(false)
 const memorySplitPercent = ref(50)

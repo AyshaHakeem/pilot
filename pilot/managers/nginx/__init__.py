@@ -509,9 +509,7 @@ class NginxManager:
             replace_private_text_locked(path, content)
 
     def _restore_unvalidated(self) -> None:
-        """Put back the files nginx rejected. Every bench shares one nginx, so a broken
-        file left in place would stop it from starting at the next restart. A file that
-        another operation rewrote since is theirs, and stays."""
+        """Put back the files nginx rejected, except a file that another operation rewrote since."""
         for path, (previous, written) in self._unvalidated.items():
             with exclusive_file_lock(path):
                 if (path.read_text() if path.exists() else None) != written:
@@ -613,8 +611,7 @@ class NginxManager:
                 run_command(_privileged(["unlink", str(entry)]))
 
     def _reload_or_rollback(self, symlink_path: Path) -> None:
-        """Reload, or unpublish this bench when no tested config is left for it, then re-raise.
-        A failed reload puts back the previous files, so a published bench keeps serving them."""
+        """Reload, or unpublish this bench when no config is left for it, then re-raise."""
         try:
             self.reload()
         except Exception:

@@ -66,8 +66,7 @@ class BenchRuntime:
         on_progress(f"Stopped bench {self.bench.config.name}.")
 
     def restart_workload(self, include_admin: bool, on_progress: Callable[[str], None]) -> None:
-        """Restart production processes. Fails when there is nothing to restart, so a script
-        does not take a skipped restart for a done one."""
+        """Restart production processes. Fails when there is nothing to restart."""
         if not self.bench.config.production.enabled:
             raise BenchError(_DEV_RESTART_MESSAGE)
 

@@ -24,8 +24,7 @@ class ListSiteAppsCommand(Command):
         bench_apps = {app.config.name for app in self.bench.apps()}
         for app in self.site.active_apps():
             self.report(app)
-            # A restore from another bench can list apps this bench does not have. Stdout keeps
-            # one app name per line for scripts.
+            # Stdout keeps one app name per line for scripts.
             if app not in bench_apps:
                 print(
                     f"Warning: {app} is not on this bench. Uninstall it from the site to drop it.",

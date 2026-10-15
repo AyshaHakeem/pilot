@@ -31,8 +31,8 @@ class DropSiteCommand(Command):
 
     @classmethod
     def from_frappe_args(cls, bench: "Bench", args: tuple[str, ...]) -> "DropSiteCommand":
-        """Read Frappe's `[--site SITE] drop-site SITE [options]`, so existing scripts keep working
-        and still get Pilot's cleanup. Pilot always uses the bench's own database credentials."""
+        """Parse Frappe's `[--site SITE] drop-site SITE [options]` form. The bench's own
+        database credentials are always used."""
         parser = argparse.ArgumentParser(prog="drop-site", add_help=False, exit_on_error=False)
         parser.add_argument("--site")
         parser.add_argument("command")

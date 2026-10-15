@@ -15,7 +15,6 @@ class MariaDBConfig:
     admin_user: str = "root"
     socket_path: str = ""
     existing: bool = False
-    # The share of host memory Pilot's MariaDB may use; the rest stays for the benches.
     memory_share: float = 0.5
 
     def validate(self) -> None:

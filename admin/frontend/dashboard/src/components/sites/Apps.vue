@@ -53,8 +53,7 @@ const canDisable = (app: AppCardEntry | null) => {
   return canDisableApps.value && Boolean(app && appDetailMap.value[app.name]?.is_marketplace)
 }
 
-// Registry metadata describes the listed repository, so a fork or a private copy of an
-// app with the same name keeps its own title, links and logo.
+// Registry metadata describes the listed repository, not a fork with the same name.
 const registryValue = (map: Record<string, string>, name: string) =>
   appDetailMap.value[name]?.is_marketplace ? map[name] : ''
 

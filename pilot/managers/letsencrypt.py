@@ -358,8 +358,7 @@ class LetsEncryptManager:
 
 def install_renewal_timer() -> bool:
     """Install the host-wide daily timer that renews certificates and warns before one
-    expires. Pilot owns renewal: Fedora and Arch do not enable certbot's own timer.
-    Returns whether it was installed now."""
+    expires; Fedora and Arch do not enable certbot's timer. Returns whether it was installed now."""
     from pilot.managers.environment import AdminEnvManager
     from pilot.managers.systemd_user import install_user_timer, user_timer_installed
     from pilot.utils import cli_root

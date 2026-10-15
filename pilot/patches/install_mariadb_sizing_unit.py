@@ -6,8 +6,8 @@ PATCH_NAME = Path(__file__).stem
 
 
 def run(benches_root: Path) -> None:
-    """Install the unit that sizes Pilot's MariaDB before it starts, so a resized VM gets
-    sizing for its new memory. One MariaDB serves every bench, so the first bench applies it."""
+    """Install the unit that sizes Pilot's MariaDB before each start. One MariaDB serves
+    every bench, so the first bench installs it."""
     from pilot.config import BenchConfig
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.database import MariaDBManager

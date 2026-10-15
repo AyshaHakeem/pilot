@@ -189,9 +189,8 @@ class App:
 
     @contextlib.contextmanager
     def record_lockfiles_on_failure(self) -> Iterator[None]:
-        """Record the lockfiles that a failed build's own installs changed, so they do not count
-        as local changes and rule out prebuilt assets. The files stay as they are, because a
-        person can edit one while the build runs. A later edit changes the hash and counts."""
+        """Record the lockfiles a failed build's installs changed, so they do not rule out
+        prebuilt assets. A later edit changes the hash and counts as a change."""
         from pilot.core.app.node_packages import PACKAGE_MANAGERS
         from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
 

@@ -17,7 +17,6 @@ const DNS_RECORD_COLUMNS = [
 
 interface Props {
   siteName: string
-  // The site serves TLS and the bench has no Let's Encrypt email yet.
   emailRequired?: boolean
 }
 

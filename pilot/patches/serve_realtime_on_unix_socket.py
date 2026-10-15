@@ -6,8 +6,7 @@ PATCH_NAME = Path(__file__).stem
 
 
 def run(benches_root: Path) -> None:
-    """Move production realtime off its TCP port, which answered from the internet past
-    nginx, onto a Unix socket that only nginx reaches."""
+    """Move production realtime from its TCP port to a Unix socket that only nginx reaches."""
     from pilot.core.bench import Bench
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.nginx import NginxManager

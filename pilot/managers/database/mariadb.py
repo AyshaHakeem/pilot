@@ -315,14 +315,13 @@ class MariaDBManager(UserOwnedDBManager):
 
     @property
     def sized_for_memory_mb(self) -> int | None:
-        """The host memory my.cnf was sized for; None for a my.cnf from before Pilot recorded it."""
+        """The host memory my.cnf was sized for, or None when it is not recorded."""
         match = _SIZED_FOR.search(self.my_cnf_path.read_text()) if self.my_cnf_path.exists() else None
         return int(match.group(1)) if match else None
 
     def size_for_host(self) -> MariaDBMemorySizing | None:
-        """Size the server again before it starts when the host memory changed, as after a
-        VM resize, or the unit limits do not match the sizing. Run by the sizing unit, so
-        MariaDB starts with the new pool and limits."""
+        """Size the server again before it starts when the host memory or the unit limits no
+        longer match the sizing. Run by the sizing unit."""
         if is_macos() or self.config.existing or not self.my_cnf_path.exists():
             return None
         sized_for = self.sized_for_memory_mb
@@ -333,8 +332,7 @@ class MariaDBManager(UserOwnedDBManager):
                 return None
         self._drop_oversized_buffer_pool_override()
         sizing = self._write_config()
-        # The unit file holds the limits for later starts; the runtime properties apply now,
-        # without a daemon-reload while systemd is starting MariaDB.
+        # Runtime properties apply now; a daemon-reload while systemd starts MariaDB would block.
         self.unit_path.write_text(self._render_unit(sizing))
         self._set_runtime_memory_limits(sizing)
         return sizing

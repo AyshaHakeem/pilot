@@ -69,8 +69,7 @@ class TaskWorker:
                 self._worker.write_pid(None)
 
     def _wait_for_database(self) -> None:
-        """Hold the first task until the bench's database is up, so a task queued before a
-        reboot does not fail on it. After the timeout, tasks run and report their own errors."""
+        """Hold the first task until the bench's database is up, for at most the timeout."""
         from pilot.core.bench import Bench
         from pilot.core.bench.runtime import BenchRuntime
         from pilot.exceptions import BenchError

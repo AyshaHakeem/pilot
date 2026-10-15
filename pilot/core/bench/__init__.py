@@ -318,9 +318,7 @@ class Bench:
 
     @property
     def realtime_socket(self) -> Path | None:
-        """The Unix socket production realtime listens on, so it never answers from the network.
-        None where realtime keeps its TCP port, including a Frappe that does not read
-        FRAPPE_SOCKETIO_UDS."""
+        """The Unix socket production realtime listens on, or None where it uses its TCP port."""
         socket = self.realtime_socket_path
         node_utils = self.apps_path / "frappe" / "node_utils.js"
         if socket is None or not node_utils.exists() or "FRAPPE_SOCKETIO_UDS" not in node_utils.read_text():
@@ -329,8 +327,8 @@ class Bench:
 
     @property
     def realtime_socket_path(self) -> Path | None:
-        """Where production realtime listens when its Frappe supports a Unix socket. None for
-        lite mode, the Python backend and supervisor, which always use the TCP port."""
+        """Where production realtime listens when Frappe supports a Unix socket. None for lite
+        mode, the Python backend and supervisor."""
         if self.is_lite_mode or self.config.socketio_backend != "node":
             return None
         if self.config.production.process_manager != "systemd":
