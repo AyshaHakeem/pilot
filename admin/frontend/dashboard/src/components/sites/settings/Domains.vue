@@ -69,6 +69,7 @@ const domainMenuOptions = (row: DomainRow): DropdownItem[] => {
 
 const PENDING_POLL_MS = 5000
 let pendingPoll: ReturnType<typeof setTimeout> | undefined
+let unmounted = false
 
 const loadDomains = async (quiet = false) => {
   clearTimeout(pendingPoll)
@@ -80,7 +81,9 @@ const loadDomains = async (quiet = false) => {
     primaryDomain.value = data.primary || ''
     certificateEmailRequired.value = Boolean(data.certificate_email_required)
     certificatePending.value = Boolean(data.certificate_pending)
-    if (certificatePending.value) pendingPoll = setTimeout(() => loadDomains(true), PENDING_POLL_MS)
+    if (certificatePending.value && !unmounted) {
+      pendingPoll = setTimeout(() => loadDomains(true), PENDING_POLL_MS)
+    }
   } catch (e) {
     error.value = errorMessage(e, 'Failed to load domains.')
   } finally {
@@ -119,7 +122,10 @@ watch(nginxEnabled, (enabled) => {
   if (enabled) loadDomains()
 })
 
-onUnmounted(() => clearTimeout(pendingPoll))
+onUnmounted(() => {
+  unmounted = true
+  clearTimeout(pendingPoll)
+})
 </script>
 
 <template>
