@@ -411,6 +411,18 @@ class MariaDBManager(UserOwnedDBManager):
             time.sleep(1)
         return True
 
+    def keep_out_of_swap(self) -> None:
+        """Set MemorySwapMax to 0, live first and then in the unit file, so a failed attempt can retry."""
+        if is_macos() or self.config.existing or not self.unit_path.exists():
+            return
+        env = self._systemctl_env()
+        run_command(self._systemctl("set-property", "--runtime", self._UNIT_NAME, "MemorySwapMax=0"), env=env)
+        current = self.unit_path.read_text()
+        unit = re.sub(r"^MemorySwapMax=.*$", "MemorySwapMax=0", current, flags=re.M)
+        if unit != current:
+            self.unit_path.write_text(unit)
+            run_command(self._systemctl("daemon-reload"), env=env)
+
     def raise_memory_high(self) -> bool:
         """Raise the unit's MemoryHigh to `memory_high_for` its MemoryMax, on disk and live.
         Never lowers a limit or restarts the server. Returns whether anything changed."""
@@ -441,6 +453,7 @@ class MariaDBManager(UserOwnedDBManager):
                 self._UNIT_NAME,
                 f"MemoryHigh={sizing.memory_high_mb}M",
                 f"MemoryMax={sizing.memory_max_mb}M",
+                "MemorySwapMax=0",
             ),
             env=self._systemctl_env(),
         )
@@ -928,7 +941,7 @@ class MariaDBManager(UserOwnedDBManager):
             "LimitNOFILE=65535\n"
             f"MemoryHigh={sizing.memory_high_mb}M\n"
             f"MemoryMax={sizing.memory_max_mb}M\n"
-            "MemorySwapMax=100M\n"
+            "MemorySwapMax=0\n"
             "Restart=on-failure\n\n"
             "[Install]\n"
             "WantedBy=default.target\n"
