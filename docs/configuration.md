@@ -237,6 +237,8 @@ Before it applies the Central credential, bootstrap sizes Pilot's MariaDB for th
 
 The same sizing runs again when the host's memory changes, for example after a VM resize. `my.cnf` records the memory it was sized for. The user unit `pilot-mariadb-sizing.service` runs before every start of `pilot-mariadb.service`; when the host memory differs from the recorded value by 100 MB or more, it writes `my.cnf` and the unit for the new memory and sets the new memory limits for this start. MariaDB then starts with the new buffer pool, with no restart. A buffer pool size saved in `managed.cnf` that is larger than the new host allows is removed, so the automatic sizing takes over.
 
+On a host with less than 1 GB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
+
 `mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
 
 The domain provider controls the edge route for each hostname. Its route policy gives Pilot the public scheme, origin scheme, and client IP source.

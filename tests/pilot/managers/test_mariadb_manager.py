@@ -70,6 +70,18 @@ def test_small_vm_limits_leave_memory_for_other_pilot_processes() -> None:
     assert sizing.memory_max_mb < sizing.total_memory_mb
 
 
+def test_a_host_under_1_gb_gets_a_smaller_mariadb() -> None:
+    """Measured on one lite bench: MariaDB holds about 90 MB plus its buffer pool."""
+    sizing = calculate_mariadb_memory(512)
+
+    assert sizing.innodb_buffer_pool_mb == 64
+    assert sizing.key_buffer_mb == 8
+    assert sizing.max_connections == 20
+    assert sizing.memory_max_mb == 256
+    # MemoryHigh stays above the roughly 155 MB working set, so MariaDB is not throttled.
+    assert sizing.memory_high_mb == 192
+
+
 def test_small_vm_variable_limits_use_mariadb_ceiling_not_full_host() -> None:
     limits = calculate_mariadb_variable_limits(2048)
 
@@ -92,7 +104,7 @@ def test_larger_vm_variable_limits_preserve_press_memory_guards() -> None:
     assert limits.max_connections_recommended == 50
 
 
-@pytest.mark.parametrize("total_memory_mb", [1024, 2048, 3072, 4096, 8192, 16384, 32768])
+@pytest.mark.parametrize("total_memory_mb", [512, 960, 1024, 2048, 3072, 4096, 8192, 16384, 32768])
 def test_startup_values_are_inside_configurable_ranges(total_memory_mb: int) -> None:
     sizing = calculate_mariadb_memory(total_memory_mb)
     limits = calculate_mariadb_variable_limits(total_memory_mb)
