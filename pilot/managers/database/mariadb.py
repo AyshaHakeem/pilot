@@ -321,12 +321,16 @@ class MariaDBManager(UserOwnedDBManager):
 
     def size_for_host(self) -> MariaDBMemorySizing | None:
         """Size the server again before it starts when the host memory changed, as after a
-        VM resize. Run by the sizing unit, so MariaDB starts with the new pool and limits."""
+        VM resize, or the unit limits do not match the sizing. Run by the sizing unit, so
+        MariaDB starts with the new pool and limits."""
         if is_macos() or self.config.existing or not self.my_cnf_path.exists():
             return None
         sized_for = self.sized_for_memory_mb
         if sized_for is not None and abs(self._total_memory_mb() - sized_for) < _RESIZE_THRESHOLD_MB:
-            return None
+            # tune_to_host leaves the old unit when a shrink must wait.
+            sized_unit = self._render_unit(calculate_mariadb_memory(sized_for, self.config.memory_share))
+            if self.unit_path.exists() and self.unit_path.read_text() == sized_unit:
+                return None
         self._drop_oversized_buffer_pool_override()
         sizing = self._write_config()
         # The unit file holds the limits for later starts; the runtime properties apply now,

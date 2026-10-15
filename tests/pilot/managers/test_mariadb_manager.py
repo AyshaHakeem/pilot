@@ -1260,6 +1260,8 @@ def test_size_for_host_sizes_again_when_the_memory_moved_by_100_mb(
         manager.config_dir.mkdir(parents=True)
         marker = f"# pilot-sized-for-memory-mb = {sized_for_mb}\n" if sized_for_mb else ""
         manager.my_cnf_path.write_text(f"# Managed by Pilot.\n{marker}[mysqld]\n")
+        if sized_for_mb:
+            unit_path.write_text(manager._render_unit(calculate_mariadb_memory(sized_for_mb)))
         sizing = manager.size_for_host()
         sized_for, my_cnf = manager.sized_for_memory_mb, manager.my_cnf_path.read_text()
 
@@ -1270,6 +1272,27 @@ def test_size_for_host_sizes_again_when_the_memory_moved_by_100_mb(
         assert sized_for == host_memory_mb
         assert f"innodb-buffer-pool-size = {expected.innodb_buffer_pool_mb}M" in my_cnf
         assert f"MemoryMax={expected.memory_max_mb}M" in unit_path.read_text()
+
+
+def test_size_for_host_applies_unit_limits_that_a_deferred_shrink_left(tmp_path) -> None:
+    """tune_to_host writes my.cnf for a smaller share but keeps the old unit until MariaDB shrinks."""
+    manager = _manager()
+    unit_path = tmp_path / "pilot-mariadb.service"
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(type(manager), "unit_path", new_callable=PropertyMock, return_value=unit_path),
+        patch.object(manager, "_total_memory_mb", return_value=4096),
+        patch.object(manager, "_set_runtime_memory_limits") as set_limits,
+    ):
+        manager.config_dir.mkdir(parents=True)
+        manager.my_cnf_path.write_text("# Managed by Pilot.\n# pilot-sized-for-memory-mb = 4096\n[mysqld]\n")
+        unit_path.write_text(manager._render_unit(calculate_mariadb_memory(4096, memory_share=0.7)))
+        sizing = manager.size_for_host()
+
+    assert sizing == calculate_mariadb_memory(4096)
+    assert set_limits.called
+    assert f"MemoryMax={sizing.memory_max_mb}M" in unit_path.read_text()
 
 
 def test_a_larger_memory_share_gives_mariadb_more_of_the_host(tmp_path) -> None:
