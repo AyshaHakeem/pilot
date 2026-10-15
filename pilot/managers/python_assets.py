@@ -127,11 +127,12 @@ class PythonAssetBuilder:
 
     @staticmethod
     def frontend_dirs(app: "App") -> list[Path]:
-        return [
-            app.path / name
-            for name in ("frontend", "roster")
-            if NodePackages(app.path / name).has_package_json
-        ]
+        """`frontend`, `roster` and each build dir that `[tool.bench.assets]` declares, such as
+        Helpdesk's `desk`, that has a package.json."""
+        from pilot.core.app.prebuilt_assets import asset_build_dirs
+
+        names = dict.fromkeys(["frontend", "roster", *asset_build_dirs(app)])
+        return [app.path / name for name in names if NodePackages(app.path / name).has_package_json]
 
     def setup_prebuilt_assets(
         self,

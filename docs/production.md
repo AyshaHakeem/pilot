@@ -104,7 +104,7 @@ Firewall and WAF config are bench settings. Settings apply code should delegate 
 
 ## JS Dependencies
 
-Before a build, Pilot installs each app's JS dependencies with the package manager its lockfile names: `pnpm-lock.yaml` uses pnpm, and `yarn.lock` or no lockfile uses yarn. The install uses the frozen lockfile and fails the build when the lockfile is out of date. A `frontend` or `roster` folder without its own lockfile installs from the app root when the app root workspace lists it. For an app root with `pnpm-lock.yaml`, the folder must be an importer in that lockfile. For other app roots, the folder must match the `workspaces` patterns in `package.json`. Pilot installs pnpm into `~/.local` the first time an app needs it. An app with both lockfiles fails the build.
+Before a build, Pilot installs each app's JS dependencies with the package manager its lockfile names: `pnpm-lock.yaml` uses pnpm, and `yarn.lock` or no lockfile uses yarn. The install uses the frozen lockfile and fails the build when the lockfile is out of date. Pilot checks the app root, the `frontend` and `roster` folders, and each `build_dir` in `[tool.bench.assets]`, and installs where `node_modules` is missing or older than the lockfile. A folder without its own lockfile installs from the app root when the app root workspace lists it. For an app root with `pnpm-lock.yaml`, the folder must be an importer in that lockfile. For other app roots, the folder must match the `workspaces` patterns in `package.json`. Pilot installs pnpm into `~/.local` the first time an app needs it. An app with both lockfiles fails the build.
 
 ## Build Memory Cap
 
