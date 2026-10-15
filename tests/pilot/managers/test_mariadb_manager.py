@@ -168,14 +168,16 @@ def test_provision_initialises_and_installs_unit_when_fresh(tmp_path) -> None:
         patch.object(m, "is_running", return_value=False),
         patch.object(m, "_total_memory_mb", return_value=8192),
         patch.object(m, "_install_unit") as install_unit,
+        patch.object(m, "install_sizing_unit") as install_sizing_unit,
         patch.object(m, "_reset_failed_state") as reset_failed_state,
         patch.object(m, "_wait_until_reachable"),
         patch.object(m, "secure_installation") as secure,
         patch(f"{MODULE}.run_command") as rc,
     ):
         m.provision()
-        assert m.my_cnf_path.read_text().startswith("# Managed by Pilot.\n[mysqld]\n")
+        assert m.my_cnf_path.read_text().startswith("# Managed by Pilot.\n# pilot-sized-for-memory-mb = 8192\n[mysqld]\n")
     install_unit.assert_called_once()
+    install_sizing_unit.assert_called_once()
     reset_failed_state.assert_called_once()
     secure.assert_called_once()
     argv_calls = [c.args[0] for c in rc.call_args_list]
@@ -1237,3 +1239,93 @@ def test_an_existing_unit_gets_its_memory_high_raised_live(tmp_path: Path, monke
 
     limits["MemoryHigh"] = 2658
     assert manager.raise_memory_high() is False
+
+
+@pytest.mark.parametrize(
+    ("sized_for_mb", "host_memory_mb", "sizes"),
+    [(4096, 4096, False), (4096, 4150, False), (4096, 4196, True), (8192, 2048, True), (None, 4096, True)],
+)
+def test_size_for_host_sizes_again_when_the_memory_moved_by_100_mb(
+    tmp_path, sized_for_mb: int | None, host_memory_mb: int, sizes: bool
+) -> None:
+    manager = _manager()
+    unit_path = tmp_path / "pilot-mariadb.service"
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(type(manager), "unit_path", new_callable=PropertyMock, return_value=unit_path),
+        patch.object(manager, "_total_memory_mb", return_value=host_memory_mb),
+        patch.object(manager, "_set_runtime_memory_limits") as set_limits,
+    ):
+        manager.config_dir.mkdir(parents=True)
+        marker = f"# pilot-sized-for-memory-mb = {sized_for_mb}\n" if sized_for_mb else ""
+        manager.my_cnf_path.write_text(f"# Managed by Pilot.\n{marker}[mysqld]\n")
+        sizing = manager.size_for_host()
+        sized_for, my_cnf = manager.sized_for_memory_mb, manager.my_cnf_path.read_text()
+
+    assert (sizing is not None) is sizes
+    assert set_limits.called is sizes
+    if sizes:
+        expected = calculate_mariadb_memory(host_memory_mb)
+        assert sized_for == host_memory_mb
+        assert f"innodb-buffer-pool-size = {expected.innodb_buffer_pool_mb}M" in my_cnf
+        assert f"MemoryMax={expected.memory_max_mb}M" in unit_path.read_text()
+
+
+def test_tune_to_host_drops_a_buffer_pool_size_saved_on_a_larger_host(tmp_path) -> None:
+    manager = _manager()
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(manager, "is_installed", return_value=True),
+        patch.object(manager, "is_provisioned", return_value=True),
+        patch.object(manager, "_total_memory_mb", return_value=4096),
+        patch.object(manager, "_install_unit"),
+        patch.object(manager, "_wait_until_healthy"),
+        patch.object(manager, "_unit_memory_mb", return_value=None),
+        patch.object(manager, "_apply_live_sizing"),
+        patch.object(manager, "_lower_runtime_memory_limits"),
+    ):
+        manager.config_dir.mkdir(parents=True)
+        manager.managed_cnf_path.write_text(
+            "[mysqld]\ninnodb-buffer-pool-size = 20480M\ninnodb-buffer-pool-size-max = 21000M\nmax-connections = 80\n"
+        )
+        manager.tune_to_host()
+        managed = manager.managed_cnf_path.read_text()
+
+    assert "innodb-buffer-pool-size" not in managed
+    assert "max-connections = 80" in managed
+
+
+def test_tune_to_host_keeps_the_old_unit_while_the_shrink_waits(tmp_path) -> None:
+    manager = _manager()
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(manager, "is_installed", return_value=True),
+        patch.object(manager, "is_provisioned", return_value=True),
+        patch.object(manager, "_total_memory_mb", return_value=1024),
+        patch.object(manager, "_install_unit") as install_unit,
+        patch.object(manager, "_wait_until_healthy"),
+        patch.object(manager, "_unit_memory_mb", return_value=1_000_000),
+        patch.object(manager, "_apply_live_sizing"),
+        patch.object(manager, "_lower_runtime_memory_limits", return_value=False),
+    ):
+        manager.tune_to_host()
+
+    install_unit.assert_not_called()
+
+
+def test_the_sizing_unit_runs_before_every_mariadb_start(tmp_path) -> None:
+    manager = _manager()
+    with (
+        patch.object(type(manager), "user_unit_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch(f"{MODULE}.run_command") as run,
+    ):
+        manager.install_sizing_unit()
+
+    unit = (tmp_path / "pilot-mariadb-sizing.service").read_text()
+    assert "Before=pilot-mariadb.service" in unit
+    assert "WantedBy=pilot-mariadb.service" in unit
+    assert unit.split("ExecStart=")[1].split("\n")[0].endswith(" -m pilot.managers.database")
+    assert any("enable" in call.args[0] for call in run.call_args_list)
