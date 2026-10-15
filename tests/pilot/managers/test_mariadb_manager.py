@@ -795,7 +795,7 @@ def test_linux_unit_starts_with_option_file_and_memory_limits(tmp_path) -> None:
     assert "LimitNOFILE=65535" in content
     assert f"MemoryHigh={sizing.memory_high_mb}M" in content
     assert f"MemoryMax={sizing.memory_max_mb}M" in content
-    assert "MemorySwapMax=100M" in content
+    assert "MemorySwapMax=0\n" in content
 
 
 def _tune(manager, tmp_path, current_max_mb):
@@ -1218,6 +1218,25 @@ def test_validate_endpoint_on_macos_checks_password_for_already_secured_server(t
     ):
         resp = _post_validate(_client(tmp_path), "wrong")
     assert resp.get_json() == {"engine": "mariadb", "state": "invalid"}
+
+
+def test_an_existing_unit_stops_mariadb_swapping_live(tmp_path: Path, monkeypatch) -> None:
+    from pilot.managers.database import mariadb as module
+
+    manager = _manager()
+    unit = tmp_path / "pilot-mariadb.service"
+    unit.write_text("[Service]\nMemoryHigh=384M\nMemoryMax=512M\nMemorySwapMax=100M\n")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(module, "is_macos", lambda: False)
+    monkeypatch.setattr(type(manager), "unit_path", property(lambda self: unit))
+    monkeypatch.setattr(module, "run_command", lambda argv, **kwargs: commands.append(argv))
+
+    assert manager.keep_out_of_swap() is True
+    assert "MemorySwapMax=0\n" in unit.read_text()
+    assert "MemoryMax=512M" in unit.read_text()
+    assert commands[-1][-1] == "MemorySwapMax=0"
+
+    assert manager.keep_out_of_swap() is False
 
 
 def test_an_existing_unit_gets_its_memory_high_raised_live(tmp_path: Path, monkeypatch) -> None:
