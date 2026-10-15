@@ -19,13 +19,13 @@ def run(benches_root: Path) -> None:
             continue
         config = BenchConfig.read(bench_dir)
         manager = MariaDBManager(config.mariadb)
-        if _runs_own_mariadb(config, manager):
+        if _has_own_mariadb(config, manager):
             manager.install_sizing_unit()
             print("Installed the MariaDB sizing unit.")
         mark_applied(bench_dir, PATCH_NAME)
 
 
-def _runs_own_mariadb(config, manager) -> bool:
+def _has_own_mariadb(config, manager) -> bool:
     from pilot.managers.platform import is_macos
 
     return (

@@ -17,12 +17,12 @@ def run(benches_root: Path) -> None:
             continue
         if is_applied(bench_dir, PATCH_NAME):
             continue
-        if _issues_certificates(BenchConfig.read(bench_dir)) and install_renewal_timer():
+        if _is_issuing_certificates(BenchConfig.read(bench_dir)) and install_renewal_timer():
             print("Installed the certificate renewal timer.")
         mark_applied(bench_dir, PATCH_NAME)
 
 
-def _issues_certificates(config) -> bool:
+def _is_issuing_certificates(config) -> bool:
     from pilot.managers.platform import is_linux
 
     return is_linux() and config.production.enabled and bool(config.letsencrypt.email)
