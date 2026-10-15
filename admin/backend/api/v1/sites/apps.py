@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -87,8 +88,9 @@ def site_apps(name: str):
                 # Registry links and metadata describe the listed repository, not a fork of it.
                 "is_marketplace": app.is_marketplace,
             }
-        except Exception:
-            pass
+        except (BenchError, OSError, ValueError, subprocess.SubprocessError) as error:
+            # One unreadable app must not hide the site's other apps; the row keeps its name.
+            current_app.logger.warning("Could not read details of app %s: %s", app_name, error)
         result.append(entry)
 
     return jsonify({"apps": result, "can_disable": bench.has_app_disabling})

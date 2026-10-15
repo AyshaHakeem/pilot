@@ -102,6 +102,34 @@ def test_site_apps_marks_only_the_listed_repository_as_marketplace(tmp_path: Pat
     assert "missing" not in suite
 
 
+def test_site_apps_keeps_an_app_whose_details_cannot_be_read(tmp_path: Path, caplog) -> None:
+    from pilot.exceptions import BenchError
+
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site1.localhost", ["suite"])
+    _make_app(bench_root, "suite", '[project]\nname = "suite"\n')
+
+    client = _client(bench_root)
+    with patch("admin.backend.providers.apps.AppProvider.get_app", side_effect=BenchError("registry is down")):
+        response = client.get("/api/v1/sites/site1.localhost/apps")
+
+    assert response.status_code == 200
+    assert response.get_json()["apps"][0]["name"] == "suite"
+    assert "registry is down" in caplog.text
+
+
+def test_site_apps_reports_an_unexpected_lookup_error(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site1.localhost", ["suite"])
+    _make_app(bench_root, "suite", '[project]\nname = "suite"\n')
+
+    client = _client(bench_root)
+    with patch("admin.backend.providers.apps.AppProvider.get_app", side_effect=RuntimeError("bug")):
+        response = client.get("/api/v1/sites/site1.localhost/apps")
+
+    assert response.status_code == 500
+
+
 def test_site_marketplace_returns_catalog_for_existing_site(tmp_path: Path) -> None:
     bench_root = tmp_path / "benches" / "current"
     _make_site(bench_root, "site1.localhost", [])
