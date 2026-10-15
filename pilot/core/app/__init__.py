@@ -167,7 +167,7 @@ class App:
         return any(
             Path(path).name != "components.d.ts"
             and not any(path == output or path.startswith(f"{output}/") for output in outputs)
-            and build_lockfiles.get(path) != self._content_hash(path)
+            and (path not in build_lockfiles or build_lockfiles[path] != self._content_hash(path))
             for path in repo.changed_paths
         )
 
