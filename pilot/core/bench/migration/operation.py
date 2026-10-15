@@ -256,6 +256,38 @@ class MigrationOperation:
         if self.next_migrate_site() is None:
             self._complete(on_step)
 
+    def fail_stopped_step(self, phase: str, site_name: str | None) -> None:
+        """Pause for the user when a chain task stopped without its own failure handling:
+        killed, or its process died. A no-op once its step is done or the operation left
+        that phase, because the next task may already run."""
+        if self.state != phase or self._is_step_done(phase, site_name):
+            return
+        if phase == "backing_up" and site_name:
+            self.site(site_name).backup_status = "failed"
+        if phase == "migrating" and site_name:
+            site = self.site(site_name)
+            site.migration_status = "failed"
+            # A revert must restore what the stopped attempt touched too.
+            self._union_touched_tables(site)
+        self.diagnosis = {
+            "phase": phase,
+            "message": "The task stopped before it finished. Retry it, or revert.",
+            "output_excerpt": "",
+        }
+        self._enter_needs_attention(phase, site_name)
+        if phase == "backing_up":
+            self._restore_maintenance()
+
+    def _is_step_done(self, phase: str, site_name: str | None) -> bool:
+        if phase == "updating":
+            return self.apps_updated
+        if not site_name:
+            return False
+        site = self.site(site_name)
+        if phase == "backing_up":
+            return site.backup_status == "backed_up"
+        return site.migration_status == "success"
+
     def retry(self) -> None:
         """Resume the chain from needs_attention so the failed unit runs again."""
         if self.state != "needs_attention":

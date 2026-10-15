@@ -807,3 +807,82 @@ def test_reverting_a_branch_switch_migration_returns_the_app_to_its_branch(tmp_p
     app.record_branch.assert_called_once_with()
     mock_bench._reinstall_apps.assert_called_once()
     assert mock_bench._reinstall_apps.call_args.args[0] == {"myapp"}
+
+
+def _backing_up_operation(tmp_path: Path):
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    mock_bench.apps.return_value = []
+    mock_bench.site.return_value.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-101"):
+        operation.begin()
+    operation.site("site1.localhost").backup_status = "backing_up"
+    return operation, mock_bench
+
+
+def test_a_killed_backup_task_pauses_the_operation_for_a_retry(tmp_path: Path) -> None:
+    operation, mock_bench = _backing_up_operation(tmp_path)
+
+    operation.fail_stopped_step("backing_up", "site1.localhost")
+
+    assert operation.state == "needs_attention"
+    assert operation.site("site1.localhost").backup_status == "failed"
+    assert "stopped before it finished" in operation.diagnosis["message"]
+    mock_bench.site.return_value.set_maintenance_settings.assert_called_with(
+        {"maintenance_mode": 0, "pause_scheduler": 0}
+    )
+    operation.retry()
+    assert operation.state == "backing_up"
+    assert operation.next_backup_site() == "site1.localhost"
+
+
+def test_a_stopped_task_callback_leaves_an_operation_that_moved_on(tmp_path: Path) -> None:
+    operation, _mock_bench = _backing_up_operation(tmp_path)
+    operation.back_up_site("site1.localhost")
+    state = operation.state
+
+    operation.fail_stopped_step("backing_up", "site1.localhost")
+
+    assert operation.state == state != "needs_attention"
+
+
+def test_chain_tasks_register_the_stopped_step_callback() -> None:
+    from pilot.internal.tasks.callbacks import validate_callback
+    from pilot.tasks.migrate import MigrateTask
+    from pilot.tasks.migration_backup import MigrationBackupTask
+    from pilot.tasks.update import UpdateTask
+
+    for task, phase in ((MigrationBackupTask, "backing_up"), (MigrateTask, "migrating"), (UpdateTask, "updating")):
+        args = task.__new__(task)
+        args.operation_id, args.site = "op-1", "site1.localhost"
+        assert task.fail_migration_step(args)["phase"] == phase
+    assert validate_callback({"operation": "fail-migration-step", "args": {}})["operation"] == "fail-migration-step"
+
+
+def test_a_task_killed_after_its_backup_finished_leaves_the_chain_alone(tmp_path: Path) -> None:
+    operation, _mock_bench = _backing_up_operation(tmp_path)
+    operation.sites.append(SiteProgress(name="site2.localhost"))
+    operation.site("site1.localhost").backup_status = "backed_up"
+
+    operation.fail_stopped_step("backing_up", "site1.localhost")
+
+    assert operation.state == "backing_up"
+
+
+def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path) -> None:
+    from pilot.core.bench.migration.state import get_state
+
+    operation, mock_bench = _backing_up_operation(tmp_path)
+    mock_bench.site.return_value.path = tmp_path
+    (tmp_path / "touched_tables.json").write_text('["tabItem"]')
+    operation.state = get_state("migrating")
+    operation.site("site1.localhost").migration_status = "running"
+
+    operation.fail_stopped_step("migrating", "site1.localhost")
+
+    site = operation.site("site1.localhost")
+    assert operation.state == "needs_attention"
+    assert (site.migration_status, site.touched_tables) == ("failed", ["tabItem"])
