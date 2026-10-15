@@ -170,3 +170,13 @@ def test_drop_skips_the_backup_only_when_asked(
 
     cmd = _capture_drop_cmd(tmp_path, monkeypatch, bench, no_backup=no_backup)["cmd"]
     assert ("--no-backup" in cmd) is skips_backup
+
+
+@pytest.mark.parametrize(("no_backup", "forced"), [(False, False), (True, True)])
+def test_a_failed_backup_stops_the_drop(tmp_path: Path, monkeypatch, no_backup: bool, forced: bool) -> None:
+    # Frappe's --force drops the database even when the backup before it failed.
+    _install_provider(tmp_path, monkeypatch)
+
+    cmd = _capture_drop_cmd(tmp_path, monkeypatch, _make_bench(tmp_path), no_backup=no_backup)["cmd"]
+
+    assert ("--force" in cmd) is forced

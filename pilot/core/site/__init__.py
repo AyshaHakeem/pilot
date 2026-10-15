@@ -246,9 +246,10 @@ class Site:
         from pilot.managers.nginx import NginxManager
 
         provider_domains = self._provider_domains()
-        cmd = [*self.bench.frappe_call, "frappe", "drop-site", "--force", self.config.name]
+        # Frappe's --force drops the database even when the backup before it failed.
+        cmd = [*self.bench.frappe_call, "frappe", "drop-site", self.config.name]
         if no_backup:
-            cmd.append("--no-backup")
+            cmd += ["--no-backup", "--force"]
         on_progress(f"Dropping site '{self.config.name}'...")
         with SiteCommands(self).setup_credentials(self.db_type) as credentials:
             run_command(cmd + credentials, cwd=self.bench.sites_path, stream_output=True)
