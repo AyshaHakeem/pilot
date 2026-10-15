@@ -222,3 +222,25 @@ def test_nginx_gates_tcp_peer_to_provider_proxy_servers(tmp_path: Path, monkeypa
     assert "if ($bench_from_proxy = 0) { return 403; }" in config
     assert "deny               all;" not in config
     assert "X-Forwarded-For    $http_x_forwarded_for" in config
+
+
+def test_set_primary_waits_for_the_site_config_lock(tmp_path: Path, monkeypatch) -> None:
+    import threading
+
+    from pilot.internal.atomic_file import exclusive_file_lock
+
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    bench = _make_bench(tmp_path)
+    _write_site(bench, "site1.local", {"domains": ["shop.example.com"]})
+    path = bench.sites_path / "site1.local" / "site_config.json"
+    provider = DomainRouteProvider(bench)
+
+    with exclusive_file_lock(path):
+        writer = threading.Thread(target=provider.set_primary, args=("site1.local", "shop.example.com"))
+        writer.start()
+        writer.join(timeout=0.3)
+        assert writer.is_alive()
+        assert "host_name" not in json.loads(path.read_text())
+    writer.join(timeout=5)
+
+    assert json.loads(path.read_text())["host_name"] == "http://shop.example.com"

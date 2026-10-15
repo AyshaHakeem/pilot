@@ -7,12 +7,14 @@ import socket
 import subprocess
 import sys
 import urllib.request
+from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
 from pilot.config.route import RoutePolicy
 from pilot.exceptions import BenchError, DomainConflictError, DomainProviderError
+from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
 from pilot.managers.platform import which
-from pilot.utils import host_owner, normalize_host, write_private_text
+from pilot.utils import host_owner, normalize_host
 
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
@@ -51,10 +53,9 @@ class DomainRouteProvider:
         if not ran:
             self._verify(site_name, domain)
         policy = self._route_policy(domain, ran, data)
-        config = self._read(site_name)
         entry = {"domain": domain, "route": policy.to_dict()} if policy else domain
-        config.setdefault("domains", []).append(entry)
-        self._write(site_name, config)
+        with self._edit_config(site_name) as config:
+            config.setdefault("domains", []).append(entry)
         return policy
 
     def _register_with_provider(self, domain: str) -> tuple[bool, object]:
@@ -75,11 +76,10 @@ class DomainRouteProvider:
         if primary and normalize_host(primary) == domain:
             raise DomainConflictError("Cannot remove the primary domain. Make another domain primary first.")
         self._ask_provider("deregister", domain)
-        config = self._read(site_name)
-        config["domains"] = [
-            d for d in (config.get("domains") or []) if normalize_host(self._name(d)) != domain
-        ]
-        self._write(site_name, config)
+        with self._edit_config(site_name) as config:
+            config["domains"] = [
+                d for d in (config.get("domains") or []) if normalize_host(self._name(d)) != domain
+            ]
 
     def release(self, domain: str) -> None:
         """Best-effort provider route release after local site teardown."""
@@ -126,27 +126,26 @@ class DomainRouteProvider:
         return host.split("://", 1)[-1] or None if host else None
 
     def set_primary(self, site_name: str, domain: str | None) -> None:
-        config = self._read(site_name)
-        if not domain:
-            config.pop("host_name", None)
-            self._write(site_name, config)
-            return
-        domain = normalize_host(domain)
-        candidates = {normalize_host(site_name)} | {normalize_host(d) for d in self._names(config)}
-        if domain not in candidates:
-            raise DomainConflictError(f"{domain} is not a domain of this site.")
         from pilot.config import RoutePolicy, SiteConfig
 
-        site = SiteConfig(
-            name=site_name,
-            apps=[],
-            ssl=bool(config.get("ssl")),
-            domains=config.get("domains") or [],
-            route=RoutePolicy.from_dict(config["route"]) if config.get("route") else None,
-        )
-        scheme = site.route_for(domain).public_scheme
-        config["host_name"] = f"{scheme}://{domain}"
-        self._write(site_name, config)
+        with self._edit_config(site_name) as config:
+            if not domain:
+                config.pop("host_name", None)
+                return
+            domain = normalize_host(domain)
+            candidates = {normalize_host(site_name)} | {normalize_host(d) for d in self._names(config)}
+            if domain not in candidates:
+                raise DomainConflictError(f"{domain} is not a domain of this site.")
+
+            site = SiteConfig(
+                name=site_name,
+                apps=[],
+                ssl=bool(config.get("ssl")),
+                domains=config.get("domains") or [],
+                route=RoutePolicy.from_dict(config["route"]) if config.get("route") else None,
+            )
+            scheme = site.route_for(domain).public_scheme
+            config["host_name"] = f"{scheme}://{domain}"
 
     def _config_path(self, site_name: str):
         return self.bench.sites_path / site_name / "site_config.json"
@@ -157,8 +156,14 @@ class DomainRouteProvider:
             raise BenchError(f"Site '{site_name}' not found.")
         return json.loads(path.read_text())
 
-    def _write(self, site_name: str, config: dict) -> None:
-        write_private_text(self._config_path(site_name), json.dumps(config, indent=1))
+    @contextlib.contextmanager
+    def _edit_config(self, site_name: str) -> Iterator[dict]:
+        """Read-modify-write site_config.json under its lock; an exception writes nothing."""
+        path = self._config_path(site_name)
+        with exclusive_file_lock(path):
+            config = self._read(site_name)
+            yield config
+            replace_private_text_locked(path, json.dumps(config, indent=1))
 
     def _ask_provider(
         self, action: str, domain: str | None = None, *, site: str | None = None
