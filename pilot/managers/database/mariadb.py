@@ -411,20 +411,17 @@ class MariaDBManager(UserOwnedDBManager):
             time.sleep(1)
         return True
 
-    def keep_out_of_swap(self) -> bool:
-        """Set the unit's MemorySwapMax to 0, on disk and live, so MariaDB stays in memory.
-        Returns whether anything changed."""
+    def keep_out_of_swap(self) -> None:
+        """Set MemorySwapMax to 0, live first and then in the unit file, so a failed attempt can retry."""
         if is_macos() or self.config.existing or not self.unit_path.exists():
-            return False
+            return
+        env = self._systemctl_env()
+        run_command(self._systemctl("set-property", "--runtime", self._UNIT_NAME, "MemorySwapMax=0"), env=env)
         current = self.unit_path.read_text()
         unit = re.sub(r"^MemorySwapMax=.*$", "MemorySwapMax=0", current, flags=re.M)
-        if unit == current:
-            return False
-        self.unit_path.write_text(unit)
-        env = self._systemctl_env()
-        run_command(self._systemctl("daemon-reload"), env=env)
-        run_command(self._systemctl("set-property", "--runtime", self._UNIT_NAME, "MemorySwapMax=0"), env=env)
-        return True
+        if unit != current:
+            self.unit_path.write_text(unit)
+            run_command(self._systemctl("daemon-reload"), env=env)
 
     def raise_memory_high(self) -> bool:
         """Raise the unit's MemoryHigh to `memory_high_for` its MemoryMax, on disk and live.

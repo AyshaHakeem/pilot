@@ -12,7 +12,7 @@ from pilot.core.mariadb_memory import (
     calculate_mariadb_variable_limits,
     live_sizing_values,
 )
-from pilot.exceptions import DatabaseError
+from pilot.exceptions import CommandError, DatabaseError
 from pilot.managers.database.mariadb import MariaDBManager
 
 MODULE = "pilot.managers.database.mariadb"
@@ -76,14 +76,12 @@ def test_a_host_under_800_mb_gets_the_small_buffer_pool(total_memory_mb: int, bu
 
 
 def test_a_512_mb_host_gets_a_smaller_mariadb() -> None:
-    """Measured on one lite bench: MariaDB holds about 90 MB plus its buffer pool."""
     sizing = calculate_mariadb_memory(512)
 
     assert sizing.innodb_buffer_pool_mb == 64
     assert sizing.key_buffer_mb == 8
     assert sizing.max_connections == 20
     assert sizing.memory_max_mb == 256
-    # MemoryHigh stays above the roughly 155 MB working set, so MariaDB is not throttled.
     assert sizing.memory_high_mb == 192
 
 
@@ -1236,12 +1234,52 @@ def test_an_existing_unit_stops_mariadb_swapping_live(tmp_path: Path, monkeypatc
     monkeypatch.setattr(type(manager), "unit_path", property(lambda self: unit))
     monkeypatch.setattr(module, "run_command", lambda argv, **kwargs: commands.append(argv))
 
-    assert manager.keep_out_of_swap() is True
+    manager.keep_out_of_swap()
+
     assert "MemorySwapMax=0\n" in unit.read_text()
     assert "MemoryMax=512M" in unit.read_text()
-    assert commands[-1][-1] == "MemorySwapMax=0"
+    assert commands[0][-1] == "MemorySwapMax=0"
+    assert commands[1][-1] == "daemon-reload"
 
-    assert manager.keep_out_of_swap() is False
+
+def test_a_failed_live_swap_limit_leaves_the_unit_for_the_retry(tmp_path: Path, monkeypatch) -> None:
+    from pilot.managers.database import mariadb as module
+
+    manager = _manager()
+    unit = tmp_path / "pilot-mariadb.service"
+    unit.write_text("[Service]\nMemorySwapMax=100M\n")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(module, "is_macos", lambda: False)
+    monkeypatch.setattr(type(manager), "unit_path", property(lambda self: unit))
+
+    def failing_run(argv, **kwargs):
+        raise CommandError("systemctl failed")
+
+    monkeypatch.setattr(module, "run_command", failing_run)
+    with pytest.raises(CommandError):
+        manager.keep_out_of_swap()
+    assert "MemorySwapMax=100M" in unit.read_text()
+
+    monkeypatch.setattr(module, "run_command", lambda argv, **kwargs: commands.append(argv))
+    manager.keep_out_of_swap()
+    assert commands[0][-1] == "MemorySwapMax=0"
+    assert "MemorySwapMax=0\n" in unit.read_text()
+
+
+def test_keep_out_of_swap_applies_the_live_limit_when_the_unit_is_already_zero(tmp_path: Path, monkeypatch) -> None:
+    from pilot.managers.database import mariadb as module
+
+    manager = _manager()
+    unit = tmp_path / "pilot-mariadb.service"
+    unit.write_text("[Service]\nMemorySwapMax=0\n")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(module, "is_macos", lambda: False)
+    monkeypatch.setattr(type(manager), "unit_path", property(lambda self: unit))
+    monkeypatch.setattr(module, "run_command", lambda argv, **kwargs: commands.append(argv))
+
+    manager.keep_out_of_swap()
+
+    assert [command[-1] for command in commands] == ["MemorySwapMax=0"]
 
 
 def test_an_existing_unit_gets_its_memory_high_raised_live(tmp_path: Path, monkeypatch) -> None:

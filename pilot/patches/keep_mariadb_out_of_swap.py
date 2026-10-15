@@ -18,8 +18,8 @@ def run(benches_root: Path) -> None:
         if is_applied(bench_dir, PATCH_NAME):
             continue
         config = BenchConfig.read(bench_dir)
-        if config.db_type == "mariadb" and MariaDBManager(config.mariadb).keep_out_of_swap():
-            print("MariaDB no longer uses swap.")
+        if config.db_type == "mariadb":
+            MariaDBManager(config.mariadb).keep_out_of_swap()
         mark_applied(bench_dir, PATCH_NAME)
 
 
