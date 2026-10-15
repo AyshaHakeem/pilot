@@ -46,12 +46,7 @@ class PythonAssetBuilder:
         else:
             logging.warning("Memory control unavailable here, so this build runs uncapped.")
 
-        env = {**systemctl_env(), **(kwargs.get("env") or {})}
-        node_options = env.get("NODE_OPTIONS", "")
-        # V8 stops near 2GB whatever the cap; leave a quarter of the cap for native memory.
-        if limit_mb and "--max-old-space-size" not in node_options:
-            env["NODE_OPTIONS"] = f"{node_options} --max-old-space-size={limit_mb * 3 // 4}".strip()
-        kwargs["env"] = env
+        kwargs["env"] = self.get_build_env(kwargs.get("env") or {}, limit_mb)
         try:
             run_command(argv, **kwargs)
         except CommandError as error:
@@ -66,6 +61,15 @@ class PythonAssetBuilder:
                 error.message.replace(repr("systemd-run"), repr(command), 1),
                 returncode=error.returncode,
             ) from error
+
+    @staticmethod
+    def get_build_env(env: dict, limit_mb: int) -> dict:
+        env = {**systemctl_env(), **env}
+        node_options = env.get("NODE_OPTIONS", "")
+        # V8 stops near 2GB whatever the cap; leave a quarter of the cap for native memory.
+        if limit_mb and "--max-old-space-size" not in node_options:
+            env["NODE_OPTIONS"] = f"{node_options} --max-old-space-size={limit_mb * 3 // 4}".strip()
+        return env
 
     def build_assets(self) -> None:
         for app in self.bench.apps():

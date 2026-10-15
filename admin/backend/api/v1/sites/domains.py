@@ -154,27 +154,33 @@ def add_domain(name: str):
     bench_root = Path(current_app.config["BENCH_ROOT"])
     if not site_exists(bench_root, name):
         return site_not_found()
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return malformed_body()
-    fields = text_fields(data, "domain", "email")
-    if fields is None:
-        return invalid_fields()
-    domain, email = fields["domain"], fields["email"]
-    if err := validate_site_name(domain):
-        return error_response("invalid_domain", err, 422)
-    # Optional: without any email the domain is served over HTTP until one is set.
-    if email and (err := validate_email(email)):
-        return error_response("invalid_email", err, 422, {"needs_email": True})
+    fields, response = _add_domain_request()
+    if response is not None:
+        return response
     try:
         domains = _site_domains(bench_root, name)
-        domains.register(domain)
-        task_id = domains.apply_task(email=email)
+        domains.register(fields["domain"])
+        task_id = domains.apply_task(email=fields["email"])
     except BenchError as error:
         return _domain_failure(error, "Could not attach the domain.")
     except Exception:
         return internal_error("Could not attach the domain.")
     return accepted_task_response(bench_root, task_id)
+
+
+def _add_domain_request():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return None, malformed_body()
+    fields = text_fields(data, "domain", "email")
+    if fields is None:
+        return None, invalid_fields()
+    if err := validate_site_name(fields["domain"]):
+        return None, error_response("invalid_domain", err, 422)
+    # Optional: without any email the domain is served over HTTP until one is set.
+    if fields["email"] and (err := validate_email(fields["email"])):
+        return None, error_response("invalid_email", err, 422, {"needs_email": True})
+    return fields, None
 
 
 @sites_bp.get("/<name>/domains/<domain>")

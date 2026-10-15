@@ -11,17 +11,21 @@ def run(benches_root: Path) -> None:
     from pilot.config import BenchConfig
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.letsencrypt import install_renewal_timer
-    from pilot.managers.platform import is_linux
 
     for bench_dir in sorted(benches_root.glob("*")):
         if not bench_dir.is_dir() or not (bench_dir / "bench.toml").exists():
             continue
         if is_applied(bench_dir, PATCH_NAME):
             continue
-        config = BenchConfig.read(bench_dir)
-        if is_linux() and config.production.enabled and config.letsencrypt.email and install_renewal_timer():
+        if _issues_certificates(BenchConfig.read(bench_dir)) and install_renewal_timer():
             print("Installed the certificate renewal timer.")
         mark_applied(bench_dir, PATCH_NAME)
+
+
+def _issues_certificates(config) -> bool:
+    from pilot.managers.platform import is_linux
+
+    return is_linux() and config.production.enabled and bool(config.letsencrypt.email)
 
 
 if __name__ == "__main__":
