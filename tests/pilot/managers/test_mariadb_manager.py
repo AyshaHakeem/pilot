@@ -803,7 +803,7 @@ def _tune(manager, tmp_path, current_max_mb):
         sizing = manager.tune_to_host()
         config = manager.my_cnf_path.read_text()
     restart.assert_not_called()
-    install_unit.assert_called_once_with(sizing)
+    install_unit.assert_called_once_with(sizing, preserve_swap_limit=True)
     return sizing, config, [name for name, _args, _kwargs in order.mock_calls]
 
 
