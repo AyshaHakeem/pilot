@@ -334,7 +334,7 @@ def test_create_update_skips_backup_and_migrate_when_no_app_needs_a_migrate(tmp_
     mock_bench.site.return_value.set_maintenance_mode.assert_not_called()
 
 
-def test_create_update_migrates_only_sites_with_an_app_that_needs_it(tmp_path: Path) -> None:
+def test_create_update_migrates_every_site_when_one_app_needs_it(tmp_path: Path) -> None:
     mock_bench = MagicMock()
     mock_bench.path = tmp_path
     apps = []
@@ -357,7 +357,7 @@ def test_create_update_migrates_only_sites_with_an_app_that_needs_it(tmp_path: P
     with patch.object(Marketplace, "registry", return_value=[]):
         operation = MigrationStore(mock_bench).create_update()
 
-    assert [site.name for site in operation.sites] == ["hr.local"]
+    assert [site.name for site in operation.sites] == ["hr.local", "sales.local"]
 
 
 def test_operation_site_lifecycle(tmp_path: Path) -> None:

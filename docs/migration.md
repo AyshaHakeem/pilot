@@ -84,7 +84,7 @@ Putting the sites into maintenance mode first prevents writes while the bench is
 
 ### Which Sites Are Migrated
 
-An update backs up and migrates only the sites that need it. When the update is created, Pilot compares each app's installed commit with its target commit. An app needs a migrate when the diff changes any of these, the same rule Frappe Cloud uses:
+An update backs up and migrates sites only when an app change needs a migrate. When the update is created, Pilot compares each app's installed commit with its target commit. An app needs a migrate when the diff changes any of these, the same rule Frappe Cloud uses:
 
 - `<app>/patches.txt`
 - `<app>/hooks.py`
@@ -93,7 +93,7 @@ An update backs up and migrates only the sites that need it. When the update is 
 - a doctype-style JSON file, `<app>/<module>/<type>/<name>/<name>.json`
 - `frappe/geo/languages.json`
 
-When Pilot cannot read the diff, it assumes a migrate is needed. A site is migrated when any of its installed apps needs a migrate. The other sites stay online. When no app needs a migrate, the update only updates the apps, rebuilds the assets, and restarts the services. Each app records the result in `has_migrate_changes`. The rule is in `AppRepository.has_migrate_changes`.
+When Pilot cannot read the diff, it assumes a migrate is needed. When any selected app needs a migrate, every affected site is backed up and migrated. When none does, the update only updates the apps, rebuilds the assets, and restarts the services, and the update dialog hides the backup option. Each app records the result in `has_migrate_changes`. The rule is in `AppRepository.has_migrate_changes`.
 
 ## How the State Machine Works
 

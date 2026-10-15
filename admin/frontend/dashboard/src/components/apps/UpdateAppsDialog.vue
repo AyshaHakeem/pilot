@@ -34,6 +34,9 @@ const updateLabel = computed(() => {
   if (count === appNames.value.length) return 'Update all'
   return count === 1 ? 'Update 1 app' : `Update ${count} apps`
 })
+const needsMigrate = computed(() =>
+  [...selected.value].some((name) => updates.value[name]?.has_migrate_changes !== false),
+)
 const safeguard = ref(true)
 const updating = ref(false)
 const error = ref('')
@@ -137,7 +140,7 @@ const runUpdate = async () => {
           </div>
         </div>
 
-        <label class="flex items-center gap-2 pt-2 cursor-pointer">
+        <label v-if="needsMigrate" class="flex items-center gap-2 pt-2 cursor-pointer">
           <Checkbox v-model="safeguard" />
           <span class="text-ink-gray-7 text-sm">Take backup of sites</span>
         </label>
