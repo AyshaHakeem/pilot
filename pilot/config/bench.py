@@ -163,7 +163,7 @@ class BenchConfig:
     @classmethod
     def default(cls, name: str = "", benches_root: Path | None = None) -> "BenchConfig":
         """Build a fresh config from the setup wizard's baseline values."""
-        common = CommonConfig.read(benches_root) if benches_root else _DEFAULT_COMMON_CONFIG
+        common = CommonConfig.read(benches_root) if benches_root else copy.deepcopy(_DEFAULT_COMMON_CONFIG)
         data = copy.deepcopy(_DEFAULT_DATA)
         data["bench"]["name"] = name
         return cls._from_dict(data, common=common)

@@ -88,3 +88,10 @@ def test_describe_domain_uses_attached_hostname_for_case_variant(tmp_path: Path)
         "public_scheme": "https",
         "tls": True,
     }
+
+
+def test_default_configs_do_not_share_common_settings() -> None:
+    first = BenchConfig.default("first")
+    first.letsencrypt.email = "ops@example.com"
+
+    assert BenchConfig.default("second").letsencrypt.email == ""
