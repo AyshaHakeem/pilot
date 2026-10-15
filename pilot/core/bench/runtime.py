@@ -89,7 +89,9 @@ class BenchRuntime:
         ProcessManager.for_bench(self.bench).write_config()
         self.bench.write_common_site_config()
         if self.bench.config.production.enabled:
-            NginxManager(self.bench).generate_config()
+            nginx = NginxManager(self.bench)
+            with nginx.config_lock():
+                nginx.generate_config()
 
     def rebuild_assets(self, apps: list[str] | None = None, force: bool = False) -> None:
         from pilot.managers.environment import PythonEnvManager

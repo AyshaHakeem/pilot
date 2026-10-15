@@ -103,8 +103,7 @@ class BenchProduction:
         nginx_manager.install()
         self._install_waf()
         (self.bench.config_path / "nginx").mkdir(parents=True, exist_ok=True)
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.install_config()
+        nginx_manager.publish_config(ssl_ready=True)
         nginx_manager.setup_sudoers()
         nginx_manager.enable_at_boot()
         self._report_site_urls(nginx_manager, on_progress)
@@ -122,11 +121,9 @@ class BenchProduction:
         letsencrypt_manager.setup_sudoers()
         install_renewal_timer()
         letsencrypt_manager.ensure_webroot()
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.reload()
+        nginx_manager.apply_config()
         letsencrypt_manager.obtain_all()
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.reload()
+        nginx_manager.apply_config()
 
     def setup_production(
         self,

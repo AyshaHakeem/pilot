@@ -150,9 +150,7 @@ class SiteProvisioner:
                 "Enable SSL from its settings once its DNS points to this server."
             )
             return
-        nginx_manager = NginxManager(self.bench)
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.reload()
+        NginxManager(self.bench).apply_config()
 
 
 def validate_new_site(bench: "Bench", name: str, apps: list[str]) -> bool:

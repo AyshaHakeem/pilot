@@ -39,10 +39,9 @@ def test_obtain_cert_never_regenerates_without_ssl(tmp_path: Path) -> None:
         _provisioner(tmp_path).obtain_cert(site, lambda _: None)
 
     manager = mock_nginx.return_value
-    ssl_ready_flags = [call.kwargs["ssl_ready"] for call in manager.generate_config.call_args_list]
-    assert ssl_ready_flags == [True]
+    manager.generate_config.assert_not_called()
     mock_letsencrypt.return_value.obtain.assert_called_once_with(site.config)
-    manager.reload.assert_called_once()
+    manager.apply_config.assert_called_once_with()
 
 
 def test_a_failed_certificate_keeps_the_new_site_on_http(tmp_path: Path) -> None:

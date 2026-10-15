@@ -5,6 +5,8 @@ import logging
 import pwd
 import re
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from fnmatch import fnmatch
 from pathlib import Path
 from types import SimpleNamespace
@@ -398,13 +400,34 @@ class NginxManager:
         admin_ssl = self.bench.config.admin.tls and ssl_ready and self.has_admin_cert
         self._write_config_file(nginx_dir / "include.conf", self._renderer.generate_bench_config(sites, admin_ssl))
 
+    @contextmanager
+    def config_lock(self) -> Iterator[None]:
+        """Serialize nginx config changes across benches, from the first write to the reload.
+        Every bench shares one nginx, so `nginx -t` must not see another bench's untested files."""
+        from pilot.utils import benches_dir
+
+        benches_dir().mkdir(parents=True, exist_ok=True)
+        with exclusive_file_lock(benches_dir() / "nginx"):
+            yield
+
+    def apply_config(self, ssl_ready: bool = True) -> None:
+        """Write this bench's config, test it and reload nginx, or put the old files back."""
+        with self.config_lock():
+            self.generate_config(ssl_ready=ssl_ready)
+            self.reload()
+
+    def publish_config(self, ssl_ready: bool = False) -> None:
+        """Write this bench's config and include it in nginx, then test and reload."""
+        with self.config_lock():
+            self.generate_config(ssl_ready=ssl_ready)
+            self.install_config()
+
     def reload_for_site_change(self) -> None:
         if not self.bench.config.production.enabled or not self.is_installed():
             return
         print("Updating nginx configuration...")
         sys.stdout.flush()
-        self.generate_config(ssl_ready=True)
-        self.reload()
+        self.apply_config()
 
     def _write_error_pages(self, nginx_dir: Path) -> None:
         error_dir = nginx_dir / "error_pages"
@@ -607,8 +630,9 @@ class NginxManager:
 
     def uninstall_config(self) -> None:
         """Take this bench's vhost out of nginx and reload. Certs are kept."""
-        self._unpublish(self.config_dir / f"{self.bench.config.name}.conf")
-        self.reload()
+        with self.config_lock():
+            self._unpublish(self.config_dir / f"{self.bench.config.name}.conf")
+            self.reload()
 
     def reload(self) -> None:
         try:

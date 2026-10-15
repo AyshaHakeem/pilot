@@ -265,9 +265,7 @@ def regenerate_configs(bench: "Bench") -> None:
 def regenerate_nginx(bench: "Bench") -> None:
     from pilot.managers.nginx import NginxManager
 
-    manager = NginxManager(bench)
-    manager.generate_config(ssl_ready=True)
-    manager.install_config()
+    NginxManager(bench).publish_config(ssl_ready=True)
 
 
 def restart_running_workload(bench: "Bench") -> bool:

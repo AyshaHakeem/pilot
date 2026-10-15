@@ -1252,3 +1252,33 @@ def test_a_site_alias_redirects_to_the_primary_domain_but_answers_central_probes
 
     assert "return 301 https://www.shop.example.com$request_uri;" in config
     assert "location = /api/method/ping {" in config
+
+
+_REAL_CONFIG_LOCK = NginxManager.config_lock
+
+
+def _is_locked(lock_file: Path) -> bool:
+    import fcntl
+
+    with open(lock_file) as other:
+        try:
+            fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(other, fcntl.LOCK_UN)
+    return False
+
+
+def test_a_config_change_holds_the_host_lock_until_nginx_accepts_it(tmp_path: Path, monkeypatch) -> None:
+    """Every bench shares one nginx, so no bench may test or reload while another writes."""
+    monkeypatch.setattr(NginxManager, "config_lock", _REAL_CONFIG_LOCK)
+    monkeypatch.setattr("pilot.utils.benches_dir", lambda: tmp_path / "benches")
+    manager = NginxManager(_bench_with_site(tmp_path, _BASE_DATA))
+    lock_file = tmp_path / "benches" / ".nginx.lock"
+    locked_at_reload: list[bool] = []
+
+    with patch.object(manager, "reload", side_effect=lambda: locked_at_reload.append(_is_locked(lock_file))):
+        manager.apply_config(ssl_ready=False)
+
+    assert locked_at_reload == [True]
+    assert not _is_locked(lock_file)
