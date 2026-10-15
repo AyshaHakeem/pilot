@@ -15,7 +15,7 @@ class SetMariaDBMemoryShareTask(Task):
 
     memory_share: float
 
-    @step("configure", lambda self: f"Giving MariaDB {round(self.memory_share * 100)}% of host memory")
+    @step("configure", lambda self: f"Set the database memory split to {round(self.memory_share * 100)}%")
     def run(self) -> None:
         DatabaseQuickActions(self.bench.config).set_memory_share(self.memory_share, self.bench.path.parent)
 

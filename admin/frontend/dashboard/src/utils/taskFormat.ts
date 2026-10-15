@@ -68,6 +68,7 @@ const COMMAND_LABELS: Record<string, string> = {
   'wizard-setup': 'Wizard Setup',
   'update-cli': 'Update CLI',
   'fetch-all-app-updates': 'Fetch App Updates',
+  'set-mariadb-memory-share': 'Set Memory Split',
 }
 
 // Ordered: the dropdown renders in this order.
