@@ -39,6 +39,7 @@ class PythonAssetBuilder:
 
         limit_mb = build_memory_limit_mb(self.bench.config.build.memory_limit_mb) if can_read_memory() else 0
         capped = bool(limit_mb) and can_cap_memory()
+        command = argv[0]
         if capped:
             swap_mb = build_swap_limit_mb()
             argv = memory_capped(argv, limit_mb, swap_mb)
@@ -62,7 +63,7 @@ class PythonAssetBuilder:
                     "in bench.toml, then retry."
                 ) from error
             raise CommandError(
-                error.message.replace(repr("systemd-run"), repr(argv[0]), 1),
+                error.message.replace(repr("systemd-run"), repr(command), 1),
                 returncode=error.returncode,
             ) from error
 
