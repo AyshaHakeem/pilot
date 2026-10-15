@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useTranslation } from '../translation'
-import { Button, ErrorMessage, SettingsRow } from 'frappe-ui'
+import { Button, SettingsRow } from 'frappe-ui'
+import { watch } from 'vue'
 import Panel from '../components/Panel.vue'
 import { openExternal } from '../external'
 import type { Store } from '../store'
@@ -9,15 +10,29 @@ const __ = useTranslation()
 
 interface Props {
   store: Store
+  active?: boolean
 }
 
 const props = defineProps<Props>()
 
-props.store.loadAccountLinks()
+watch(
+  () => props.active,
+  (active) => {
+    if (active) props.store.loadAccountLinks()
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <Panel :title="__('Advanced')" :description="__('Deeper controls for your server.')">
+  <Panel
+    :title="__('Advanced')"
+    :description="__('Deeper controls for your server.')"
+    :loading="!store.state.accountLinks && !store.state.accountLinksError"
+    :error="store.state.accountLinksError"
+    :error-title="__(`Couldn't load your server links`)"
+    @retry="store.loadAccountLinks()"
+  >
     <div class="divide-y divide-outline-gray-1 border-t border-outline-gray-1">
       <SettingsRow
         label-for=""
@@ -27,7 +42,6 @@ props.store.loadAccountLinks()
       >
         <Button
           icon-right="lucide-arrow-up-right"
-          :disabled="!store.state.accountLinks"
           :label="__('Open server')"
           @click="openExternal(store.state.accountLinks?.server)"
         />
@@ -43,13 +57,11 @@ props.store.loadAccountLinks()
       >
         <Button
           icon-right="lucide-arrow-up-right"
-          :disabled="!store.state.accountLinks"
           :label="__('Manage billing')"
           @click="openExternal(store.state.accountLinks?.billing)"
         />
       </SettingsRow>
     </div>
 
-    <ErrorMessage :message="store.state.accountLinksError" class="mt-2" />
   </Panel>
 </template>
