@@ -230,6 +230,9 @@ class App:
     def update_target(self) -> RevisionPin | None:
         return self._repository.update_target()
 
+    def has_migrate_changes(self, pin: RevisionPin) -> bool:
+        return self._repository.has_migrate_changes(pin)
+
     @property
     def marketplace_entry(self) -> dict | None:
         return self._repository.marketplace_entry
