@@ -337,6 +337,8 @@ class NginxManager:
         self.bench = bench
         self._renderer = NginxConfigRenderer(bench)
         self._modsec = ModSecurityRenderer(bench)
+        # (content before, content written) of each config file, until `nginx -t` accepts the set.
+        self._unvalidated: dict[Path, tuple[str | None, str]] = {}
 
     def is_installed(self) -> bool:
         return which("nginx") is not None
@@ -382,7 +384,7 @@ class NginxManager:
             (site.config, self.serviceable_tls_domains(site.config, ssl_ready)) for site in self.bench.sites()
         ]
         admin_ssl = self.bench.config.admin.tls and ssl_ready and self.has_admin_cert
-        (nginx_dir / "include.conf").write_text(self._renderer.generate_bench_config(sites, admin_ssl))
+        self._write_config_file(nginx_dir / "include.conf", self._renderer.generate_bench_config(sites, admin_ssl))
 
     def reload_for_site_change(self) -> None:
         if not self.bench.config.production.enabled or not self.is_installed():
@@ -444,11 +446,32 @@ class NginxManager:
         modsec_dir = self._modsec.modsec_dir()
         modsec_dir.mkdir(parents=True, exist_ok=True)
         (self.bench.path / "logs").mkdir(exist_ok=True)
-        (modsec_dir / "modsecurity.conf").write_text(self._modsec.render_engine(waf))
-        (modsec_dir / "overrides.conf").write_text(self._modsec.render_overrides(waf))
-        (modsec_dir / "custom_rules.conf").write_text(self._modsec.render_custom_rules(waf))
-        (modsec_dir / "exclusions.conf").write_text(self._modsec.render_exclusions(waf))
-        (modsec_dir / "main.conf").write_text(self._modsec.render_main(modsec_dir))
+        self._write_config_file(modsec_dir / "modsecurity.conf", self._modsec.render_engine(waf))
+        self._write_config_file(modsec_dir / "overrides.conf", self._modsec.render_overrides(waf))
+        self._write_config_file(modsec_dir / "custom_rules.conf", self._modsec.render_custom_rules(waf))
+        self._write_config_file(modsec_dir / "exclusions.conf", self._modsec.render_exclusions(waf))
+        self._write_config_file(modsec_dir / "main.conf", self._modsec.render_main(modsec_dir))
+
+    def _write_config_file(self, path: Path, content: str) -> None:
+        if path in self._unvalidated:
+            previous = self._unvalidated[path][0]
+        else:
+            previous = path.read_text() if path.exists() else None
+        self._unvalidated[path] = (previous, content)
+        path.write_text(content)
+
+    def _restore_unvalidated(self) -> None:
+        """Put back the files nginx rejected. Every bench shares one nginx, so a broken
+        file left in place would stop it from starting at the next restart. A file that
+        another operation rewrote since is theirs, and stays."""
+        for path, (previous, written) in self._unvalidated.items():
+            if (path.read_text() if path.exists() else None) != written:
+                continue
+            if previous is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_text(previous)
+        self._unvalidated.clear()
 
     @property
     def config_dir(self) -> Path:
@@ -574,7 +597,12 @@ class NginxManager:
         self.reload()
 
     def reload(self) -> None:
-        run_command(_privileged(["nginx", "-t"]), timeout=10)
+        try:
+            run_command(_privileged(["nginx", "-t"]), timeout=10)
+        except CommandError:
+            self._restore_unvalidated()
+            raise
+        self._unvalidated.clear()
         if not is_linux():
             run_command(["nginx", "-s", "reload"])
             return

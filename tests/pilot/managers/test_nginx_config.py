@@ -1178,3 +1178,42 @@ def test_only_the_bad_gateway_page_retries_on_its_own() -> None:
     pages = {code: render_error_html(code, *text) for code, text in ERROR_PAGES.items()}
     assert '<meta http-equiv="refresh" content="5">' in pages[502]
     assert all("http-equiv" not in page for code, page in pages.items() if code != 502)
+
+
+def test_a_config_nginx_rejects_is_put_back(tmp_path: Path) -> None:
+    from pilot.exceptions import CommandError
+
+    bench = _bench_with_site(tmp_path, _BASE_DATA)
+    include_conf = tmp_path / "config" / "nginx" / "include.conf"
+    include_conf.parent.mkdir(parents=True, exist_ok=True)
+    include_conf.write_text("# the config nginx runs now\n")
+    manager = NginxManager(bench)
+
+    manager.generate_config(ssl_ready=False)
+    with (
+        patch("pilot.managers.nginx.run_command", side_effect=CommandError("nginx: [emerg] bad")),
+        pytest.raises(CommandError),
+    ):
+        manager.reload()
+
+    assert include_conf.read_text() == "# the config nginx runs now\n"
+
+
+def test_a_rejected_config_never_undoes_a_file_another_operation_wrote_since(tmp_path: Path) -> None:
+    from pilot.exceptions import CommandError
+
+    bench = _bench_with_site(tmp_path, _BASE_DATA)
+    include_conf = tmp_path / "config" / "nginx" / "include.conf"
+    include_conf.parent.mkdir(parents=True, exist_ok=True)
+    include_conf.write_text("# old\n")
+    manager = NginxManager(bench)
+
+    manager.generate_config(ssl_ready=False)
+    include_conf.write_text("# accepted by another operation\n")
+    with (
+        patch("pilot.managers.nginx.run_command", side_effect=CommandError("nginx: [emerg] bad")),
+        pytest.raises(CommandError),
+    ):
+        manager.reload()
+
+    assert include_conf.read_text() == "# accepted by another operation\n"
