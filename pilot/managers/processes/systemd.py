@@ -181,6 +181,12 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         except FileNotFoundError:
             return False
 
+    @override
+    def wake_admin(self) -> None:
+        run_command(
+            self._systemctl("start", "--no-block", self._unit_name("admin")), env=self._systemctl_env()
+        )
+
     def start_admin(self) -> None:
         # Base start_admin only daemon-reloads; we need full install for a new bench.
         self.bench.logs_path.mkdir(parents=True, exist_ok=True)

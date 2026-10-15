@@ -785,6 +785,16 @@ def test_an_idle_admin_socket_is_activated(tmp_path: Path, monkeypatch) -> None:
     assert ["restart", "test-bench-admin.socket"] in calls
 
 
+def test_wake_admin_starts_the_admin_service_without_waiting(tmp_path: Path, monkeypatch) -> None:
+    mgr = _make_systemd_manager(tmp_path)
+    calls: list[list[str]] = []
+    monkeypatch.setattr("pilot.managers.processes.systemd.run_command", lambda argv, **kwargs: calls.append(argv))
+
+    mgr.wake_admin()
+
+    assert calls == [["systemctl", "--user", "start", "--no-block", "test-bench-admin.service"]]
+
+
 def test_supervisor_starts_again_after_a_reboot(tmp_path: Path, monkeypatch) -> None:
     """The bench owns its supervisord, so an @reboot entry brings the bench back."""
     from pilot.managers.cron import CronManager
