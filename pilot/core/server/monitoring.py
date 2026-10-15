@@ -368,15 +368,15 @@ def main() -> None:
     if not monitors:
         return
 
-    for monitor in monitors:
-        monitor.sample_cpu()
-        monitor.sample_io()
-    time.sleep(CPU_SAMPLE_INTERVAL)
-
     # Before the shipper and Fluent Bit read the token, so both ship with the rotated one.
     bench = monitors[0].bench
     if bench.config.central.enabled:
         DatumCredential(bench, bench.config.telemetry.token, on_progress=print).rotate_if_expiring()
+
+    for monitor in monitors:
+        monitor.sample_cpu()
+        monitor.sample_io()
+    time.sleep(CPU_SAMPLE_INTERVAL)
 
     shipper = MetricShipper(bench.config.telemetry)
     for monitor in monitors:
