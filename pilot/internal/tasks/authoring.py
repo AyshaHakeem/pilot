@@ -67,6 +67,8 @@ def task_argv_suffix(cls: type[Task], args: dict) -> list[str]:
         elif strip_optional(arg_field.hint) is bool:
             if value:
                 argv.append(long_flag(arg_field.name))
+            elif arg_field.default is True:
+                argv.append(long_flag(f"no_{arg_field.name}"))
         elif value:
             argv.append(long_flag(arg_field.name))
             argv += argv_values(value)
