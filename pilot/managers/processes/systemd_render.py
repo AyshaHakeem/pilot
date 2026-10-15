@@ -14,6 +14,7 @@ class SystemdRenderer(ServiceRenderer):
         working_dir = f"WorkingDirectory={pd.working_dir}\n" if pd.working_dir else ""
         env = "".join(f"Environment={k}={v}\n" for k, v in pd.env.items())
         stop = f"TimeoutStopSec={pd.stop_timeout}\n" if pd.stop_timeout is not None else ""
+        remove_socket = f"ExecStartPre=/bin/rm -f {pd.socket_file}\n" if pd.socket_file else ""
         # systemd stops in reverse start order; redis must outlive a lite runner draining into it.
         after_redis = (
             ""
@@ -28,6 +29,7 @@ class SystemdRenderer(ServiceRenderer):
             f"[Service]\n"
             f"Type=simple\n"
             f"{working_dir}{env}"
+            f"{remove_socket}"
             f"ExecStart={shlex.join(pd.argv)}\n"
             f"Restart=on-failure\n"
             f"LimitNOFILE=65535\n"
