@@ -327,3 +327,20 @@ def test_has_migrate_changes_assumes_a_migrate_when_the_target_cannot_be_fetched
 
     pin = RevisionPin(kind="commit", ref="f" * 40)
     assert _repository(path).has_migrate_changes(pin) is True
+
+
+def test_has_migrate_changes_sees_a_doctype_moved_out_of_place(tmp_path: Path) -> None:
+    path, _ = _repo_with_two_commits(tmp_path / "app")
+    doctype = path / "demo/demo/doctype/task/task.json"
+    doctype.parent.mkdir(parents=True)
+    doctype.write_text('{"doctype": "DocType", "name": "Task", "fields": []}\n' * 20)
+    _git(path, "add", ".")
+    _git(path, "commit", "-qm", "add task")
+    (path / "demo/archive").mkdir(parents=True)
+    _git(path, "mv", "demo/demo/doctype/task/task.json", "demo/archive/task.json")
+    _git(path, "commit", "-qm", "move task")
+    target = GitRepo(path).head_sha
+    _git(path, "checkout", "-q", "HEAD~1")
+
+    pin = RevisionPin(kind="commit", ref=target)
+    assert _repository(path).has_migrate_changes(pin) is True

@@ -102,7 +102,7 @@ class GitRepo:
 
     def get_changed_files(self, old: str, new: str) -> list[str] | None:
         """Paths that differ between two commits, or None when either is missing locally."""
-        result = self._run("diff", "--name-only", "-z", old, new)
+        result = self._run("diff", "--name-only", "--no-renames", "-z", old, new)
         if result.returncode != 0:
             return None
         return [path for path in result.stdout.split("\0") if path]
