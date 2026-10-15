@@ -243,20 +243,13 @@ class BenchRuntime:
             return 7000
 
     def _install_python_requirements(self, on_progress: Callable[[str], None]) -> None:
-        from pilot.managers.environment import ensure_uv
-        from pilot.utils import run_command
-
-        uv = ensure_uv()
-        python = str(self.bench.python)
+        from pilot.managers.environment import PythonEnvManager
 
         for app in self.bench.apps():
             if not (app.path / "pyproject.toml").exists() and not (app.path / "setup.py").exists():
                 continue
             on_progress(f"Installing Python requirements for {app.config.name}...")
-            run_command(
-                [uv, "pip", "install", "--python", python, "-e", app.editable_target],
-                stream_output=True,
-            )
+            PythonEnvManager(self.bench).install_app(app)
 
     def _install_js_requirements(self, on_progress: Callable[[str], None]) -> None:
         from pilot.core.app.node_packages import NodePackages

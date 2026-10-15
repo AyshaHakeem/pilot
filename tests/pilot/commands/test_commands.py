@@ -689,7 +689,7 @@ def test_requirements_skips_app_without_python_setup_files(tmp_path: Path) -> No
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_not_called()
@@ -707,7 +707,7 @@ def test_requirements_installs_app_with_pyproject_toml(tmp_path: Path) -> None:
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_called_once()
@@ -725,7 +725,7 @@ def test_requirements_installs_app_with_setup_py(tmp_path: Path) -> None:
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_called_once()
