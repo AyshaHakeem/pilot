@@ -442,6 +442,18 @@ create_bench_user() {
     echo "Creating user '$1'..."
     useradd -m -s /bin/bash "$1"
     usermod -aG "$(admin_group)" "$1" 2>/dev/null || true
+    add_user_bus_env "$1"
+}
+
+# `su` and `sudo -iu` open no login session, so `systemctl --user` finds no
+# runtime directory or D-Bus socket without these.
+add_user_bus_env() {
+    rc="$(getent passwd "$1" | cut -d: -f6)/.bashrc"
+    cat >>"$rc" <<'EOF'
+export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+EOF
+    chown "$1:" "$rc"
 }
 
 # Bench services are `systemctl --user` units, which need this user's systemd
