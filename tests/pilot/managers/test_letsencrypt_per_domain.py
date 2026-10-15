@@ -189,7 +189,7 @@ def test_a_certificate_with_time_left_raises_nothing(tmp_path: Path) -> None:
 
 def test_the_renewal_timer_is_installed_once_for_the_host(tmp_path: Path) -> None:
     from pilot.managers.environment import AdminEnvManager
-    from pilot.managers.letsencrypt import install_renewal_timer
+    from pilot.managers.letsencrypt import install_renewal_timer, is_renewal_timer_installed
 
     root, unit_dir = tmp_path / "pilot", tmp_path / "systemd"
     with (
@@ -198,8 +198,10 @@ def test_the_renewal_timer_is_installed_once_for_the_host(tmp_path: Path) -> Non
         patch("pilot.managers.systemd_user.run_command") as run_command,
         patch.object(AdminEnvManager, "python", new=root / ".admin-venv" / "bin" / "python"),
     ):
-        assert install_renewal_timer() is True
-        assert install_renewal_timer() is False
+        assert not is_renewal_timer_installed()
+        install_renewal_timer()
+        assert is_renewal_timer_installed()
+        install_renewal_timer()
 
     service = (unit_dir / "pilot-certificates.service").read_text()
     assert f"ExecStart={root}/.admin-venv/bin/python -m pilot.managers.letsencrypt" in service
