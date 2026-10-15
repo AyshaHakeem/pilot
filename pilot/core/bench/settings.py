@@ -333,7 +333,7 @@ def _restart_systemd(manager) -> bool:
         [*manager._systemctl(), "restart", *non_admin_units],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
         env=env,
         check=True,
     )
