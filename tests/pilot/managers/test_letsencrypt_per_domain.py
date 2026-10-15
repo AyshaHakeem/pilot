@@ -185,3 +185,59 @@ def test_a_certificate_with_time_left_raises_nothing(tmp_path: Path) -> None:
         patch("pilot.managers.letsencrypt.certificate_days_left", return_value=40),
     ):
         assert LetsEncryptManager(bench).expiring_certificates() == []
+
+
+def test_the_renewal_timer_is_installed_once_for_the_host(tmp_path: Path) -> None:
+    from pilot.managers.environment import AdminEnvManager
+    from pilot.managers.letsencrypt import install_renewal_timer
+
+    root, unit_dir = tmp_path / "pilot", tmp_path / "systemd"
+    with (
+        patch("pilot.utils.cli_root", return_value=root),
+        patch("pilot.managers.systemd_user.user_unit_dir", return_value=unit_dir),
+        patch("pilot.managers.systemd_user.run_command") as run_command,
+        patch.object(AdminEnvManager, "python", new=root / ".admin-venv" / "bin" / "python"),
+    ):
+        assert install_renewal_timer() is True
+        assert install_renewal_timer() is False
+
+    service = (unit_dir / "pilot-certificates.service").read_text()
+    assert f"ExecStart={root}/.admin-venv/bin/python -m pilot.managers.letsencrypt" in service
+    assert (unit_dir / "pilot-certificates.timer").is_symlink()
+    assert run_command.call_args.args[0][-3:] == ["enable", "--now", "pilot-certificates.timer"]
+
+
+def _renewal_benches(*eligible: bool) -> list:
+    from types import SimpleNamespace
+
+    return [
+        (
+            Path(f"/benches/bench{index}"),
+            SimpleNamespace(
+                production=SimpleNamespace(enabled=True),
+                letsencrypt=SimpleNamespace(email="ops@example.com" if is_eligible else ""),
+            ),
+        )
+        for index, is_eligible in enumerate(eligible)
+    ]
+
+
+@pytest.mark.parametrize("renew_fails", [False, True])
+def test_the_daily_renewal_renews_once_and_checks_every_bench(tmp_path: Path, renew_fails: bool) -> None:
+    from pilot.exceptions import CommandError
+    from pilot.managers import letsencrypt
+
+    with (
+        patch("pilot.utils.cli_root", return_value=tmp_path),
+        patch("pilot.utils.iter_sibling_benches", return_value=_renewal_benches(True, False, True)),
+        patch("pilot.core.bench.Bench", side_effect=lambda config, path: path),
+        patch.object(letsencrypt, "LetsEncryptManager") as manager,
+    ):
+        if renew_fails:
+            manager.return_value.renew.side_effect = CommandError("certbot failed")
+        letsencrypt.main()
+
+    benches = [call.args[0] for call in manager.call_args_list]
+    assert benches == [Path("/benches/bench0"), Path("/benches/bench0"), Path("/benches/bench2")]
+    assert manager.return_value.renew.call_count == 1
+    assert manager.return_value.alert_expiring_certificates.call_count == 2
