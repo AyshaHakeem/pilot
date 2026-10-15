@@ -16,6 +16,7 @@ from pilot.core.server.monitoring_config import MonitorConfigurator
 from pilot.core.server.monitoring_datum import MetricShipper
 from pilot.core.server.monitoring_proc import ProcMetricsReader
 from pilot.core.server.monitoring_processes import ProcessResolver
+from pilot.managers.fluentbit import LogsConfigurator
 from pilot.utils import cli_root, iter_sibling_benches
 
 if typing.TYPE_CHECKING:
@@ -385,6 +386,8 @@ def main() -> None:
     host.collect_slow_queries()
     # One tick, one POST, after every log is on disk.
     shipper.send()
+    # Logs read the same config, so a credential that arrives later starts both.
+    LogsConfigurator().sync(host.bench.config.telemetry)
 
 
 if __name__ == "__main__":

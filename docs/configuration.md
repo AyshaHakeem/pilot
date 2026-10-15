@@ -236,6 +236,8 @@ Either shipper runs only when its switch is on and both `endpoint` and `token` a
 
 `pilot setup telemetry` writes this section and installs the log shipper. Central is asked for the credential when `[central] enabled` is set, and what it returns replaces what is already there, because the token expires. `--endpoint` and `--token` override the fetch. `pilot setup production` does the same, once, before configuring either shipper.
 
+The monitor checks this section on every run, so both shippers start when a credential arrives later, such as from Central's bootstrap. It rewrites the Fluent Bit config and restarts Fluent Bit when the endpoint or token changes, and it starts Fluent Bit again when it is not running. Fluent Bit must be installed. `install.sh` installs it on Debian and Ubuntu. `pilot remove logs` stops Fluent Bit and sets `logs_enabled = false`, so the monitor does not start it again.
+
 ### Alert Delivery
 
 `[resource_limits]` sets when an alert is raised and where it goes. A usage percentage of `0` disables that alert; `site_uptime` covers sites that stop answering their ping. A condition must hold for five minutes before anything is sent.
