@@ -418,7 +418,7 @@ def test_delete_site_app_queues_uninstall(tmp_path: Path) -> None:
     body = response.get_json()
     assert response.status_code == 202
     assert body["command"] == "uninstall-app"
-    assert body["args"] == {"site": "site1.localhost", "app": "suite", "force": False}
+    assert body["args"] == {"site": "site1.localhost", "app": "suite", "force": False, "remove_from_bench": False}
 
 
 def test_delete_site_app_passes_force_flag(tmp_path: Path) -> None:

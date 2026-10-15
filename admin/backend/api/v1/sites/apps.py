@@ -340,8 +340,11 @@ def delete_site_app(name: str, app: str):
         return jsonify({"app": app, "disabled": True})
 
     force = request.args.get("force") == "true"
+    remove_from_bench = request.args.get("remove_from_bench") == "true"
     try:
-        task_id = UninstallAppTask.queue(bench, site=name, app=app, force=force)
+        task_id = UninstallAppTask.queue(
+            bench, site=name, app=app, force=force, remove_from_bench=remove_from_bench
+        )
     except Exception as error:
         return task_failure(error)
     return accepted_task_response(bench_root, task_id)

@@ -67,7 +67,7 @@ Task-starting endpoints should return:
 
 Two app operations answer inline instead of returning a task id, because both are flag flips on data that never left the site:
 
-- `DELETE /sites/<name>/apps/<app>?mode=disable` returns `{"app": ..., "disabled": true}`. Without the parameter the route queues an uninstall as before.
+- `DELETE /sites/<name>/apps/<app>?mode=disable` returns `{"app": ..., "disabled": true}`. Without the parameter the route queues an uninstall. The app stays on the bench; `remove_from_bench=true` also removes it when no site uses it any more.
 - `POST /sites/<name>/apps` for an app the site only has disabled returns `{"app": ..., "enabled": true}`. It falls through to the install queue when a required app has to be installed first.
 
 ### Site Detail And Login

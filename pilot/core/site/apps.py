@@ -167,7 +167,10 @@ class SiteApps:
         app_names: list[str],
         force: bool,
         on_progress: Callable[[str], None],
+        remove_from_bench: bool = False,
     ) -> None:
+        """Uninstall apps from this site. The apps stay on the bench unless
+        `remove_from_bench` asks to remove one that no site uses any more."""
         if not self.site.exists:
             raise BenchError(f"Site '{self.site.config.name}' does not exist.")
 
@@ -183,7 +186,8 @@ class SiteApps:
             on_progress(f"Uninstalling '{app_name}' from site '{self.site.config.name}'...")
             self.site.uninstall_app(app, force=force)
             on_progress(f"'{app_name}' uninstalled from '{self.site.config.name}'.")
-            self.remove_app_if_not_on_any_site(app_name, on_progress)
+            if remove_from_bench:
+                self.remove_app_if_not_on_any_site(app_name, on_progress)
 
     def forget_missing_app(self, app_name: str, on_progress: Callable[[str], None]) -> None:
         """Drop an app the site lists but the bench does not have, as after a restore from

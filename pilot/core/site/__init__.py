@@ -229,10 +229,11 @@ class Site:
         app_names: list[str],
         force: bool = False,
         on_progress: Callable[[str], None] = lambda message: None,
+        remove_from_bench: bool = False,
     ) -> None:
         from pilot.core.site.apps import SiteApps
 
-        SiteApps(self).uninstall_apps(app_names, force, on_progress)
+        SiteApps(self).uninstall_apps(app_names, force, on_progress, remove_from_bench)
 
     def _remove_app_if_not_on_any_site(self, app_name: str, on_progress: Callable[[str], None]) -> None:
         from pilot.core.site.apps import SiteApps

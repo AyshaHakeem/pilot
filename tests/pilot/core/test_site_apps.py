@@ -264,3 +264,24 @@ def test_uninstalling_an_app_the_bench_lacks_only_drops_it_from_the_site(tmp_pat
     assert any(command[-2:] == ["remove-from-installed-apps", "ghost"] for command in commands)
     assert not any("uninstall-app" in command for command in commands)
     remove_from_bench.assert_not_called()
+
+
+@pytest.mark.parametrize("remove_from_bench", [False, True])
+def test_uninstalling_from_a_site_removes_the_app_from_the_bench_only_when_asked(
+    tmp_path, remove_from_bench: bool
+) -> None:
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    (bench.apps_path / "myapp").mkdir()
+    site_dir = bench.sites_path / "site1.localhost"
+    site_dir.mkdir()
+    (site_dir / "site_config.json").write_text("{}")
+
+    with (
+        patch("pilot.core.site.Site.list_apps", return_value=["frappe", "myapp"]),
+        patch("pilot.core.site.Site.uninstall_app"),
+        patch.object(SiteApps, "remove_app_if_not_on_any_site") as remove_app,
+    ):
+        bench.site("site1.localhost").uninstall_apps(["myapp"], remove_from_bench=remove_from_bench)
+
+    assert remove_app.called is remove_from_bench
