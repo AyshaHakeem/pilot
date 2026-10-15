@@ -232,7 +232,7 @@ Pilot configures PROXY protocol v2 when an HTTPS origin needs it. See [Per-domai
 
 `[telemetry]` is one credential for both shippers. `endpoint` is the base URL of the region's Datum, with no path: metrics append `/v1/ingest` and logs append `/v1/logs/ingest`. `token` is the JWT Central mints for the region, which Datum tells apart by route rather than by token, so one serves both. `logs_enabled` and `metrics_enabled` switch each shipper independently.
 
-Either shipper runs only when its switch is on and both `endpoint` and `token` are set. Metrics also need the optional `datum` package (`pip install pilot[metrics]`). Logs are written locally regardless of shipping settings.
+Either shipper runs only when its switch is on and both `endpoint` and `token` are set. Logs are written locally regardless of shipping settings.
 
 `pilot setup telemetry` writes this section and installs the log shipper. Central is asked for the credential when `[central] enabled` is set, and what it returns replaces what is already there, because the token expires. `--endpoint` and `--token` override the fetch. `pilot setup production` does the same, once, before configuring either shipper.
 
