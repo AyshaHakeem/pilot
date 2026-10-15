@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 from pilot.config.proxy import CLOUDFLARE_NETWORKS
 from pilot.config.waf import parse_nginx_size
 from pilot.exceptions import CommandError
+from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
 from pilot.internal.template import Template
 from pilot.managers.gunicorn import GunicornManager
 from pilot.managers.nginx.waf_render import ModSecurityRenderer
@@ -464,24 +465,26 @@ class NginxManager:
         self._write_config_file(modsec_dir / "main.conf", self._modsec.render_main(modsec_dir))
 
     def _write_config_file(self, path: Path, content: str) -> None:
-        if path in self._unvalidated:
-            previous = self._unvalidated[path][0]
-        else:
-            previous = path.read_text() if path.exists() else None
-        self._unvalidated[path] = (previous, content)
-        path.write_text(content)
+        with exclusive_file_lock(path):
+            if path in self._unvalidated:
+                previous = self._unvalidated[path][0]
+            else:
+                previous = path.read_text() if path.exists() else None
+            self._unvalidated[path] = (previous, content)
+            replace_private_text_locked(path, content)
 
     def _restore_unvalidated(self) -> None:
         """Put back the files nginx rejected. Every bench shares one nginx, so a broken
         file left in place would stop it from starting at the next restart. A file that
         another operation rewrote since is theirs, and stays."""
         for path, (previous, written) in self._unvalidated.items():
-            if (path.read_text() if path.exists() else None) != written:
-                continue
-            if previous is None:
-                path.unlink(missing_ok=True)
-            else:
-                path.write_text(previous)
+            with exclusive_file_lock(path):
+                if (path.read_text() if path.exists() else None) != written:
+                    continue
+                if previous is None:
+                    path.unlink(missing_ok=True)
+                else:
+                    replace_private_text_locked(path, previous)
         self._unvalidated.clear()
 
     @property
