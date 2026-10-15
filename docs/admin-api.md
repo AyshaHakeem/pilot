@@ -114,7 +114,7 @@ Measuring means a `du` per site directory and one schema-size query, so the rout
 
 ### Backups And Restore
 
-Pilot writes backup runs to `sites/<site>/backups`. Frappe prunes `private/backups` on every backup and every hour, so Pilot keeps its runs out of that directory and its retention policy is the only pruner.
+Pilot writes backup runs to `sites/<site>/backups`. Frappe prunes `private/backups` on every backup and every hour, so Pilot keeps its runs out of that directory and its retention policy is the only pruner. `POST /sites/<name>/backups` returns `409` while another task owns the site, such as a restore, rename or drop.
 
 `POST /sites/<name>/actions/restore` queues `restore-site`. The body has `parts`, a list of `database`, `public`, `private`, and `config`, an optional `skip_failing_patches` boolean, and one source:
 
@@ -131,7 +131,7 @@ A remote source needs a bench session and an `https://` site. The Administrator 
 
 `POST /sites/<name>/actions/restore-upload` takes the same `parts` and `skip_failing_patches` (`"true"`) as multipart form fields, plus the files `database`, `public`, `private`, and `config` (the site config backup). nginx `client_max_body_size` limits the upload size.
 
-A restore puts the site in maintenance mode, restores only the chosen parts, and migrates it. It restores the files before the database. From a remote site or Frappe Cloud, the file archives and a MariaDB database stream into the site as they download, so they need no copy on disk. The site stays in maintenance mode for the download time. `skip_failing_patches` passes `--skip-failing` to the migration. It takes no backup of the site first. A database from another site brings that site's encryption key. The `config` part merges the source site config into this site, except the keys that belong to this site: `db_*`, `redis_*`, `pilot_*`, `atlas_*`, `rds_db`, `host_name`, `installed_apps`, `maintenance_mode`, and `pause_scheduler`. A config restored without its database keeps this site's `encryption_key`, so the passwords in this site's database stay readable. If a step fails, the site stays in maintenance mode. Restoring from another site needs a bench session; a site token can only restore its own backups.
+A restore puts the site in maintenance mode, restores only the chosen parts, and migrates it. It restores the files before the database. From a remote site or Frappe Cloud, the file archives and a MariaDB database stream into the site as they download, so they need no copy on disk. The site stays in maintenance mode for the download time. `skip_failing_patches` passes `--skip-failing` to the migration. It takes no backup of the site first. A database from another site brings that site's encryption key. The `config` part merges the source site config into this site, except the keys that belong to this site: `db_*`, `redis_*`, `pilot_*`, `atlas_*`, `rds_db`, `maintenance_mode`, `pause_scheduler`, `email_sender_name`, and the keys a site-scoped config change cannot set either, such as `host_name`, `domains`, `route`, `ssl`, `cert_name`, `backup_retention`, and `installed_apps`. A config restored without its database keeps this site's `encryption_key`, so the passwords in this site's database stay readable. If a step fails, the site stays in maintenance mode. Restoring from another site needs a bench session; a site token can only restore its own backups.
 
 #### Chunked uploads
 
