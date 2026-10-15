@@ -85,6 +85,21 @@ def test_site_apps_falls_back_to_name_when_app_missing(tmp_path: Path) -> None:
     apps = {app["name"]: app for app in response.get_json()["apps"]}
     assert apps["ghost"]["title"] == "ghost"
     assert apps["ghost"]["description"] == ""
+    assert apps["ghost"]["missing"] is True
+
+
+def test_site_apps_marks_only_the_listed_repository_as_marketplace(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site1.localhost", ["suite"])
+    _make_app(bench_root, "suite", '[project]\nname = "suite"\n')
+
+    client = _client(bench_root)
+    with patch("pilot.core.app.App.is_marketplace", new=False):
+        response = client.get("/api/v1/sites/site1.localhost/apps")
+
+    suite = response.get_json()["apps"][0]
+    assert suite["is_marketplace"] is False
+    assert "missing" not in suite
 
 
 def test_site_marketplace_returns_catalog_for_existing_site(tmp_path: Path) -> None:

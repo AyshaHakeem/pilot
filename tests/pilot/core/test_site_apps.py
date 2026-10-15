@@ -239,3 +239,28 @@ def test_install_app_refuses_when_a_required_app_is_not_on_the_bench(tmp_path: P
         site.install_app(app)
 
     assert not any("install-app" in call.args[0] for call in mock_rc.call_args_list)
+
+
+def test_uninstalling_an_app_the_bench_lacks_only_drops_it_from_the_site(tmp_path) -> None:
+    from unittest.mock import patch
+
+    from pilot.core.site.apps import SiteApps
+
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    site_dir = bench.sites_path / "site1.localhost"
+    site_dir.mkdir()
+    (site_dir / "site_config.json").write_text("{}")
+    site = bench.site("site1.localhost")
+
+    with (
+        patch("pilot.core.site.Site.list_apps", return_value=["frappe", "ghost"]),
+        patch("pilot.core.site.apps.run_command") as run,
+        patch.object(SiteApps, "remove_app_if_not_on_any_site") as remove_from_bench,
+    ):
+        site.uninstall_apps(["ghost"])
+
+    commands = [call.args[0] for call in run.call_args_list]
+    assert any(command[-2:] == ["remove-from-installed-apps", "ghost"] for command in commands)
+    assert not any("uninstall-app" in command for command in commands)
+    remove_from_bench.assert_not_called()

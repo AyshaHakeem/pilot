@@ -63,7 +63,7 @@ Task-starting endpoints should return:
 
 ### Site Apps
 
-`GET /sites/<name>/apps` returns the apps in use on the site, disabled ones excluded, plus `can_disable` for whether this bench's Frappe supports disabling at all.
+`GET /sites/<name>/apps` returns the apps in use on the site, disabled ones excluded, plus `can_disable` for whether this bench's Frappe supports disabling at all. Each app has `is_marketplace` when its repository is the one the registry lists; the registry's links and metadata apply only then, so a fork keeps its own. An app the site lists but the bench does not have, for example after a restore from another bench, has `missing: true`. Uninstalling such an app removes it from the site's installed apps only.
 
 Two app operations answer inline instead of returning a task id, because both are flag flips on data that never left the site:
 

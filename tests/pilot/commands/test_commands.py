@@ -1466,3 +1466,18 @@ def test_new_app_reloads_workers_so_sites_can_import_it(tmp_path: Path) -> None:
 
     mock_new_app.assert_called_once()
     mock_reload.assert_called_once()
+
+
+def test_list_site_apps_marks_apps_the_bench_does_not_have(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    from pilot.commands.sites.list_apps import ListSiteAppsCommand
+
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    (bench.apps_path / "frappe" / ".git").mkdir(parents=True)
+
+    with patch("pilot.core.site.Site.active_apps", return_value=["frappe", "commera"]):
+        ListSiteAppsCommand(bench, site_name="site1.localhost").run()
+
+    output = capsys.readouterr()
+    assert output.out.splitlines() == ["frappe", "commera"]
+    assert "commera is not on this bench" in output.err

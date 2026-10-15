@@ -54,37 +54,43 @@ def site_apps(name: str):
     except Exception:
         return internal_error("Could not read site apps.")
 
+    bench = Bench(bench_root)
     provider = AppProvider(bench_root)
     result = []
     for app_name in site.active_apps:
+        entry = {
+            "name": app_name,
+            "title": app_name,
+            "description": "",
+            "branch": "",
+            "commit": "",
+            "version": "",
+            "repo": "",
+        }
+        try:
+            app = bench.app(app_name)
+        except BenchError:
+            # Listed by the site, as after a restore from another bench, but not on this bench.
+            result.append({**entry, "missing": True})
+            continue
         try:
             info = provider.get_app(app_name)
-            result.append(
-                {
-                    "name": app_name,
-                    "title": info.title,
-                    "description": info.description,
-                    "branch": info.branch,
-                    "commit": info.current_commit,
-                    "version": info.installed_version,
-                    "repo": info.repo,
-                    "has_local_changes": info.has_local_changes,
-                }
-            )
+            entry |= {
+                "title": info.title,
+                "description": info.description,
+                "branch": info.branch,
+                "commit": info.current_commit,
+                "version": info.installed_version,
+                "repo": info.repo,
+                "has_local_changes": info.has_local_changes,
+                # Registry links and metadata describe the listed repository, not a fork of it.
+                "is_marketplace": app.is_marketplace,
+            }
         except Exception:
-            result.append(
-                {
-                    "name": app_name,
-                    "title": app_name,
-                    "description": "",
-                    "branch": "",
-                    "commit": "",
-                    "version": "",
-                    "repo": "",
-                }
-            )
+            pass
+        result.append(entry)
 
-    return jsonify({"apps": result, "can_disable": Bench(bench_root).has_app_disabling})
+    return jsonify({"apps": result, "can_disable": bench.has_app_disabling})
 
 
 @sites_bp.get("/<name>/marketplace")
