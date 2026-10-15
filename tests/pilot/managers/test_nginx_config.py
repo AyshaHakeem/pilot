@@ -4,7 +4,7 @@ from unittest.mock import PropertyMock, patch
 
 import pytest
 
-from pilot.config import BenchConfig, SiteConfig
+from pilot.config import BenchConfig, RoutePolicy, SiteConfig
 from pilot.config.central import HostnameAlias
 from pilot.core.bench import Bench
 from pilot.exceptions import CommandError
@@ -1217,3 +1217,18 @@ def test_a_rejected_config_never_undoes_a_file_another_operation_wrote_since(tmp
         manager.reload()
 
     assert include_conf.read_text() == "# accepted by another operation\n"
+
+
+def test_a_site_alias_redirects_to_the_primary_domain_but_answers_central_probes(tmp_path: Path) -> None:
+    edge = RoutePolicy("https", "http", "x_forwarded_for")
+    renamed = SiteConfig(
+        name="shop.example.com",
+        apps=["frappe"],
+        domains=["www.shop.example.com"],
+        primary_domain="www.shop.example.com",
+        route=edge,
+    )
+    config = _cloud_config(tmp_path, [(renamed, False)], hostname_mappings={_SITE_GLOB: renamed.name})
+
+    assert "return 301 https://www.shop.example.com$request_uri;" in config
+    assert "location = /api/method/ping {" in config

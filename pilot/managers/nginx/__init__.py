@@ -173,10 +173,15 @@ class NginxConfigRenderer:
             return None
 
         site, tls_domains = entry
-        scheme = "https" if mapping.target in tls_domains else "http"
+        # Redirect to the domain the site calls home, on the scheme clients reach it with.
+        target = site.primary
+        if site.configured_route_for(target):
+            scheme = site.route_for(target).public_scheme
+        else:
+            scheme = "https" if target in tls_domains else "http"
         return SimpleNamespace(
             server_name=vm_hostname_pattern(mapping.pattern),
-            redirect=f"{scheme}://{mapping.target}" if mapping.redirect else "",
+            redirect=f"{scheme}://{target}" if mapping.redirect else "",
             proxy_pass=f"http://bench-{self.bench.config.name}",
             site=site.name,
             public_root=f"{self.bench.path}/sites/{site.name}/public",
