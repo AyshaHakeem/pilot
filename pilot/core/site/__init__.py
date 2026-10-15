@@ -244,15 +244,21 @@ class Site:
         self,
         on_progress: Callable[[str], None] = lambda message: None,
         no_backup: bool = False,
+        force: bool = False,
+        archived_sites_path: str | None = None,
     ) -> None:
         from pilot.core.site.commands import SiteCommands
         from pilot.managers.nginx import NginxManager
 
         provider_domains = self._provider_domains()
-        # Frappe's --force drops the database even when the backup before it failed.
         cmd = [*self.bench.frappe_call, "frappe", "drop-site", self.config.name]
         if no_backup:
-            cmd += ["--no-backup", "--force"]
+            cmd.append("--no-backup")
+        # Frappe's --force drops the database even when the backup before it failed.
+        if force or no_backup:
+            cmd.append("--force")
+        if archived_sites_path:
+            cmd += ["--archived-sites-path", archived_sites_path]
         on_progress(f"Dropping site '{self.config.name}'...")
         with SiteCommands(self).setup_credentials(self.db_type) as credentials:
             run_command(cmd + credentials, cwd=self.bench.sites_path, stream_output=True)
