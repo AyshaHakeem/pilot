@@ -2,7 +2,7 @@
 
 Commands are a user interface over the core object model. Keep command classes small: parse arguments, resolve a bench, and call a core object or task.
 
-Use `pilot --help` and `pilot <command> --help` for exact flags.
+Use `pilot --help` and `pilot <command> --help` for exact flags. `pilot --version` prints the Pilot version (`dev` for a source checkout).
 
 ## Bench Commands
 
@@ -78,7 +78,9 @@ Site behavior belongs on `Site` or a module under `pilot/core/site`.
 - `pilot setup letsencrypt`: issue or refresh TLS certificates.
 - `pilot setup production`: deploy process manager and nginx integration.
 - `pilot setup central`: hand the host to Central and alias the VM hostnames it serves.
+- `pilot setup telemetry`: write the metrics credential to `common_config.toml` and install Fluent Bit.
 - `pilot remove production`: remove production deployment files and services.
+- `pilot remove logs`: stop and disable the Fluent Bit log shipper.
 
 `pilot setup central` writes the shared `[central]` settings: it enables Central management and, given `--admin-pattern` or `--site-pattern`, aliases those VM hostname globs to this bench's admin domain and its site. Central manages a host holding one bench, so the command refuses a second one rather than guess which bench a VM hostname belongs to, and `--site-pattern` aliases the bench's only site, skipping the alias while the bench has no site and refusing to guess when it has more than one. The credential itself is never passed in - it arrives through instance metadata, and `--rebootstrap` asks for it to be applied again. Because the bootstrap unit is written only while Central is enabled, the command rebuilds the process set of a bench already in production, restarting its workload.
 
@@ -97,6 +99,7 @@ These commands control the task worker, not individual Frappe workers.
 - `pilot admin build`: rebuild Admin frontend assets from source.
 - `pilot admin upgrade`: update Pilot to the latest version, run pending upgrade patches (pre_update before, post_update after), and restart the admin service.
 - `pilot admin issue-site-token`: issue a scoped site-to-bench API token.
+- `pilot admin revoke-totp --device-name NAME`: revoke a device's TOTP credential, for a lost authenticator.
 - `pilot admin run-patches [--phase pre_update|post_update|all]`: run pending Pilot upgrade patches by hand (see [Configuration](configuration.md#common-config)); `pilot admin upgrade` already runs both phases automatically.
 
 Admin commands live in `pilot/commands/admin`. Backend route behavior lives under `admin/backend/api/v1`.
