@@ -217,7 +217,10 @@ class Site:
     def build_assets(self) -> None:
         """Rebuild the assets of the apps this site runs. Assets are shared by every
         site on the bench that has those apps."""
-        self.bench.rebuild_assets(apps=self.active_apps(), force=True)
+        bench_apps = {app.config.name for app in self.bench.apps()}
+        self.bench.rebuild_assets(
+            apps=[name for name in self.active_apps() if name in bench_apps], force=True
+        )
 
     def uninstall_apps(
         self,
