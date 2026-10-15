@@ -144,6 +144,12 @@ class SiteBackups:
         write_retention(self.site.path / "site_config.json", retention)
         return self.schedule()
 
+    def move_schedule(self, old_name: str) -> None:
+        """Carry a renamed site's backup schedule over from its old name."""
+        from pilot.managers.cron import CronManager
+
+        CronManager(self.site.bench.path).move_schedule(old_name, self.site.config.name, self._cron_command())
+
     def clear_schedule(self) -> None:
         from pilot.managers.cron import CronManager
 

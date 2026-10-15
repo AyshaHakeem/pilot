@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.config import SiteConfig
+from pilot.exceptions import CronError
+from pilot.managers.cron import CronManager
 from pilot.utils import run_command
 
 if TYPE_CHECKING:
@@ -253,6 +255,11 @@ class Site:
         on_progress(f"Dropping site '{self.config.name}'...")
         with SiteCommands(self).setup_credentials(self.db_type) as credentials:
             run_command(cmd + credentials, cwd=self.bench.sites_path, stream_output=True)
+        # The site directory is archived now, so only the cron entry is left to remove.
+        try:
+            CronManager(self.bench.path).remove_schedule(self.config.name)
+        except CronError as error:
+            on_progress(f"Could not remove the site's backup schedule: {error}")
         self._remove_from_bench_toml()
         self._release_domains(provider_domains)
         on_progress(f"\nSite '{self.config.name}' dropped.")
