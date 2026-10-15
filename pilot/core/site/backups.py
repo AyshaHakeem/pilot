@@ -106,9 +106,14 @@ class SiteBackups:
         policy = BackupRetentionPolicy(config)
         with exclusive_file_lock(self.runs_lock_path):
             timestamps = sorted(set(self._local_timestamps()) | set(offsite_runs))
-            return [
-                ts for ts in policy.select_deletions(timestamps) if self._delete_run(offsite, offsite_runs, ts)
-            ]
+            selected = policy.select_deletions(timestamps)
+
+        # Offsite deletes are network calls, so publishing does not wait on them.
+        deleted = [ts for ts in selected if self._delete_offsite_run(offsite, offsite_runs, ts)]
+        with exclusive_file_lock(self.runs_lock_path):
+            for timestamp in deleted:
+                self._delete_local(timestamp)
+        return deleted
 
     def resolve_file(self, filename: str) -> Path:
         """A path inside this site's own backup directory. These names arrive from API
@@ -176,15 +181,14 @@ class SiteBackups:
     def retention_from_payload(self, block: dict | None):
         return retention_from_payload(block)
 
-    def _delete_run(self, offsite, offsite_runs: dict, timestamp: str) -> bool:
-        """Delete one run offsite first; keep local files if offsite deletion fails."""
+    def _delete_offsite_run(self, offsite, offsite_runs: dict, timestamp: str) -> bool:
+        """Delete one run offsite. False keeps its local files, because the offsite delete failed."""
         if timestamp in offsite_runs:
             try:
                 self._delete_offsite(offsite, timestamp, offsite_runs[timestamp])
             except Exception as error:
                 print(f"Kept backup {timestamp}: offsite delete failed: {error}")
                 return False
-        self._delete_local(timestamp)
         return True
 
     def _local_timestamps(self) -> list[str]:

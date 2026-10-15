@@ -59,23 +59,33 @@ def test_a_backup_never_overwrites_a_run_from_the_same_second(tmp_path: Path) ->
     assert [path.name for path in backups.iterdir()] == ["20261015_020000-site1-database.sql.gz"]
 
 
-def test_retention_waits_while_a_run_is_published(tmp_path: Path) -> None:
+def test_retention_deletes_offsite_without_holding_the_publish_lock(tmp_path: Path) -> None:
+    """A slow bucket must not hold back a backup that waits to publish its run."""
+    from unittest.mock import Mock
+
     from pilot.internal.atomic_file import exclusive_file_lock
 
-    bench, _ = _site_with_backups(tmp_path)
+    bench, backups = _site_with_backups(tmp_path)
     site_backups = bench.site("site1.localhost").backups
-    published: list[str] = []
+    (backups / "20261015_010000-site1-database.sql.gz").write_text("old")
+    (backups / "20261015_020000-site1-database.sql.gz").write_text("new")
+    offsite = Mock()
+    offsite.list_backups.return_value = {"20261015_010000": {"database": "20261015_010000-site1-database.sql.gz"}}
 
-    def lock(path):
-        assert path == site_backups.runs_lock_path
-        published.append("locked")
-        return exclusive_file_lock(path)
+    def delete(*_args) -> None:
+        with exclusive_file_lock(site_backups.runs_lock_path, blocking=False):
+            pass
 
-    with patch("pilot.core.site.backups.exclusive_file_lock", side_effect=lock):
-        site_backups._publish([])
-        with patch("pilot.core.site.backups.read_retention", return_value=object()), patch(
-            "pilot.core.site.backups.BackupRetentionPolicy"
-        ):
-            site_backups.prune()
+    offsite.delete.side_effect = delete
+    policy = Mock()
+    policy.select_deletions.return_value = ["20261015_010000"]
 
-    assert published == ["locked", "locked"]
+    with (
+        patch("pilot.core.site.backups.read_retention", return_value=object()),
+        patch("pilot.core.site.backups.BackupRetentionPolicy", return_value=policy),
+        patch.object(type(site_backups), "_offsite", return_value=offsite),
+    ):
+        assert site_backups.prune() == ["20261015_010000"]
+
+    offsite.delete.assert_called_once()
+    assert [path.name for path in backups.iterdir()] == ["20261015_020000-site1-database.sql.gz"]
