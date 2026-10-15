@@ -10,3 +10,4 @@ add_mail_use_ssl
 install_mariadb_sizing_unit
 install_certificate_renewal_timer
 serve_realtime_on_unix_socket
+start_admin_at_boot

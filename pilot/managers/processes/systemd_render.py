@@ -70,7 +70,10 @@ class SystemdRenderer(ServiceRenderer):
             # and must outlive it idle-stopping or restarting its socket.
             f"KillMode=process\n"
             f"StandardOutput=append:{pd.log_file}\n"
-            f"StandardError=append:{pd.log_file}.error.log\n"
+            f"StandardError=append:{pd.log_file}.error.log\n\n"
+            # Starts at boot so the worker runs tasks queued before a reboot; idle-stops after.
+            f"[Install]\n"
+            f"WantedBy=default.target\n"
         )
 
     def render_central_bootstrap(
