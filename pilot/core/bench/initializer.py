@@ -9,7 +9,8 @@ from pilot.config.common_site_config import update_common_site_config
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
 
-_BENCH_DIRS = ("apps", "sites", "logs", "config", "pids", "env", "admin", "tasks")
+# Not `tasks`: the task store owns it, and a wizard init runs as a task whose record lives there.
+_BENCH_DIRS = ("apps", "sites", "logs", "config", "pids", "env", "admin")
 
 
 class BenchInitializer:
