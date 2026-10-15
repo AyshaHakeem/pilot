@@ -1432,3 +1432,12 @@ def test_the_sizing_unit_runs_before_every_mariadb_start(tmp_path) -> None:
     assert "WantedBy=pilot-mariadb.service" in unit
     assert unit.split("ExecStart=")[1].split("\n")[0].endswith(" -m pilot.managers.database")
     assert any("enable" in call.args[0] for call in run.call_args_list)
+
+
+def test_client_command_uses_homebrew_default_socket_on_macos() -> None:
+    manager = _manager()
+
+    with patch(f"{MODULE}.is_macos", return_value=True):
+        command = manager._client_command()
+
+    assert command == ["mariadb", "--connect-timeout=5", "-u", "root", "--batch"]

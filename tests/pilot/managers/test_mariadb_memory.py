@@ -15,16 +15,25 @@ from pilot.managers.database.mariadb import MariaDBManager
 from pilot.managers.database.memory import MariaDBMemory
 
 
-def test_real_manager_resizes_at_boot_and_preserves_swap_and_other_overrides(tmp_path: Path) -> None:
+@pytest.mark.parametrize("snapshot_isolation", ["ON", "OFF"])
+def test_real_manager_resizes_at_boot_and_preserves_custom_variables(
+    tmp_path: Path, snapshot_isolation: str
+) -> None:
     manager = MariaDBManager(MariaDBConfig())
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "my.cnf").write_text("[mysqld]\n")
-    (config_dir / "managed.cnf").write_text("[mysqld]\ninnodb-buffer-pool-size = 400M\nconnect-timeout = 30\n")
+    (config_dir / "managed.cnf").write_text(
+        "[mysqld]\ninnodb-buffer-pool-size = 400M\nconnect-timeout = 30\n"
+        f"innodb-snapshot-isolation = {snapshot_isolation}\n"
+    )
+    (config_dir / "memory-sizing.json").write_text(
+        json.dumps({"boot_id": "previous-boot", "total_memory_mb": 1024})
+    )
     unit_dir = tmp_path / "units"
     unit_dir.mkdir()
     unit = unit_dir / "pilot-mariadb.service"
-    unit.write_text("[Unit]\nDescription=MariaDB\n[Service]\nMemorySwapMax=768M\n")
+    unit.write_text("[Unit]\nDescription=MariaDB\n[Service]\n")
     benches = tmp_path / "benches"
     benches.mkdir()
     with (
@@ -38,10 +47,12 @@ def test_real_manager_resizes_at_boot_and_preserves_swap_and_other_overrides(tmp
         patch("pilot.managers.database.mariadb.run_command"),
     ):
         manager.memory.prepare_boot()
-        assert "MemorySwapMax=768M" in unit.read_text()
         assert "Requires=pilot-mariadb-sizing.service" in unit.read_text()
         assert "connect-timeout = 30" in manager.managed_cnf_path.read_text()
+        assert manager._read_managed_options()["innodb-snapshot-isolation"] == snapshot_isolation
+        assert manager.my_cnf_path.read_text().rstrip().endswith(manager._managed_include_line)
         assert "innodb-buffer-pool-size = 400M" not in manager.managed_cnf_path.read_text()
+        assert f"MemoryMax={calculate_mariadb_memory(2048).memory_max_mb}M" in unit.read_text()
         assert (unit_dir / "pilot-mariadb-sizing.service").is_file()
 
 
@@ -198,7 +209,11 @@ def test_budget_is_rechecked_when_a_prepared_change_runs(memory) -> None:
 
 
 def test_limit_cannot_be_lower_than_the_buffer_pool(memory) -> None:
-    memory.manager._unit_memory_mb.side_effect = {"MemoryHigh": 400, "MemoryMax": 1500, "MemoryCurrent": 200}.get
+    memory.manager._unit_memory_mb.side_effect = {
+        "MemoryHigh": 400,
+        "MemoryMax": 1500,
+        "MemoryCurrent": 200,
+    }.get
     with pytest.raises(ValueError, match="Buffer Pool"):
         memory.validate("MemoryMax", 900)
 
