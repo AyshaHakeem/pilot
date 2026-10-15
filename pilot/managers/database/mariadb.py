@@ -30,6 +30,7 @@ from pilot.internal.atomic_file import (
     atomic_write_private_text,
     exclusive_file_lock,
 )
+from pilot.managers.database.memory import MariaDBMemory
 from pilot.managers.database.base import UserOwnedDBManager
 from pilot.managers.platform import is_macos, which
 from pilot.utils import cli_root, run_command
@@ -65,6 +66,10 @@ class MariaDBManager(UserOwnedDBManager):
 
     def __init__(self, config: MariaDBConfig) -> None:
         self.config = config
+
+    @property
+    def memory(self) -> MariaDBMemory:
+        return MariaDBMemory(self)
 
     @property
     def state_dir(self) -> Path:
@@ -917,15 +922,25 @@ class MariaDBManager(UserOwnedDBManager):
             raise DatabaseError("Could not detect total system memory for MariaDB sizing.")
         return total_memory_mb
 
-    def _install_unit(self, sizing: MariaDBMemorySizing) -> None:
+    def _install_unit(self, sizing: MariaDBMemorySizing, *, preserve_swap_limit: bool = False) -> None:
         self.user_unit_dir.mkdir(parents=True, exist_ok=True)
-        self.unit_path.write_text(self._render_unit(sizing))
+        content = self._render_unit(sizing)
+        if preserve_swap_limit:
+            swap_limits = "".join(
+                f"{line}\n" for line in self.unit_path.read_text().splitlines()
+                if line.strip().startswith("MemorySwapMax=")
+            )
+            content = content.replace("MemorySwapMax=0\n", swap_limits)
+        atomic_write_private_text(self.unit_path, content)
+        self.memory.install_startup_hook()
         run_command(self._systemctl("daemon-reload"), env=self._systemctl_env())
 
     def _render_unit(self, sizing: MariaDBMemorySizing) -> str:
         mariadbd = which("mariadbd") or which("mysqld") or "/usr/sbin/mariadbd"
         return (
             "[Unit]\n"
+            "Requires=pilot-mariadb-sizing.service\n"
+            "After=pilot-mariadb-sizing.service\n"
             "Description=MariaDB (pilot, user-owned)\n\n"
             "[Service]\n"
             "Type=simple\n"
