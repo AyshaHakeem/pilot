@@ -239,7 +239,7 @@ onMounted(async () => {
         :description="
           connected
             ? 'Replace the token with read-only access to the repositories you choose.'
-            : 'Recommended. Choose repositories on GitHub.'
+            : 'Connect GitHub repositories easily.'
         "
       >
         <Button :loading="redirecting" @click="connectViaCentral">
