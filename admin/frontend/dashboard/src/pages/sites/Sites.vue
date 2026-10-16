@@ -92,6 +92,7 @@ const filteredSites = computed(() => {
 })
 
 const hasCount = computed(() => !loading.value || sites.value.length > 0)
+const showSkeleton = computed(() => loading.value && sites.value.length === 0)
 
 const listColumns = [
   { label: 'Site', key: 'site', class: 'w-1/2' },
@@ -199,13 +200,13 @@ onMounted(() => {
 
     <ErrorMessage v-if="error" class="mt-16" :message="error" />
 
-    <template v-else-if="loading || filteredSites.length">
+    <template v-else-if="showSkeleton || filteredSites.length">
       <div
-        v-if="loading || view === 'grid'"
+        v-if="showSkeleton || view === 'grid'"
         class="gap-3 grid mt-1"
-        :class="loading || filteredSites.length > 1 ? 'md:grid-cols-2' : ''"
+        :class="showSkeleton || filteredSites.length > 1 ? 'md:grid-cols-2' : ''"
       >
-        <template v-if="loading">
+        <template v-if="showSkeleton">
           <SiteSkeleton v-for="index in 4" :key="index" :index="index - 1" />
         </template>
 
