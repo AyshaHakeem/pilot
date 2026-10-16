@@ -1,4 +1,4 @@
-"""`pilot init`: existing database handling and the --no-dev opt-out."""
+"""`pilot init`: existing database handling, the --no-dev opt-out, and --commit."""
 
 from __future__ import annotations
 
@@ -118,6 +118,24 @@ def test_init_keeps_the_dev_extra_by_default(tmp_path: Path) -> None:
         InitCommand(bench=bench).run()
 
     assert BenchConfig.read(tmp_path).install_dev_extra is True
+
+
+def test_commit_pins_the_framework_app_on_its_branch(tmp_path: Path) -> None:
+    from pilot.core.app import App
+
+    bench = make_bench(tmp_path)
+    commit = "4515014c87ece6cb20ee91d2cfb121c5cbd1ff4a"
+
+    with (
+        patch.object(App, "clone") as clone,
+        patch.object(App, "checkout_commit") as checkout_commit,
+        patch.object(Bench, "write_apps_txt"),
+    ):
+        BenchInitializer(bench, commit)._install_framework_apps(MagicMock(), lambda message: None)
+
+    clone.assert_called_once_with()
+    checkout_commit.assert_called_once_with(commit)
+    assert bench.config.framework_app.branch == "version-16"
 
 
 def test_new_bench_enables_server_scripts_unless_set_by_hand(tmp_path) -> None:
