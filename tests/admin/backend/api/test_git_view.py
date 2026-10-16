@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from pilot.config import BenchConfig
+from pilot.integrations.central.client import CentralClientError
 from pilot.integrations.git import BranchNotFoundError, GitAuthError
 
 
@@ -197,3 +198,61 @@ def test_put_connection_refuses_a_token_while_central_grants_github(tmp_path: Pa
 
     assert response.status_code == 409
     assert response.get_json()["error"]["code"] == "github_app_connected"
+
+
+def test_a_rejected_repository_token_keeps_the_github_app_grant(tmp_path: Path) -> None:
+    from pilot.integrations.git import GitCredentialStore
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    store = GitCredentialStore(bench_root)
+    store.save_github_app("octocat")
+    provider = Mock()
+    provider.list_branches.side_effect = GitAuthError()
+
+    with (
+        patch("admin.backend.api.v1.git.token_for", return_value="ghs_repository"),
+        patch("admin.backend.api.v1.git.provider_for_repo", return_value=provider),
+    ):
+        response = client.get("/api/v1/git/branches", query_string={"repo": "https://github.com/octocat/app"})
+
+    assert response.status_code == 401
+    assert store.load()["is_token_valid"] is True
+
+
+def test_starting_a_central_connection_reports_an_unreachable_central(tmp_path: Path) -> None:
+    from pilot.config.common import CommonConfig
+
+    client = _client(tmp_path / "benches" / "current")
+    with CommonConfig.open(tmp_path / "benches") as common:
+        common.central.enabled = True
+        common.central.bootstrapped = True
+
+    with patch(
+        "pilot.integrations.central.client.CentralClient.start_github_connection",
+        side_effect=CentralClientError("down"),
+    ):
+        response = client.post(
+            "/api/v1/git/connection-attempts", json={"return_url": "https://bench.test/git"}
+        )
+
+    assert response.status_code == 502
+    assert response.get_json()["error"]["code"] == "central_unavailable"
+
+
+def test_disconnect_keeps_the_github_app_grant_when_central_is_unreachable(tmp_path: Path) -> None:
+    from pilot.integrations.git import GitCredentialStore
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    store = GitCredentialStore(bench_root)
+    store.save_github_app("octocat")
+
+    with patch(
+        "pilot.integrations.central.client.CentralClient.disconnect_github",
+        side_effect=CentralClientError("down"),
+    ):
+        response = client.delete("/api/v1/git/connection")
+
+    assert response.status_code == 502
+    assert store.load()["username"] == "octocat"

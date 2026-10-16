@@ -58,7 +58,7 @@ class GitHubAppGrant:
         """Central's view of the grant. The store follows it."""
         status = self.client.get_github_status()
         accounts = ", ".join(connection["account"] for connection in status["connections"])
-        if accounts and not (self.is_active and self.store.load().get("username") == accounts):
+        if accounts and not (self.is_active and (self.store.load() or {}).get("username") == accounts):
             self.store.save_github_app(accounts)
         elif not accounts and self.is_active:
             self._forget()

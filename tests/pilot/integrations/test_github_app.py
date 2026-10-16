@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -67,3 +68,18 @@ def test_a_grant_removed_on_central_clears_the_store(tmp_path: Path) -> None:
         GitHubAppGrant(store).get_status()
 
     assert store.load() is None
+
+
+def test_a_token_close_to_expiry_is_minted_again(tmp_path: Path) -> None:
+    GitCredentialStore(tmp_path).save_github_app("octo")
+    expiring = (datetime.now(UTC) + timedelta(minutes=5)).isoformat()
+    minted = [
+        {"token": "ghs_expiring", "expires_at": expiring},
+        {"token": "ghs_fresh", "expires_at": "2099-01-01T00:00:00Z"},
+    ]
+
+    with patch(
+        "pilot.integrations.central.client.CentralClient.get_github_repository_token", side_effect=minted
+    ):
+        assert token_for(tmp_path, PRIVATE_REPOSITORY) == "ghs_expiring"
+        assert token_for(tmp_path, PRIVATE_REPOSITORY) == "ghs_fresh"

@@ -202,7 +202,9 @@ def list_branches():
     try:
         branches = provider.list_branches(full_name)
     except GitAuthError:
-        store.mark_invalid()
+        # A rejected repository token says nothing about the GitHub App grant itself.
+        if not GitHubAppGrant(store).is_active:
+            store.mark_invalid()
         return error_response(
             "invalid_git_token",
             "Your access token has expired or been revoked.",
