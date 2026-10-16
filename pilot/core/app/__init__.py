@@ -458,7 +458,7 @@ class App:
 
     def record_branch(self) -> None:
         """Persist this app's tracked branch to bench.toml so it survives a
-        detached HEAD after a later commit pin (see BenchInventory._configured_branch)."""
+        detached HEAD after a later commit pin (see BenchInventory.get_configured_app)."""
         if not self.config.branch or self.is_commit_hash(self.config.branch):
             return
         from pilot.config import BenchConfig
