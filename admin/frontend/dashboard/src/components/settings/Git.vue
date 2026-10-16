@@ -91,7 +91,7 @@ const verifyAndConnect = async () => {
       error.value = apiErrorMessage(result, 'Could not verify token.')
     } else {
       token.value = ''
-      status.value = result
+      status.value = { ...result, central: status.value?.central }
       toast.success(`Connected as ${result.username}`)
       if (showTokenForm.value) openTokenScreen('github')
     }
