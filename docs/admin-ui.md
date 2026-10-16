@@ -70,6 +70,7 @@ The Billing panel changes the site plan in the dialog. **Change plan** opens an 
 ## UX Expectations
 
 - Show the current bench and site context clearly.
+- Show site skeletons only when no sites are cached; keep cached sites visible while refreshing after navigation.
 - Prefer dense operational screens over marketing-style pages.
 - Keep destructive actions explicit and reversible where possible.
 - Show task progress and logs near the operation that started them.
