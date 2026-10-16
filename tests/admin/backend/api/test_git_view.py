@@ -256,3 +256,38 @@ def test_disconnect_keeps_the_github_app_grant_when_central_is_unreachable(tmp_p
 
     assert response.status_code == 502
     assert store.load()["username"] == "octocat"
+
+
+def test_starting_a_central_connection_returns_the_central_link(tmp_path: Path) -> None:
+    from pilot.config.common import CommonConfig
+
+    client = _client(tmp_path / "benches" / "current")
+    with CommonConfig.open(tmp_path / "benches") as common:
+        common.central.enabled = True
+        common.central.bootstrapped = True
+
+    with patch(
+        "pilot.integrations.central.client.CentralClient.start_github_connection",
+        return_value="https://central.test/dashboard/github/connect/attempt",
+    ) as start:
+        response = client.post(
+            "/api/v1/git/connection-attempts", json={"return_url": "https://bench.test/git"}
+        )
+
+    assert response.get_json() == {"url": "https://central.test/dashboard/github/connect/attempt"}
+    start.assert_called_once_with("https://bench.test/git")
+
+
+def test_disconnect_removes_the_github_app_grant_on_central(tmp_path: Path) -> None:
+    from pilot.integrations.git import GitCredentialStore
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    GitCredentialStore(bench_root).save_github_app("octocat")
+
+    with patch("pilot.integrations.central.client.CentralClient.disconnect_github") as disconnect:
+        response = client.delete("/api/v1/git/connection")
+
+    assert response.status_code == 204
+    disconnect.assert_called_once_with()
+    assert GitCredentialStore(bench_root).load() is None
