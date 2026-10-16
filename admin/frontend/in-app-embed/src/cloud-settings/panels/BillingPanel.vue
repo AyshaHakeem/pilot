@@ -73,7 +73,7 @@ const paymentMethodNote = computed(() => {
 const sleepNote = computed(() => {
   const trial = billing.value?.trial
   if (trial?.state !== 'Active' || !trial.sleeps_after_minutes) return ''
-  return __('Until you add one, your site sleeps after {0} minutes without visitors. The next visit wakes it in a few seconds.', [trial.sleeps_after_minutes])
+  return __('Until you add a payment method, your site sleeps after {0} minutes without visitors. The next visit wakes it in a few seconds.', [trial.sleeps_after_minutes])
 })
 
 const planSubtitle = computed(() => {
