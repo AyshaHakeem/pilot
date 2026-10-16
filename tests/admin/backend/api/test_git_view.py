@@ -184,3 +184,16 @@ def test_repository_resolutions_requires_a_repo(tmp_path: Path) -> None:
     response = client.post("/api/v1/git/repository-resolutions", json={})
 
     assert response.status_code == 422
+
+
+def test_put_connection_refuses_a_token_while_central_grants_github(tmp_path: Path) -> None:
+    from pilot.integrations.git import GitCredentialStore
+
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    GitCredentialStore(bench_root).save_github_app("octocat")
+
+    response = client.put("/api/v1/git/connection", json={"provider": "github", "token": "ghp_abc123"})
+
+    assert response.status_code == 409
+    assert response.get_json()["error"]["code"] == "github_app_connected"

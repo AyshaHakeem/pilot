@@ -61,6 +61,14 @@ Task-starting endpoints should return:
 
 `GET /git/branches?repo=...` runs local `git ls-remote --heads`, so Git must be available on the Pilot host. It returns all remote branch names and puts the remote default first.
 
+### Git Connection Through Central
+
+On a Central-managed host, `GET /git/connection` also returns `central`: whether Central offers its GitHub App, and the granted repositories of each account. The host stores no GitHub token. It asks Central for a read-only token per repository and caches it in memory until about 10 minutes before expiry.
+
+- `POST /git/connection-attempts` with `{"return_url": ...}` returns the Central `url` where a user picks repositories. Central then sends the browser back to `return_url`.
+- A Central grant replaces a stored personal access token. `PUT /git/connection` answers 409 `github_app_connected` while the grant is active.
+- `DELETE /git/connection` removes the grant on Central, then the local record.
+
 ### Site Apps
 
 `GET /sites/<name>/apps` returns the apps in use on the site, disabled ones excluded, plus `can_disable` for whether this bench's Frappe supports disabling at all. Each app has `is_marketplace` when its repository is the one the registry lists; the registry's links and metadata apply only then, so a fork keeps its own. An app the site lists but the bench does not have, for example after a restore from another bench, has `missing: true`. Uninstalling such an app removes it from the site's installed apps only.
