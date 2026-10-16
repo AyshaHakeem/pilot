@@ -155,13 +155,12 @@ class App:
 
     @property
     def has_source_changes(self) -> bool:
-        """Local edits that published assets lack. Files the asset build rewrites do not count,
-        or one server build would rule out prebuilt assets for good."""
+        """Uncommitted edits that published assets lack. Files the asset build rewrites do not count,
+        or one server build would rule out prebuilt assets for good. Commits need no check: archives
+        are found by commit, and a shallow pinned checkout reads as ahead of its upstream."""
         from pilot.core.app.prebuilt_assets import build_output_paths
 
         repo = self._repository.repo
-        if repo.has_unpushed_commits:
-            return True
         outputs = build_output_paths(self)
         build_lockfiles = self.failed_build_lockfiles
         return any(
