@@ -52,13 +52,28 @@ const error = computed(() => store.state.billingError)
 const loadFailed = computed(() => Boolean(error.value) && !billing.value)
 const plan = computed(() => billing.value?.plan)
 
+const formatDate = (value?: string | null) =>
+  value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : ''
+
+const formatMoney = (amount: number, currency: string) =>
+  new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 0 }).format(amount)
+
 const paymentMethodNote = computed(() => {
   const trial = billing.value?.trial
   if (trial?.state === 'Ended')
-    return __('Your free trial has ended and this site is stopped. Add a payment method before {0} to keep it.', [trial.deletes_on])
+    return __('Your free trial has ended and this site is stopped. Add a payment method before {0} to keep it.', [formatDate(trial.deletes_on)])
+  if (trial?.state === 'Active' && trial.credit)
+    return __('Your free trial ends in {0} days. Add a payment method by {1} to keep this site running and get {2} credit.', [trial.days_left, formatDate(trial.credit.ends_on || trial.ends_on), formatMoney(trial.credit.amount, trial.credit.currency)])
   if (trial?.state === 'Active')
     return __('Your free trial ends in {0} days. Add a payment method to keep this site running.', [trial.days_left])
   return __('Add a payment method to keep this site running.')
+})
+
+// A trial server sleeps when idle until the team adds a payment method.
+const sleepNote = computed(() => {
+  const trial = billing.value?.trial
+  if (trial?.state !== 'Active' || !trial.sleeps_after_minutes) return ''
+  return __('Until you add one, your site sleeps after {0} minutes without visitors. The next visit wakes it in a few seconds.', [trial.sleeps_after_minutes])
 })
 
 const planSubtitle = computed(() => {
@@ -175,7 +190,7 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
         </section>
 
         <section class="rounded-6 border border-outline-gray-2 p-5">
-          <p class="text-p-sm text-ink-gray-5">{{ __("Trial credit") }}</p>
+          <p class="text-p-sm text-ink-gray-5">{{ __("Credit") }}</p>
 
           <p class="mt-1.5 text-2xl-semibold tabular-nums text-ink-gray-9">
             {{ billing.credit?.amount ?? "—" }}
@@ -221,6 +236,14 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
 
         <p class="col-start-1 mt-0.5 text-p-sm text-ink-gray-5">
           {{ billing.payment_method ? __("Used for your monthly bill.") : paymentMethodNote }}
+        </p>
+
+        <p
+          v-if="!billing.payment_method && sleepNote"
+          class="col-start-1 mt-1 flex items-start gap-1.5 text-p-sm text-ink-gray-5"
+        >
+          <span class="lucide-moon mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+          {{ sleepNote }}
         </p>
 
         <Button
