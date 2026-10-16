@@ -69,7 +69,6 @@ const paymentMethodNote = computed(() => {
   return __('Add a payment method to keep this site running.')
 })
 
-// A trial server sleeps when idle until the team adds a payment method.
 const sleepNote = computed(() => {
   const trial = billing.value?.trial
   if (trial?.state !== 'Active' || !trial.sleeps_after_minutes) return ''

@@ -1,10 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
-// The billing tab's trial copy and plan change, against the site's Cloud Settings API. The
-// payloads follow Central's billing_api responses, which Pilot and Frappe pass through as they are.
-
 const PROGRESS_URL = '/tests/host.html?progress=1'
 
+// These follow Central's billing_api responses, which Pilot and Frappe pass through unchanged.
 const trial = (state: 'Active' | 'Ended') => ({
   state,
   ends_on: '2026-10-21',
