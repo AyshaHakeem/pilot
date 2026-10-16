@@ -5,6 +5,7 @@ import { Button, ErrorMessage } from 'frappe-ui'
 import { computed, ref, watch } from 'vue'
 import AddPaymentCard from '../components/AddPaymentCard.vue'
 import BillingProfileCard from '../components/BillingProfileCard.vue'
+import ChangePlanCard from '../components/ChangePlanCard.vue'
 import Panel from '../components/Panel.vue'
 import { openExternal } from '../external'
 import { useErrorMessage, type Store } from '../store'
@@ -136,7 +137,15 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
       <ErrorMessage :message="loadFailed ? '' : error" />
       <ErrorMessage :message="paymentSetupError" />
 
+      <ChangePlanCard
+        v-if="flow === 'plan'"
+        :store="store"
+        @close="flow = ''"
+        @add-payment="startPayment"
+      />
+
       <section
+        v-else
         class="grid grid-cols-1 items-center gap-x-4 rounded-6 border border-outline-gray-2 p-5 sm:grid-cols-[minmax(0,1fr)_auto]"
       >
         <p class="text-base-semibold text-ink-gray-8">
@@ -147,10 +156,8 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
 
         <Button
           class="mt-3 justify-self-start sm:col-start-2 sm:row-span-2 sm:row-start-1 sm:mt-0"
-          icon-right="lucide-arrow-up-right"
-          :disabled="!changePlanUrl"
           :label="__('Change plan')"
-          @click="openExternal(changePlanUrl)"
+          @click="flow = 'plan'"
         />
 
         <ErrorMessage :message="store.state.accountLinksError" class="mt-2 sm:col-span-2" />
