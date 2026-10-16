@@ -100,6 +100,8 @@ Build your own UI on the read calls, for example a plan badge or a banner. For c
 
 Requests use the current origin and session. They time out after 30 seconds. The SDK does not retry write calls.
 
+`changePlan(plan)` returns `{ queued, resized, progress_url }`. A new size stops the site for a few minutes. When `progress_url` is set, open it: the page lives on Central and brings the user back when the site is ready. During a free trial, Central refuses the call until the team adds a payment method.
+
 ## Handle feedback and errors
 
 | State | Dialog behavior |

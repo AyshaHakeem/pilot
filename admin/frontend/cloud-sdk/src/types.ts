@@ -55,6 +55,13 @@ export interface PlanOptions {
   sufficient: boolean
 }
 
+/** A queued plan change. `progress_url` is the page that follows it while the site restarts. */
+export interface PlanChange {
+  queued: boolean
+  resized: boolean
+  progress_url: string | null
+}
+
 export interface BillingProfile {
   currency: string
   legal_name: string
