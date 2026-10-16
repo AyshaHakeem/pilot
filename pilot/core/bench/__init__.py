@@ -468,8 +468,17 @@ class Bench:
         )
 
     @property
+    def admin_internal_endpoint(self) -> str:
+        """The loopback admin URL a site stores as `pilot_endpoint`."""
+        from pilot.utils import admin_url
+
+        if not self.config.production.enabled:
+            return admin_url(self.config)
+        return f"http://127.0.0.1:{self.config.admin.internal_port}"
+
+    @property
     def admin_endpoint(self) -> str:
-        """The admin URL a site stores as `pilot_endpoint`."""
+        """The public admin URL that a browser on a site reaches."""
         from pilot.core.adapters.domain_provider import DomainRouteProvider
         from pilot.utils import admin_url, matches_wildcard
 

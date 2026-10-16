@@ -110,6 +110,8 @@ allow_bench_management = true
 
 Nginx proxies admin traffic to `port + 1` on localhost. In production, `admin.domain` is required. `allow_bench_management` permits this admin to manage sibling benches and defaults to enabled only for development installs.
 
+A new site calls Pilot at `pilot_endpoint` in its `site_config.json`. This is the admin URL on localhost, so it does not depend on DNS or `admin.domain`. The browser loads Cloud Settings from `cloud_server_url` and `cloud_settings_embed_url`, which hold the public admin URL. An admin domain change updates the public URLs and any `pilot_endpoint` that is not on localhost.
+
 Set the admin password with `pilot set-admin-password` or the Settings page. Pilot stores a PBKDF2-HMAC-SHA256 verifier. `jwt_secret` is local; `jwks_url` and `jwks_audience` are for a remote token issuer and are host-shared. Pilot keeps the issuer's public keys in `.jwks-cache.json` in the benches directory. A token whose key is in the cache is verified without a fetch, and a cache older than one minute is refreshed in the background. A key that is not in the cache causes a fetch, at most once every 30 seconds. A failed fetch keeps the cached keys.
 
 Site-specific settings, including developer mode, live in each site's `site_config.json`.
