@@ -70,10 +70,10 @@ const connectViaCentral = async () => {
     const returnUrl = `${window.location.origin}${route.path}?github=connected`
     const result = await gitApi.connectViaCentral(returnUrl)
     if (hasApiError(result))
-      throw new Error(apiErrorMessage(result, 'Could not reach Frappe Central.'))
+      throw new Error(apiErrorMessage(result, 'Could not reach Frappe Cloud.'))
     window.location.assign(result.url)
   } catch (e) {
-    error.value = errorMessage(e, 'Could not reach Frappe Central.')
+    error.value = errorMessage(e, 'Could not reach Frappe Cloud.')
     redirecting.value = false
   }
 }
@@ -141,7 +141,7 @@ const tokenActions: DropdownItem[] = [centralActions[0], centralActions[2]]
 onMounted(async () => {
   await load()
   if (route.query.github === 'connected') {
-    if (viaCentral.value) toast.success('GitHub connected through Frappe Central')
+    if (viaCentral.value) toast.success('GitHub connected through Frappe Cloud')
     router.replace({ query: { ...route.query, github: undefined } })
   }
 })
@@ -155,7 +155,7 @@ onMounted(async () => {
   <div v-else-if="viaCentral" class="space-y-6">
     <div class="flex justify-between items-start gap-3">
       <div>
-        <p class="font-medium text-ink-gray-8">Connected through Frappe Central</p>
+        <p class="font-medium text-ink-gray-8">Connected through Frappe Cloud</p>
         <p class="text-ink-gray-5 text-p-sm">Read-only access to these repositories.</p>
       </div>
       <Dropdown :options="centralActions" align="end">
@@ -192,7 +192,7 @@ onMounted(async () => {
     <Alert
       v-if="centralError"
       theme="amber"
-      title="Frappe Central is not reachable"
+      title="Frappe Cloud is not reachable"
       :dismissible="false"
     >
       <template #description>
@@ -235,7 +235,7 @@ onMounted(async () => {
       class="-mx-2.5 divide-y divide-outline-alpha-gray-1 hover-merges-dividers"
     >
       <SettingsRow
-        label="Connect through Frappe Central"
+        label="Connect through Frappe Cloud"
         :description="
           connected
             ? 'Replace the token with read-only access to the repositories you choose.'

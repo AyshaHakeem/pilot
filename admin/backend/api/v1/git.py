@@ -79,11 +79,11 @@ def start_central_connection():
     if not isinstance(return_url, str) or not return_url.startswith(("http://", "https://")):
         return error_response("invalid_return_url", "return_url must be an http or https URL.", 422)
     if not _current_bench().config.central.enabled:
-        return error_response("central_unavailable", "This server is not managed by Frappe Central.", 422)
+        return error_response("central_unavailable", "This server is not managed by Frappe Cloud.", 422)
     try:
         url = CentralClient().start_github_connection(return_url)
     except CentralClientError as exc:
-        return error_response("central_unavailable", f"Could not reach Frappe Central: {exc}", 502)
+        return error_response("central_unavailable", f"Could not reach Frappe Cloud: {exc}", 502)
     return jsonify({"url": url})
 
 
@@ -106,7 +106,7 @@ def save_integration():
     if GitHubAppGrant(_store()).is_active:
         return error_response(
             "github_app_connected",
-            "Disconnect the Frappe Central GitHub connection before adding a token.",
+            "Disconnect the Frappe Cloud GitHub connection before adding a token.",
             409,
         )
 
@@ -147,7 +147,7 @@ def delete_integration():
         try:
             grant.disconnect()
         except CentralClientError as exc:
-            return error_response("central_unavailable", f"Could not reach Frappe Central: {exc}", 502)
+            return error_response("central_unavailable", f"Could not reach Frappe Cloud: {exc}", 502)
     store.clear()
     _current_bench().audit_action("git", {"event": "disconnected"})
     return no_content_response()
@@ -160,7 +160,7 @@ def list_repos():
         try:
             return jsonify(CentralClient().get_github_repositories())
         except CentralClientError as exc:
-            return error_response("central_unavailable", f"Could not reach Frappe Central: {exc}", 502)
+            return error_response("central_unavailable", f"Could not reach Frappe Cloud: {exc}", 502)
 
     record = store.load()
     if not record or not record.get("token"):
