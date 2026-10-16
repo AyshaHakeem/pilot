@@ -283,6 +283,19 @@ def test_a_change_moves_the_browser_urls_and_keeps_a_loopback_pilot_endpoint(tmp
     }
 
 
+def test_a_change_keeps_a_stale_loopback_pilot_endpoint_on_loopback(tmp_path: Path) -> None:
+    bench = _admin_bench(tmp_path)
+    site = _write_site_config(bench, "site1.local", {"pilot_endpoint": "http://127.0.0.1:1"})
+
+    with (
+        patch.object(AdminDomainChange, "_republish_nginx"),
+        patch.object(AdminDomainChange, "_reissue_certificate", lambda self, on_progress: False),
+    ):
+        AdminDomainChange(bench, NEW).run()
+
+    assert json.loads(site.read_text()) == {"pilot_endpoint": f"http://127.0.0.1:{bench.config.admin.internal_port}"}
+
+
 def test_a_common_site_config_without_pilot_endpoint_is_left_alone(tmp_path: Path) -> None:
     bench = _admin_bench(tmp_path)
     common = bench.sites_path / "common_site_config.json"

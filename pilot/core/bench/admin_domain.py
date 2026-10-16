@@ -5,6 +5,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
 from pilot.exceptions import BenchError
 from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
@@ -173,15 +174,16 @@ class AdminDomainChange:
             return
         with exclusive_file_lock(config_path):
             config = json.loads(config_path.read_text())
-            # A loopback pilot_endpoint does not depend on the admin domain.
-            keys = [
-                key
-                for key in ("pilot_endpoint", "cloud_server_url", "cloud_settings_embed_url")
-                if key in config and config[key] not in (endpoint, self.bench.admin_internal_endpoint)
-            ]
-            if not keys:
+            is_loopback = urlsplit(str(config.get("pilot_endpoint", ""))).hostname == "127.0.0.1"
+            urls = {
+                "pilot_endpoint": self.bench.admin_internal_endpoint if is_loopback else endpoint,
+                "cloud_server_url": endpoint,
+                "cloud_settings_embed_url": endpoint,
+            }
+            changes = {key: url for key, url in urls.items() if key in config and config[key] != url}
+            if not changes:
                 return
-            config.update(dict.fromkeys(keys, endpoint))
+            config.update(changes)
             replace_private_text_locked(config_path, json.dumps(config, indent=indent))
 
     def _retarget_hostname_aliases(self) -> None:

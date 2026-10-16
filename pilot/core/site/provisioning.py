@@ -96,8 +96,7 @@ class SiteProvisioner:
         if not config_path.exists():
             return
         config = json.loads(config_path.read_text())
-        # The site calls Pilot on this host. Only the browser needs the public admin domain,
-        # which an image keeps as a placeholder until Central routes it.
+        # Only the browser needs the public admin URL, a placeholder on an image until Central routes it.
         config["pilot_endpoint"] = self.bench.admin_internal_endpoint
         config["cloud_server_url"] = config["cloud_settings_embed_url"] = self.bench.admin_endpoint
         config["pilot_auth_token"] = Session(self.bench).issue_pilot_token(site.config.name)
