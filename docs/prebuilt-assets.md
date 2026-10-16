@@ -12,7 +12,7 @@ Apps that publish nothing continue to work. Pilot builds their assets on the ser
 4. The workflow deletes the files of older commits, as the [retention inputs](#keep-or-delete-old-assets) set.
 5. When Pilot installs or updates the app, it downloads the archive for the checked-out commit, checks the checksum, and puts the files in place.
 
-The archive holds `<app>/public/dist`, each declared SPA, and the files the build writes that git ignores under `<app>/public` and `<app>/www`, such as a generated CSS file. Its manifest also holds the app's entries of `assets.json` and `assets-rtl.json`, and Pilot merges them in place of the app's old entries. The framework app `frappe` uses the same workflow. An app that has no `package.json` and no `*.bundle.*` files publishes an empty archive, so that benches do not build it.
+The archive holds `<app>/public/dist`, each declared SPA, and the files the build writes that git ignores under `<app>/public` and `<app>/www`, such as a generated CSS file. Its manifest also holds the app's entries of `assets.json` and `assets-rtl.json`, and Pilot merges them in place of the app's old entries. The framework app `frappe` uses the same workflow. Its archive also holds the page islands of Frappe's own pages. A bench where no other app has Frappe UI pages uses them as they are; otherwise Pilot builds every app's page islands after the download. An app that has no `package.json` and no `*.bundle.*` files publishes an empty archive, so that benches do not build it.
 
 The release `assets-<branch>` is a pre-release that holds files only. It is not a version release of the app. Do not edit it.
 
