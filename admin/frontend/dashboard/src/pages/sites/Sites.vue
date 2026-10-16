@@ -148,7 +148,7 @@ const backupNow = async (site: SiteResource) => {
 const siteMenuOptions = (site: SiteResource) => {
   return [
     { label: 'Visit site', icon: 'lucide-external-link', onClick: () => openSite(site) },
-    { label: 'Open as admin', icon: 'lucide-log-in', onClick: () => openAsAdmin(site) },
+    { label: 'Login as admin', icon: 'lucide-log-in', onClick: () => openAsAdmin(site) },
     { label: 'Back up now', icon: 'lucide-archive', onClick: () => backupNow(site) },
     {
       label: 'View analytics',

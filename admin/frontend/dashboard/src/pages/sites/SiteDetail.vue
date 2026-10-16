@@ -184,7 +184,7 @@ const menuOptions = computed(() => [
         { label: 'Install app', icon: 'lucide-plus', onClick: goToMarketplace },
       ]
     : []),
-  { label: 'Open as admin', icon: 'lucide-log-in', onClick: loginAsAdmin },
+  { label: 'Login as admin', icon: 'lucide-log-in', onClick: loginAsAdmin },
   { label: 'Back up now', icon: 'lucide-archive', onClick: backupNow },
   { label: 'View jobs', icon: 'lucide-list-checks', onClick: viewJobs },
 ])
