@@ -184,7 +184,7 @@ const menuOptions = computed(() => [
         { label: 'Install app', icon: 'lucide-plus', onClick: goToMarketplace },
       ]
     : []),
-  { label: 'Login as admin', icon: 'lucide-log-in', onClick: loginAsAdmin },
+  { label: 'Open as admin', icon: 'lucide-log-in', onClick: loginAsAdmin },
   { label: 'Back up now', icon: 'lucide-archive', onClick: backupNow },
   { label: 'View jobs', icon: 'lucide-list-checks', onClick: viewJobs },
 ])
@@ -313,7 +313,7 @@ onMounted(() => {
       @click="site?.setup_complete ? openSite() : setupSite()"
     >
       <template #prefix><span class="size-4 lucide-external-link" /></template>
-      <span class="hidden sm:inline">{{ site?.setup_complete ? 'Open site' : 'Setup site' }}</span>
+      <span class="hidden sm:inline">{{ site?.setup_complete ? 'Visit site' : 'Setup site' }}</span>
       <span class="sm:hidden">{{ site?.setup_complete ? 'Open' : 'Setup' }}</span>
     </Button>
   </Teleport>

@@ -21,7 +21,7 @@ import SiteSkeleton from '@/components/sites/SiteSkeleton.vue'
 import { useIsMobile } from '@/composables/common/useIsMobile'
 import { useSiteStorage } from '@/composables/sites/useSiteStorage'
 import { useSites } from '@/composables/sites/useSites'
-import { openSiteLogin } from '@/utils/siteLogin'
+import { openSiteLink } from '@/utils/siteLogin'
 import { openTaskDetailPage } from '@/utils/taskRoute'
 import type { SiteResource } from '@/types/sites'
 import { errorMessage } from '@/utils/error'
@@ -111,12 +111,23 @@ const listRows = computed(() =>
 )
 
 const loginAsAdmin = async (site: SiteResource) => {
-  return openSiteLogin(() => sitesApi.loginLink(site.name), {
+  return openSiteLink(() => sitesApi.loginLink(site.name), {
     onHint: (hint) => toast.info(hint),
   })
 }
 
-const openSite = (site: SiteResource) => {
+const openSite = async (site: SiteResource) => {
+  try {
+    await openSiteLink(async () => {
+      const detail = await sitesApi.detail(site.name)
+      return { url: `${detail.url}/desk` }
+    })
+  } catch (caught) {
+    toast.error(errorMessage(caught, 'Could not open site'))
+  }
+}
+
+const openAsAdmin = (site: SiteResource) => {
   toast.promise(loginAsAdmin(site), {
     loading: 'Logging in as admin',
     success: 'Logged in as admin',
@@ -136,7 +147,8 @@ const backupNow = async (site: SiteResource) => {
 
 const siteMenuOptions = (site: SiteResource) => {
   return [
-    { label: 'Open site', icon: 'lucide-external-link', onClick: () => openSite(site) },
+    { label: 'Visit site', icon: 'lucide-external-link', onClick: () => openSite(site) },
+    { label: 'Open as admin', icon: 'lucide-log-in', onClick: () => openAsAdmin(site) },
     { label: 'Back up now', icon: 'lucide-archive', onClick: () => backupNow(site) },
     {
       label: 'View analytics',
