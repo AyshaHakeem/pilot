@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -15,10 +16,13 @@ from pilot.managers.processes.base import (
     UnitGroup,
     override,
 )
+from pilot.managers.processes.definitions import ProcessState
 from pilot.managers.processes.local import ProcessDefinition
 from pilot.utils import cli_root, run_command
 
 _BOOT_JOB = "supervisord-boot"
+# `group:program   RUNNING   pid 123, uptime 0:01:02`
+_STATUS_LINE = re.compile(r"^(?P<program>\S+)\s+(?P<state>\S+)(?:\s+pid (?P<pid>\d+),)?")
 
 
 class SupervisorRenderer(ServiceRenderer):
@@ -40,7 +44,7 @@ class SupervisorRenderer(ServiceRenderer):
         # Lower priority starts first and stops last, so redis outlives what drains into it.
         priority = "priority=100\n" if pd.name.startswith("redis") else ""
         return (
-            f"[program:{self.get_program_name(pd)}]\n"
+            f"[program:{self.get_program_name(pd.name)}]\n"
             f"{priority}"
             # supervisord expands %(name)s in every value, quoted or not.
             f"command={shlex.join(pd.argv_with_hooks).replace('%', '%%')}\n"
@@ -85,11 +89,11 @@ class SupervisorRenderer(ServiceRenderer):
             f"{programs}"
         )
 
-    def get_program_name(self, pd: ProcessDefinition) -> str:
-        return f"{self.bench_name}-{pd.name.replace('_', '-')}"
+    def get_program_name(self, name: str) -> str:
+        return f"{self.bench_name}-{name.replace('_', '-')}"
 
     def _csv(self, items: list[ProcessDefinition]) -> str:
-        return ",".join(self.get_program_name(pd) for pd in items)
+        return ",".join(self.get_program_name(pd.name) for pd in items)
 
 
 class SupervisorProcessManager(ManagedProcessManager):
@@ -180,6 +184,28 @@ class SupervisorProcessManager(ManagedProcessManager):
             text=True,
         )
         return "RUNNING" in result.stdout
+
+    @override
+    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
+        if not self.is_alive():
+            return {}
+        programs = {self._program(name): name for name in names}
+        result = subprocess.run([*self._supervisorctl(), "status", *programs], capture_output=True, text=True)
+        states = {}
+        for line in result.stdout.splitlines():
+            match = _STATUS_LINE.match(line)
+            if match and match["program"] in programs:
+                pid = int(match["pid"]) if match["pid"] else None
+                states[programs[match["program"]]] = ProcessState(match["state"], pid)
+        return states
+
+    @override
+    def restart_processes(self, names: list[str]) -> None:
+        run_command([*self._supervisorctl(), "restart", *(self._program(name) for name in names)])
+
+    def _program(self, name: str) -> str:
+        group = self.admin_group if name == "admin" else self.workload_group
+        return f"{group}:{SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(name)}"
 
     def is_configured(self) -> bool:
         return self.supervisor_conf_path.exists()

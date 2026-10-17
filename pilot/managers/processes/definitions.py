@@ -13,6 +13,12 @@ if TYPE_CHECKING:
     from pilot.core.bench import Bench
 
 
+@dataclass(frozen=True)
+class ProcessState:
+    state: str  # the manager's own word, such as RUNNING or active (running)
+    pid: int | None = None
+
+
 @dataclass
 class ProcessDefinition:
     name: str
@@ -86,8 +92,7 @@ class ProcessDefinitionBuilder:
             ]
         defs.append(self.redis_definition("redis_cache", "redis_cache.conf"))
         defs.append(self.redis_definition("redis_queue", "redis_queue.conf"))
-        for app in self.bench.apps():
-            defs.extend(app.processes.get_definitions())
+        defs.extend(self.bench.processes.get_app_definitions())
         return defs
 
     def process_definitions(self) -> list[ProcessDefinition]:

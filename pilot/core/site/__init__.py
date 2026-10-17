@@ -148,6 +148,8 @@ class Site:
         from pilot.core.site.apps import SiteApps
 
         SiteApps(self).install_app(app)
+        if self.bench.processes.has_declarations([app.config.name]):
+            self.bench.processes.apply()
 
     def install_app_with_dependencies(self, app: "App") -> list["App"]:
         """Install the app and return dependencies cascaded by Frappe."""
@@ -233,7 +235,11 @@ class Site:
     ) -> None:
         from pilot.core.site.apps import SiteApps
 
+        # Checked first: the app may leave the bench along with its declarations.
+        has_processes = self.bench.processes.has_declarations(app_names)
         SiteApps(self).uninstall_apps(app_names, force, on_progress, remove_from_bench)
+        if has_processes:
+            self.bench.processes.apply()
 
     def _remove_app_if_not_on_any_site(self, app_name: str, on_progress: Callable[[str], None]) -> None:
         from pilot.core.site.apps import SiteApps
@@ -251,6 +257,7 @@ class Site:
         from pilot.managers.nginx import NginxManager
 
         provider_domains = self._provider_domains()
+        has_processes = self.bench.processes.has_declarations(self.active_apps())
         cmd = [*self.bench.frappe_call, "frappe", "drop-site", self.config.name]
         if no_backup:
             cmd.append("--no-backup")
@@ -271,6 +278,8 @@ class Site:
         self._release_domains(provider_domains)
         on_progress(f"\nSite '{self.config.name}' dropped.")
         NginxManager(self.bench).reload_for_site_change()
+        if has_processes:
+            self.bench.processes.apply()
 
     def rename_to(
         self,

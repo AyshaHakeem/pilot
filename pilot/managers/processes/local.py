@@ -15,11 +15,21 @@ from typing import TYPE_CHECKING
 from pilot.exceptions import BenchError
 from pilot.managers.environment import AdminEnvManager
 from pilot.managers.gunicorn import GunicornManager
-from pilot.managers.processes.definitions import ProcessDefinition, ProcessDefinitionBuilder
+from pilot.managers.processes.definitions import ProcessDefinition, ProcessDefinitionBuilder, ProcessState
 from pilot.utils import cli_root
 
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
+
+
+def _live_pid(pid_file: Path) -> int | None:
+    """The pid in the file while that process is alive."""
+    try:
+        pid = int(pid_file.read_text().strip())
+        os.kill(pid, 0)
+    except (ValueError, OSError):
+        return None
+    return pid
 
 
 def _tcp_port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -175,13 +185,7 @@ class ProcessManager:
                 os.kill(pid, signal.SIGTERM)
 
     def is_running(self) -> bool:
-        if not self.pid_file.exists():
-            return False
-        try:
-            os.kill(int(self.pid_file.read_text().strip()), 0)
-            return True
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            return False
+        return _live_pid(self.pid_file) is not None
 
     def stop_admin(self) -> None:
         pass
@@ -197,6 +201,17 @@ class ProcessManager:
 
     def is_admin_running(self) -> bool:
         return _tcp_port_open(self.bench.config.admin.port)
+
+    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
+        """Read from the pid files the dev runner writes for each process."""
+        states = {}
+        for name in names:
+            pid = _live_pid(self.bench.pids_path / f"{name}.pid")
+            states[name] = ProcessState("running", pid) if pid else ProcessState("stopped")
+        return states
+
+    def restart_processes(self, names: list[str]) -> None:
+        raise BenchError("Restarting one process needs a production bench; restart `pilot start` instead.")
 
     def reload_workers(self, web_only: bool = False) -> None:
         """Ask the running dev supervisor to restart its workload processes.
@@ -332,6 +347,11 @@ class ProcessManager:
     def _cleanup_proc_pid_files(self) -> None:
         for name in self._procs:
             (self.bench.pids_path / f"{name}.pid").unlink(missing_ok=True)
+
+    @property
+    def process_definitions(self) -> list[ProcessDefinition]:
+        """The processes this manager runs."""
+        return self._process_definitions()
 
     def _prod_process_definitions(self) -> list[ProcessDefinition]:
         return self._definitions.prod_process_definitions()

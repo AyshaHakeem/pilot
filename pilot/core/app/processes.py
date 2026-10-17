@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 import tomllib
 from typing import TYPE_CHECKING
 
@@ -15,17 +16,32 @@ if TYPE_CHECKING:
 NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
+# Fixed rather than the caller's PATH, so a unit reads the same whoever writes it.
+SYSTEM_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if sys.platform == "darwin":
+    SYSTEM_PATH = f"/opt/homebrew/bin:/opt/homebrew/sbin:{SYSTEM_PATH}"
 
 
 class AppProcessError(BenchError):
-    """An app declares a malformed background process."""
+    """An app declares a malformed process."""
 
 
 class AppProcesses:
-    """Background processes an app declares in its pyproject.toml."""
+    """Processes an app declares in its pyproject.toml."""
 
     def __init__(self, app: "App") -> None:
         self.app = app
+
+    @property
+    def default_env(self) -> dict[str, str]:
+        """The bench venv first on PATH, so `python` and the CLIs the app installs resolve to the bench's."""
+        bench = self.app.bench
+        return {
+            **ProcessDefinitionBuilder.python_env(),
+            "PATH": f"{bench.env_path / 'bin'}:{SYSTEM_PATH}",
+            "VIRTUAL_ENV": str(bench.env_path),
+            "FRAPPE_BENCH_ROOT": str(bench.path),
+        }
 
     def get_definitions(self) -> list[ProcessDefinition]:
         return [
@@ -42,9 +58,9 @@ class AppProcesses:
         except tomllib.TOMLDecodeError as exc:
             raise self._error(f"invalid pyproject.toml: {exc}") from exc
 
-        declarations = data.get("tool", {}).get("pilot", {}).get("background_processes", {})
+        declarations = data.get("tool", {}).get("pilot", {}).get("processes", {})
         if not isinstance(declarations, dict):
-            raise self._error("[tool.pilot.background_processes] must be a table.")
+            raise self._error("[tool.pilot.processes] must be a table.")
         return declarations
 
     def _get_definition(self, name: str, declaration: object) -> ProcessDefinition:
@@ -55,10 +71,6 @@ class AppProcesses:
             raise self._error(f"process '{name}' must be a table.")
 
         argv, working_dir = self._get_command(name, declaration)
-
-        env = self._get_env(name, declaration.get("env", {}))
-        if "frappe_command" in declaration:
-            env = {**ProcessDefinitionBuilder.python_env(), **env}
 
         restart_on_failure = declaration.get("restart_on_failure", True)
         if not isinstance(restart_on_failure, bool):
@@ -73,7 +85,7 @@ class AppProcesses:
             name=full_name,
             argv=argv,
             log_file=self.app.bench.logs_path / f"{full_name}.log",
-            env=env,
+            env={**self.default_env, **self._get_env(name, declaration.get("env", {}))},
             working_dir=working_dir,
             stop_timeout=stop_timeout,
             critical=False,
@@ -115,11 +127,15 @@ class AppProcesses:
     def _get_env(self, name: str, env: object) -> dict[str, str]:
         if not isinstance(env, dict):
             raise self._error(f"process '{name}' env must be a table.")
+        values = {}
         for key, value in env.items():
             if not ENV_KEY_PATTERN.match(key):
                 raise self._error(f"process '{name}' env key '{key}' must match {ENV_KEY_PATTERN.pattern}.")
-            self._get_string(name, f"env.{key}", value)
-        return env
+            # A number such as PORT = 8080 is written as text; a bool has no single spelling.
+            if type(value) in (int, float):
+                value = str(value)
+            values[key] = self._get_string(name, f"env.{key}", value)
+        return values
 
     def _get_string(self, name: str, field: str, value: object) -> str:
         if not isinstance(value, str) or CONTROL_CHARACTER_PATTERN.search(value):

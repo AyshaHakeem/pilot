@@ -34,6 +34,11 @@ class ServiceRenderer(ABC):
 class ManagedProcessManager(ProcessManager, ABC):
     """Base lifecycle for production process managers."""
 
+    @property
+    @override
+    def process_definitions(self) -> list[ProcessDefinition]:
+        return self._prod_process_definitions()
+
     @abstractmethod
     def write_config(self) -> None: ...
 

@@ -13,6 +13,7 @@ from pilot.managers.processes.base import (
     UnitGroup,
     override,
 )
+from pilot.managers.processes.definitions import ProcessState
 from pilot.managers.processes.local import ProcessDefinition
 from pilot.managers.processes.systemd_render import SystemdRenderer
 from pilot.managers.systemd_user import SystemdUserMixin
@@ -199,6 +200,29 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         self.bench.logs_path.mkdir(parents=True, exist_ok=True)
         self.write_config()
         self.install_config()
+
+    @override
+    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
+        units = {self._unit_name(name): name for name in names}
+        result = subprocess.run(
+            self._systemctl("show", *units, "--property=Id,ActiveState,SubState,MainPID"),
+            capture_output=True,
+            text=True,
+            env=self._systemctl_env(),
+        )
+        states = {}
+        for block in result.stdout.strip().split("\n\n"):
+            properties = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+            name = units.get(properties.get("Id", ""))
+            if name:
+                state = f"{properties.get('ActiveState')} ({properties.get('SubState')})"
+                states[name] = ProcessState(state, int(properties.get("MainPID") or 0) or None)
+        return states
+
+    @override
+    def restart_processes(self, names: list[str]) -> None:
+        units = [self._unit_name(name) for name in names]
+        run_command(self._systemctl("restart", *units), env=self._systemctl_env(), timeout=_SYSTEMCTL_TIMEOUT)
 
     def is_configured(self) -> bool:
         result = subprocess.run(
