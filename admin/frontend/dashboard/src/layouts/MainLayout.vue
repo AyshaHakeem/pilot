@@ -39,7 +39,7 @@ useSearchShortcut()
 // Remembers the last non-Settings route so dismissing the dialog (backdrop
 // click, Escape, close button) exits to it directly instead of stepping back
 // through every section/subsection push made while the dialog was open.
-const lastNonSettingsRoute = ref(null)
+const lastNonSettingsRoute = ref<string | null>(null)
 
 watch(
   () => route.fullPath,
@@ -81,15 +81,13 @@ const breadcrumbsFromRouteMeta = ({ title = '' }) => {
 <template>
   <MobileShell v-if="isMobile">
     <header
-      class="sticky top-0 z-10 flex min-h-12 flex-col justify-center border-b bg-surface-base px-3 sm:px-5"
+      class="sticky top-0 z-20 flex min-h-12 flex-col justify-center border-b border-outline-gray-2 bg-surface-base px-3 md:px-4"
     >
       <div class="flex items-center justify-between">
-        <template v-if="route.name == 'Home'">
-          <div class="flex items-center gap-2">
-            <PilotLogo class="size-6 rounded-1" />
-            <span class="text-ink-gray-9">Home</span>
-          </div>
-        </template>
+        <div v-if="route.name == 'Home'" class="flex items-center gap-2">
+          <PilotLogo class="size-6 rounded-1" />
+          <span>Home</span>
+        </div>
 
         <button
           v-else
@@ -97,29 +95,29 @@ const breadcrumbsFromRouteMeta = ({ title = '' }) => {
           @click="mobileNavDrawer = true"
         >
           <Breadcrumbs :items="breadcrumbs" class="min-w-0" />
-          <lucide-chevron-down class="size-4 text-ink-gray-5 shrink-0" />
+          <span class="size-4 text-ink-gray-5 shrink-0 lucide-chevron-down" />
         </button>
 
-        <div id="header-badge" class="flex items-center" />
+        <div id="header-badge" class="flex items-center pl-1" />
         <div id="header-actions" class="flex items-center gap-2 ml-auto">
           <UpdateStatusButton v-if="route.meta.showUpdateStatus" />
         </div>
       </div>
     </header>
 
-    <main class="p-3">
+    <main>
       <slot />
     </main>
 
     <template #nav>
       <MobileNav class="!bg-surface-base">
-        <MobileNavItem label="Home" icon="lucide-house" to="/home" :active="route.name == 'Home'" />
+        <MobileNavItem label="Home" icon="lucide-house" route="/home" :active="route.name == 'Home'" />
         <MobileNavItem label="Search" icon="lucide-search" @click="openSearch" />
         <NotificationsPanel mobile />
         <MobileNavItem
           label="Settings"
           icon="lucide-settings"
-          to="/mobile/settings"
+          route="/mobile/settings"
           :active="route.name == 'MobileSettings'"
         />
       </MobileNav>
@@ -136,22 +134,18 @@ const breadcrumbsFromRouteMeta = ({ title = '' }) => {
     </template>
 
     <header
-      class="sticky top-0 z-10 flex min-h-12 flex-col justify-center border-b bg-surface-base px-3 sm:px-5"
+      class="sticky top-0 z-20 flex min-h-12 flex-col justify-center border-b border-outline-gray-2 bg-surface-base px-3 md:px-4"
     >
-      <div class="flex items-center justify-between">
-        <div class="flex flex-1 items-center gap-1">
-          <Breadcrumbs :items="breadcrumbs" />
-          <div id="header-badge" class="flex items-center" />
-          <div id="header-actions" class="flex items-center gap-2 ml-auto">
-            <UpdateStatusButton v-if="route.meta.showUpdateStatus" />
-          </div>
+      <div class="flex flex-1 items-center gap-1">
+        <Breadcrumbs :items="breadcrumbs" />
+        <div id="header-badge" class="flex items-center" />
+        <div id="header-actions" class="flex items-center gap-2 ml-auto">
+          <UpdateStatusButton v-if="route.meta.showUpdateStatus" />
         </div>
       </div>
     </header>
 
-    <div class="p-4">
-      <slot />
-    </div>
+    <slot />
   </DesktopShell>
 
   <SettingsDialog v-model="showSettings" />

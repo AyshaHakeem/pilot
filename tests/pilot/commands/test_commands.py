@@ -500,9 +500,13 @@ def test_remove_app_full_flow_no_sites(tmp_path: Path) -> None:
     (bench.sites_path / "apps.txt").write_text("frappe\nerpnext\n")
 
     cmd = RemoveAppCommand(bench, app_name="erpnext", skip_confirm=True)
-    with patch("pilot.managers.environment.PythonEnvManager.uninstall_app"):
+    with (
+        patch("pilot.managers.environment.PythonEnvManager.uninstall_app"),
+        patch.object(type(bench), "reload_workers") as mock_reload,
+    ):
         cmd.run()
 
+    mock_reload.assert_called_once()
     assert not app_dir.exists()
     remaining = [line for line in (bench.sites_path / "apps.txt").read_text().splitlines() if line.strip()]
     assert "erpnext" not in remaining
@@ -685,7 +689,7 @@ def test_requirements_skips_app_without_python_setup_files(tmp_path: Path) -> No
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_not_called()
@@ -703,7 +707,7 @@ def test_requirements_installs_app_with_pyproject_toml(tmp_path: Path) -> None:
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_called_once()
@@ -721,7 +725,7 @@ def test_requirements_installs_app_with_setup_py(tmp_path: Path) -> None:
 
     with (
         patch("pilot.managers.environment.ensure_uv", return_value="uv"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.managers.environment.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_python_requirements(lambda _message: None)
         mock_rc.assert_called_once()
@@ -737,7 +741,7 @@ def test_requirements_skips_js_for_app_without_package_json(tmp_path: Path) -> N
     (app_dir / ".git").mkdir()
     # No package.json
 
-    with patch("pilot.utils.run_command") as mock_rc:
+    with patch("pilot.core.app.node_packages.run_command") as mock_rc:
         BenchRuntime(bench)._install_js_requirements(lambda _message: None)
         mock_rc.assert_not_called()
 
@@ -753,8 +757,8 @@ def test_requirements_installs_js_for_app_with_package_json(tmp_path: Path) -> N
     (app_dir / "package.json").write_text('{"name": "myapp"}\n')
 
     with (
-        patch("pilot.utils.get_yarn_bin", return_value="yarn"),
-        patch("pilot.utils.run_command") as mock_rc,
+        patch("pilot.core.app.node_packages.shutil.which", return_value="yarn"),
+        patch("pilot.core.app.node_packages.run_command") as mock_rc,
     ):
         BenchRuntime(bench)._install_js_requirements(lambda _message: None)
         mock_rc.assert_called_once()
@@ -970,16 +974,15 @@ def test_drop_site_removes_from_toml_when_no_sites_key(tmp_path: Path) -> None:
     site._remove_from_bench_toml()  # no raise
 
 
-def test_restart_dev_bench_prints_guidance(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_restart_dev_bench_fails_with_guidance(tmp_path: Path) -> None:
     from pilot.commands.runtime.restart import RestartCommand
 
     bench = make_bench(tmp_path)  # production disabled by default
-    RestartCommand(bench).run()
-    out = capsys.readouterr().out
-    assert "only for production benches" in out
+    with pytest.raises(BenchError, match="only for production benches"):
+        RestartCommand(bench).run()
 
 
-def test_restart_production_incomplete_prints_repair(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+def test_restart_production_incomplete_fails_with_repair(tmp_path: Path) -> None:
     from pilot.commands.runtime.restart import RestartCommand
 
     bench = make_bench(tmp_path)
@@ -989,9 +992,8 @@ def test_restart_production_incomplete_prints_repair(tmp_path: Path, capsys: pyt
         mgr = MagicMock()
         mgr.is_configured.return_value = False
         create.return_value = mgr
-        RestartCommand(bench).run()
-    out = capsys.readouterr().out
-    assert "deployment is incomplete" in out
+        with pytest.raises(BenchError, match="deployment is incomplete"):
+            RestartCommand(bench).run()
     mgr.restart.assert_not_called()
 
 
@@ -1206,6 +1208,18 @@ def test_write_common_site_config_preserves_custom_keys(tmp_path: Path) -> None:
     assert config["redis_cache"] == "redis://localhost:13000"
 
 
+def test_write_common_site_config_does_not_enable_server_scripts(tmp_path: Path) -> None:
+    import json
+
+    bench = make_bench(tmp_path)
+    bench.sites_path.mkdir(parents=True)
+
+    bench.write_common_site_config()
+
+    config = json.loads((bench.sites_path / "common_site_config.json").read_text())
+    assert "server_script_enabled" not in config
+
+
 def test_write_common_site_config_leaves_developer_mode_to_sites(tmp_path: Path) -> None:
     import json
 
@@ -1293,8 +1307,25 @@ def test_drop_bench_deletes_directory_with_no_sites(tmp_path: Path) -> None:
     bench_dir.mkdir(parents=True)
     bench = Bench(_drop_config("one"), bench_dir)
 
-    DropBenchCommand(bench, skip_confirm=True).run()
+    with patch("pilot.managers.processes.local._tcp_port_open", return_value=False):
+        DropBenchCommand(bench, skip_confirm=True).run()
     assert not bench_dir.exists()
+
+
+def test_drop_bench_refuses_while_the_dev_bench_runs(tmp_path: Path) -> None:
+    """A running setup wizard has no pid file, only its admin port."""
+    from pilot.commands.bench.delete import DropBenchCommand
+
+    bench_dir = tmp_path / "benches" / "one"
+    bench_dir.mkdir(parents=True)
+    bench = Bench(_drop_config("one"), bench_dir)
+
+    with (
+        patch("pilot.managers.processes.local._tcp_port_open", return_value=True),
+        pytest.raises(BenchError, match="pilot -b one stop"),
+    ):
+        DropBenchCommand(bench, skip_confirm=True).run()
+    assert bench_dir.exists()
 
 
 def test_build_admin_rejects_old_node(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1418,3 +1449,50 @@ def test_start_rebuilds_admin_in_a_dev_checkout(tmp_path: Path, monkeypatch: pyt
     BenchRuntime(make_bench(tmp_path))._ensure_admin_dist(lambda _message: None)
 
     build.assert_called_once_with(on_progress=ANY)
+
+
+def test_set_admin_password_generates_one_when_left_blank(tmp_path: Path, monkeypatch, capsys) -> None:
+    """The prompt says blank generates a password."""
+    from pilot.commands.sites.set_admin_password import SetAdminPasswordCommand
+
+    bench = make_bench(tmp_path)
+    bench.config.write(tmp_path)
+    monkeypatch.setattr(SetAdminPasswordCommand, "ask_password", lambda self, label="admin password": "")
+
+    SetAdminPasswordCommand(bench=bench).run()
+
+    generated = capsys.readouterr().out.split("Generated password (shown once): ", 1)[1].strip()
+    assert BenchConfig.read(tmp_path).admin.verify_password(generated)
+
+
+def test_new_app_reloads_workers_so_sites_can_import_it(tmp_path: Path) -> None:
+    from pilot.commands.apps.new import NewAppCommand
+
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    cmd = NewAppCommand(bench, app_name="demo_app", description="Demo", email="dev@example.com")
+
+    with (
+        patch.object(type(bench), "new_app") as mock_new_app,
+        patch.object(type(bench), "reload_workers") as mock_reload,
+        patch("sys.stdin.isatty", return_value=False),
+    ):
+        cmd.run()
+
+    mock_new_app.assert_called_once()
+    mock_reload.assert_called_once()
+
+
+def test_list_site_apps_marks_apps_the_bench_does_not_have(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
+    from pilot.commands.sites.list_apps import ListSiteAppsCommand
+
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    (bench.apps_path / "frappe" / ".git").mkdir(parents=True)
+
+    with patch("pilot.core.site.Site.active_apps", return_value=["frappe", "commera"]):
+        ListSiteAppsCommand(bench, site_name="site1.localhost").run()
+
+    output = capsys.readouterr()
+    assert output.out.splitlines() == ["frappe", "commera"]
+    assert "commera is not on this bench" in output.err

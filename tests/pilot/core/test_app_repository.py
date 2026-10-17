@@ -13,6 +13,7 @@ from pilot.config import AppConfig
 from pilot.core.app import repository
 from pilot.core.app.repository import AppRepository
 from pilot.core.app.revisions import RevisionPin
+from pilot.exceptions import BenchError, CommandError
 from pilot.internal.git import GitRepo
 
 
@@ -147,3 +148,199 @@ def test_update_of_a_full_repo_passes_no_depth(
     _repository(tmp_path / "app").update()
 
     assert "--depth=1" not in git_calls[0]
+
+
+def test_pinned_tag_fetch_passes_git_auth_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict]] = []
+
+    def record(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+
+    repo = _repository(tmp_path / "app")
+    monkeypatch.setattr(repository, "run_command", record)
+    monkeypatch.setattr(AppRepository, "_sync_remote_url", lambda self: None)
+    monkeypatch.setattr(AppRepository, "git_env", property(lambda self: {"GIT_CONFIG_COUNT": "1"}))
+    monkeypatch.setattr(AppRepository, "_checkout_pinned_ref", lambda self, ref: None)
+    monkeypatch.setattr(AppRepository, "is_shallow", property(lambda self: False))
+
+    repo.checkout_pinned_target(RevisionPin(kind="tag", ref="v1.2.3"))
+
+    assert calls[0][0][-3:] == ["fetch", "origin", "v1.2.3"]
+    assert calls[0][1]["env"] == {"GIT_CONFIG_COUNT": "1"}
+
+
+def test_pinned_commit_fetch_passes_git_auth_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict]] = []
+
+    def record(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+
+    repo = _repository(tmp_path / "app")
+    monkeypatch.setattr(repository, "run_command", record)
+    monkeypatch.setattr(AppRepository, "_sync_remote_url", lambda self: None)
+    monkeypatch.setattr(AppRepository, "git_env", property(lambda self: {"GIT_CONFIG_COUNT": "1"}))
+    monkeypatch.setattr(AppRepository, "_checkout_pinned_ref", lambda self, ref: None)
+    monkeypatch.setattr(AppRepository, "is_shallow", property(lambda self: False))
+
+    repo.checkout_pinned_commit("abc1234")
+
+    assert calls[0][0][-3:] == ["fetch", "origin", "abc1234"]
+    assert calls[0][1]["env"] == {"GIT_CONFIG_COUNT": "1"}
+
+
+def test_pinned_commit_fallback_fetch_passes_git_auth_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[list[str], dict]] = []
+    attempt = {"n": 0}
+
+    def record(cmd, **kwargs):
+        calls.append((cmd, kwargs))
+        if "fetch" in cmd and attempt["n"] == 0:
+            attempt["n"] += 1
+            raise CommandError("initial fetch failed")
+
+    repo = _repository(tmp_path / "app")
+    monkeypatch.setattr(repository, "run_command", record)
+    monkeypatch.setattr(AppRepository, "_sync_remote_url", lambda self: None)
+    monkeypatch.setattr(AppRepository, "git_env", property(lambda self: {"GIT_CONFIG_COUNT": "1"}))
+    monkeypatch.setattr(AppRepository, "_checkout_pinned_ref", lambda self, ref: None)
+    monkeypatch.setattr(AppRepository, "is_shallow", property(lambda self: False))
+
+    repo.checkout_pinned_commit("abc1234")
+
+    fetch_calls = [(cmd, kwargs) for cmd, kwargs in calls if "fetch" in cmd]
+    assert len(fetch_calls) == 2
+    assert fetch_calls[1][0][-3:] == ["fetch", "origin", "main"]
+    assert fetch_calls[1][1]["env"] == {"GIT_CONFIG_COUNT": "1"}
+
+
+def _repository_of(remote: Path, path: Path) -> AppRepository:
+    """A repository cloning from `remote` over file://, which honours --depth as a network remote does."""
+    app = _FakeApp(path)
+    app.config.repo = remote.as_uri()
+    return AppRepository(app)
+
+
+def test_release_install_clones_a_full_commit_without_its_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A full clone of a large app like erpnext does not finish."""
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+    first = GitRepo(remote)._run("rev-parse", "HEAD~1").stdout.strip()
+
+    _repository_of(remote, tmp_path / "app").clone_rev(first)
+
+    clone = GitRepo(tmp_path / "app")
+    assert clone.head_sha == first
+    assert clone.is_shallow
+
+
+def test_a_short_commit_is_found_in_the_full_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+    first = GitRepo(remote)._run("rev-parse", "HEAD~1").stdout.strip()
+
+    _repository_of(remote, tmp_path / "app").clone_rev(first[:7])
+
+    assert GitRepo(tmp_path / "app").head_sha == first
+
+
+def test_a_commit_the_server_will_not_fetch_by_sha_comes_from_the_full_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Some servers only serve a commit through a ref, and refuse it asked for by its SHA."""
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+    first = GitRepo(remote)._run("rev-parse", "HEAD~1").stdout.strip()
+    def refuse(self: AppRepository, commit: str) -> None:
+        subprocess.run(["git", "init", "-q", str(self.app.path)], check=True)
+        raise CommandError("fatal: remote error: upload-pack: not our ref")
+
+    monkeypatch.setattr(AppRepository, "fetch_commit", refuse)
+
+    _repository_of(remote, tmp_path / "app").clone_rev(first)
+
+    clone = GitRepo(tmp_path / "app")
+    assert clone.head_sha == first
+    assert not clone.is_shallow
+
+
+def test_a_missing_commit_leaves_no_clone_behind(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A clone left in apps/ would read as an installed app."""
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+
+    with pytest.raises(BenchError, match="not found"):
+        _repository_of(remote, tmp_path / "app").clone_rev("0" * 40)
+
+    assert not (tmp_path / "app").exists()
+
+
+def test_files_already_at_the_app_path_are_kept(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The clone did not create them, so a failed clone must not delete them."""
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "notes").write_text("not ours")
+
+    with pytest.raises(CommandError):
+        _repository_of(remote, tmp_path / "app").clone_rev("0" * 40)
+
+    assert (tmp_path / "app" / "notes").read_text() == "not ours"
+
+
+@pytest.mark.parametrize(
+    ("changed_file", "has_migrate_changes"),
+    [
+        ("demo/public/js/form.js", False),
+        ("demo/demo/doctype/task/task.py", False),
+        ("demo/demo/doctype/task/task.json", True),
+        ("demo/hooks.py", True),
+        ("demo/patches.txt", True),
+        ("demo/fixtures/role.json", True),
+        ("demo/demo/custom/user.json", True),
+    ],
+)
+def test_has_migrate_changes_follows_the_changed_files(
+    tmp_path: Path, changed_file: str, has_migrate_changes: bool
+) -> None:
+    path, _ = _repo_with_two_commits(tmp_path / "app")
+    (path / changed_file).parent.mkdir(parents=True, exist_ok=True)
+    (path / changed_file).write_text("change")
+    _git(path, "add", changed_file)
+    _git(path, "commit", "-qm", "change")
+    target = GitRepo(path).head_sha
+    _git(path, "checkout", "-q", "HEAD~1")
+
+    pin = RevisionPin(kind="commit", ref=target)
+    assert _repository(path).has_migrate_changes(pin) is has_migrate_changes
+
+
+def test_has_migrate_changes_assumes_a_migrate_when_the_target_cannot_be_fetched(tmp_path: Path) -> None:
+    path, _ = _repo_with_two_commits(tmp_path / "app")
+
+    pin = RevisionPin(kind="commit", ref="f" * 40)
+    assert _repository(path).has_migrate_changes(pin) is True
+
+
+def test_has_migrate_changes_sees_a_doctype_moved_out_of_place(tmp_path: Path) -> None:
+    path, _ = _repo_with_two_commits(tmp_path / "app")
+    doctype = path / "demo/demo/doctype/task/task.json"
+    doctype.parent.mkdir(parents=True)
+    doctype.write_text('{"doctype": "DocType", "name": "Task", "fields": []}\n' * 20)
+    _git(path, "add", ".")
+    _git(path, "commit", "-qm", "add task")
+    (path / "demo/archive").mkdir(parents=True)
+    _git(path, "mv", "demo/demo/doctype/task/task.json", "demo/archive/task.json")
+    _git(path, "commit", "-qm", "move task")
+    target = GitRepo(path).head_sha
+    _git(path, "checkout", "-q", "HEAD~1")
+
+    pin = RevisionPin(kind="commit", ref=target)
+    assert _repository(path).has_migrate_changes(pin) is True

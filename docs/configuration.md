@@ -1,8 +1,13 @@
 # Configuration
 
-`bench.toml` is the source of truth for a bench. Read and write it through the config model and TOML store. `BenchConfig` is also the sole reader/writer of `common_config.toml`, the host-shared file described in [Common Config](#common-config).
+Pilot stores configuration in two TOML files:
 
-## Minimal Example
+- `bench.toml` contains settings for one bench.
+- `common_config.toml` sits beside the bench directories and contains settings shared by all benches on the host.
+
+Use `BenchConfig` and Pilot's TOML store to read or write either file. Do not read `common_config.toml` directly.
+
+## Quick start
 
 ```toml
 [bench]
@@ -27,21 +32,26 @@ queues = ["default", "short", "long"]
 count = 1
 ```
 
-## `[bench]`
+The first app is the framework app. A bench uses one database type for all its sites. Supported types are `mariadb` and `postgres`.
 
-- `name`: required bench name.
-- `python`: required Python version.
-- `http_port`: web port for local runtime.
-- `socketio_port`: websocket port.
-- `socketio_backend`: `node` or `python`.
-- `db_type`: `mariadb`, `postgres`, or `sqlite`.
-- `default_branch`: optional branch default for new apps.
-- `allow_developer_mode`: allows developer mode to be toggled per site. Developer mode itself stays in each site's `site_config.json`.
-- `watch_apps_js`, `watch_admin_js`, `reload_python`: development toggles.
+## Bench settings
 
-## Apps
+The `[bench]` table supports:
 
-Each `[[apps]]` entry records one app:
+| Key | Purpose |
+| --- | --- |
+| `name` | Required bench name. |
+| `python` | Required Python version. |
+| `http_port` | Local web port. |
+| `socketio_port` | Realtime port when processes are separate. |
+| `socketio_backend` | `node` or `python`. |
+| `db_type` | `mariadb` or `postgres`. |
+| `default_branch` | Default branch for new apps. |
+| `allow_developer_mode` | Allows per-site developer mode changes. |
+| `watch_apps_js`, `watch_admin_js`, `reload_python` | Development reload settings. |
+| `install_dev_extra` | Install apps' `dev` extras on a non-production bench. Defaults to true; `pilot init --no-dev` sets it to false. |
+
+Applications use `[[apps]]` entries. `branches` can list branches available to the app:
 
 ```toml
 [[apps]]
@@ -51,46 +61,27 @@ branch = "version-15"
 branches = ["version-15", "develop"]
 ```
 
-The first app is treated as the framework app when code needs that distinction.
-
-## Databases
-
-`config.mariadb` and `config.postgres` describe how a bench connects to the chosen engine. `existing = true` means the user supplied the service and Pilot should not infer or manage it as owned state. Both live in `common_config.toml`, not `bench.toml` - see [Common Config](#common-config).
-
-One bench uses one database engine for its sites. Pick it with `bench.db_type`.
-
-## Redis And Workers
-
-`[redis]` has separate cache and queue ports. They must be distinct.
-
-Workers use `[[workers]]` array entries:
+An app that the marketplace registry lists updates to the registry's newest release for its branch. It updates to the branch tip instead when the registry has no release for that branch, or when the entry sets `follow_branch = true`, for example a developer who pushes to the app's own repository:
 
 ```toml
-[[workers]]
-queues = ["default", "short", "long"]
-count = 2
+[[apps]]
+name = "myapp"
+repo = "https://github.com/frappe/myapp"
+branch = "develop"
+follow_branch = true
 ```
 
-## Production
+`[redis]` defines separate cache and queue ports. `[[workers]]` defines queue groups and their process counts.
+
+## Runtime modes
 
 ```toml
 [production]
 enabled = true
-process_manager = "systemd"
+process_manager = "systemd" # or "supervisor"
 ```
 
-Supported process managers are `systemd` and `supervisor`.
-
-## Lite Mode
-
-Lite mode runs the whole bench as one process - web, realtime and background jobs
-together - instead of separate web, socketio and worker processes. Every key below
-becomes a flag on `python -m frappe.runner`, which is what the `web` process runs.
-The process manager still supervises it; only the process set changes.
-
-A new bench is created with `enabled = true`. A bench.toml written before this was
-the default carries no `[lite_mode]` table, and keeps the separate process set until
-you turn lite mode on in Settings. Turning it off writes `enabled = false`.
+Lite mode runs web, realtime, and jobs in one process:
 
 ```toml
 [lite_mode]
@@ -102,48 +93,11 @@ request_drain_seconds = 60
 job_drain_seconds = 600
 ```
 
-The process recycles itself to release heap. `restart_after_requests` and
-`restart_after_jobs` are counted since the last restart, and `0` disables either
-limit. Reaching a limit only books the restart: it happens once no web request
-has been served for `restart_idle_seconds`, so it never lands mid-traffic. Only
-2xx responses count, and realtime polls and health checks are ignored - a browser
-tab and a monitor ping forever, and a process counting those would never look idle.
+Request and job limits are counted from the last restart; `0` disables a limit. The process waits until it is idle before restarting. Drain settings bound graceful shutdown; a job that exceeds its limit is abandoned. Lite mode uses one worker group, so multiple groups are merged by taking the union of queues and the sum of their counts.
 
-`request_drain_seconds` and `job_drain_seconds` bound the graceful shutdown on
-every restart and stop. A job still running when its drain expires is abandoned,
-so keep `job_drain_seconds` above your longest job.
+The process listens on `127.0.0.1:<http_port>` and serves realtime there too. Pilot updates `common_site_config.json` and nginx when lite mode changes. Frappe must provide `frappe/runner.py`; otherwise Pilot disables lite mode.
 
-Lite mode uses one worker pool. Thus `[[workers]]` holds one record. Its queues become
-`--queue`, and its `count` becomes `--job-threads`. One pool cannot give a different
-count to each set of queues. Thus pilot folds more records into one record. The queues
-of the new record are the union of the queues. Its count is the total of the counts.
-The audit log records this as `worker_groups_collapsed`. The Workers tab shows the one
-record, and it does not show an Add button.
-
-The process listens on `127.0.0.1:<bench.http_port>`. This is the address that gunicorn
-uses when lite mode is off. The process also serves realtime on this port. Thus pilot
-writes this port as `socketio_port` in `common_site_config.json`, and nginx sends
-`/socket.io` to it.
-
-One process holds one client cache. Thus pilot writes `client_cache_max_bytes` as
-10 MB in `common_site_config.json`, and removes the key when you turn lite mode off.
-
-The process needs the `uvicorn` and `a2wsgi` packages. Frappe declares them, but an
-environment from before frappe added them does not have them. Run
-`pilot -b <bench> setup requirements` after you update frappe.
-
-Only a frappe that has `frappe/runner.py` can run lite mode. Without this file, the
-Settings page does not show the switch, and the bench runs the usual process set. The
-next save of the settings sets `enabled` to false and records `lite_mode_disabled` in
-the audit log.
-
-A change to `enabled` starts a `switch-lite-mode` task. The task stops the workload. It
-writes `common_site_config.json` and the nginx configuration again. It installs the
-units again, and removes the units that the new mode does not use. Then it starts the
-workload again. The task does not stop admin, because the admin unit is the same in the
-two modes.
-
-## Admin
+## Admin and sites
 
 ```toml
 [admin]
@@ -154,38 +108,65 @@ tls = true
 allow_bench_management = true
 ```
 
-`admin.internal_port` is derived as `port + 1` for the localhost Gunicorn service behind nginx.
+Nginx proxies admin traffic to `port + 1` on localhost. In production, `admin.domain` is required. `allow_bench_management` permits this admin to manage sibling benches and defaults to enabled only for development installs.
 
-`allow_bench_management` gates creating and managing sibling benches from this bench's Admin. It defaults to `true` only on a development checkout (`install.sh --dev`). A release install defaults to `false`, so set it in `bench.toml` to turn it on.
+A new site calls Pilot at `pilot_endpoint` in its `site_config.json`. This is the admin URL on localhost, so it does not depend on DNS or `admin.domain`. The browser loads Cloud Settings from `cloud_server_url` and `cloud_settings_embed_url`, which hold the public admin URL. An admin domain change updates the public URLs and any `pilot_endpoint` that is not on localhost.
 
-`password` is stored as a PBKDF2-HMAC-SHA256 hash (`$pbkdf2-sha256$<iterations>$<salt>$<key>`, hashlib only - no dependency), so `bench.toml` holds a verifier rather than the password. Set it with `pilot set-admin-password` or the Settings page; a bench upgraded from an older version is migrated by the `hash_admin_password` patch, and its cleartext keeps working until then.
+Set the admin password with `pilot set-admin-password` or the Settings page. Pilot stores a PBKDF2-HMAC-SHA256 verifier. `jwt_secret` is local; `jwks_url` and `jwks_audience` are for a remote token issuer and are host-shared. Pilot keeps the issuer's public keys in `.jwks-cache.json` in the benches directory. A token whose key is in the cache is verified without a fetch, and a cache older than one minute is refreshed in the background. A key that is not in the cache causes a fetch, at most once every 30 seconds. A failed fetch keeps the cached keys.
 
-`jwt_secret` is this bench's own local token signing secret, kept in `bench.toml`. `jwks_url` and `jwks_audience` trust a remote issuer instead and are host-shared - see [Common Config](#common-config).
+Site-specific settings, including developer mode, live in each site's `site_config.json`.
 
-## Other Groups
+### Per-domain TLS
 
-- `[monitor]`: per-bench `log_path` for this bench's own application metrics. The host-wide system/DB/slow-query log paths are fixed at `cli_root()/system/logs/*` and not configurable anywhere.
-- `[gunicorn]`: Gunicorn process settings.
+A site answers on its own name plus every entry in its `site_config.json` `domains` list. The `ssl` flag records whether clients use HTTPS for the site. A bare hostname follows that flag for both public and origin TLS. A route mapping decides public and origin TLS separately:
+
+```json
+{
+  "ssl": false,
+  "domains": [
+    "www.example.com",
+    {
+      "domain": "shop.customer.com",
+      "route": {
+        "public_scheme": "https",
+        "origin_scheme": "https",
+        "client_ip_source": "proxy_protocol_v2"
+      }
+    }
+  ]
+}
+```
+
+Pilot creates one virtual host for each origin mode. A provider route can use HTTPS for clients and HTTP for its Pilot origin.
+
+Pilot stores `ssl: true` and shows this route as TLS, but it does not get a certificate. A passthrough route uses HTTPS for both connections.
+
+Pilot gets the passthrough certificate. Pilot also accepts the client IP source from the provider policy.
+
+Pilot keeps the site route policy in `site_config.json`. Each attached domain can have a different route policy.
+
+A domain the certificate does not name is served over HTTP rather than off a certificate that would fail to validate, so a half-finished `--expand` costs only that domain. Certificates are held in a certbot lineage named by the site's `cert_name`, defaulting to the site name; [renaming](commands.md#renaming-without-downtime) pins it so the certificate survives the site changing name.
+
+## Other bench tables
+
+These tables are per-bench unless noted otherwise:
+
+- `[gunicorn]`: Gunicorn settings.
+- `[build]`: manual override for the asset build memory cap.
 - `[firewall]`: firewall behavior.
-- `[waf]`: WAF behavior.
-- `[s3]`: S3 backup credentials and bucket settings.
-- `[llm]`: LLM provider settings used by the admin assistant.
+- `[waf]`: WAF rules and behavior.
+- `[s3]`: backup storage credentials and bucket settings. Set `endpoint_url` for a custom S3-compatible provider.
+- `[llm]`: admin assistant provider settings.
+- `[resource_limits]`: CPU, memory, disk, uptime, and webhook alerts.
 
-Nginx has no per-bench `bench.toml` section - `config.nginx` always holds its compiled-in defaults (ports 80/443, platform-default `config_dir`, etc.); nothing in `bench.toml` can override it.
+`[monitor]` contains this bench's application metric log path. Host-wide system, database, and slow-query logs always use `cli_root()/system/logs/` and cannot be configured.
 
-Unknown fields are ignored by normal loads for compatibility. Strict validation can report unknown config paths.
+Nginx uses compiled-in defaults; it has no `[nginx]` table in `bench.toml`.
+Unknown fields are ignored during normal loads. Strict validation reports them.
 
-## Database Credentials
+## Shared host configuration
 
-`mariadb.root_password` and `postgres.root_password` never reach a command line. Pilot's own client calls pass them through `MYSQL_PWD`/`PGPASSWORD`, and the frappe commands that set a site up (`new-site`, `restore`, `reinstall`, `drop-site`) get a throwaway MariaDB account instead: `MariaDBManager.temporary_setup_user` grants it `RELOAD`, `CREATE USER`, and full rights on that one site database, then drops it when the command returns. Pilot therefore names the site database itself (`_<16 hex>`) rather than letting frappe pick a random one. Postgres still passes the superuser credential, because frappe's Postgres setup needs privileges a scoped role cannot hold.
-
-## Fetched Endpoints
-
-`admin.jwks_url`, `central.endpoint`, `datum.endpoint`, and `llm.api_base` are URLs this bench requests itself, so `BenchConfig.validate` sends each through `validate_external_url`: the scheme must be `http` or `https`, credentials must not be embedded, and the host must not be link-local or a cloud metadata name. Loopback and private addresses stay allowed - a self-hosted model or a local JWKS issuer is a normal setup. Validation reads the literal host only; a domain that resolves to a blocked address is not caught.
-
-## Common Config
-
-Some settings are shared by every bench under one benches directory, not owned by any single bench: one MariaDB server, one Postgres server, one ACME account, one trusted admin JWKS issuer, one Central enrolment, one metrics destination. These live in `common_config.toml`, next to the bench folders, not in any bench's own `bench.toml`:
+`common_config.toml` contains one copy of host-level settings:
 
 ```toml
 [mariadb]
@@ -195,6 +176,7 @@ admin_user = "root"
 root_password = ""
 socket_path = ""
 existing = false
+memory_share = 0.5
 
 [postgres]
 host = "localhost"
@@ -208,22 +190,118 @@ email = "ops@example.com"
 webroot_path = "/var/www/letsencrypt"
 
 [central]
-endpoint = "https://central.example.com"
-auth_token = ""
+enabled = false
+bootstrapped = false
 
-[datum]
-endpoint = "https://datum.internal"
+[[central.hostname_aliases]]
+type = "site"
+pattern = "site-*.par-1.frappe.cloud"
+target = "site1.local"
+redirect = true
+
+[[central.hostname_aliases]]
+type = "admin"
+pattern = "vm-*.par-1.frappe.cloud"
+target = "admin.local"
+redirect = true
+
+[proxy]
+protocol_v2 = false
+cloudflare = false
+
+[telemetry]
+endpoint = "https://telemetry-svc.par-1.frappe.cloud"
 token = ""
+logs_enabled = true
+metrics_enabled = true
 
 [admin]
 jwks_url = "https://issuer.example.com/jwks.json"
 jwks_audience = "bench-fleet"
+
+[resource_limits]
+cpu_usage_limit = 85
+memory_usage_limit = 90
+disk_space_limit = 0
+site_uptime = true
+webhook_endpoints = { "https://alerts.example.com/pilot" = "bearer-token" }
+email_recipients = ["ops@example.com"]
+
+[frappe_cloud]
+url = "https://cloud.frappe.io"
 ```
 
-`BenchConfig` is the only reader/writer of this file - it merges these values into `config.mariadb`, `config.postgres`, `config.letsencrypt`, `config.central`, `config.datum`, and `config.admin.jwks_url`/`jwks_audience` on every read, and writes them back on save. Other code reaches these values through a bench's own `BenchConfig`, never by reading `common_config.toml` directly. `admin.tls` is not part of this file - it stays a per-bench choice in `bench.toml`.
+Shared tables are MariaDB, Postgres, Let's Encrypt, Central, the edge proxy, telemetry, resource limits, Frappe Cloud, and the admin JWKS issuer. A bench exposes these values through its own `BenchConfig`; the model merges shared values on read and writes them back to the common file.
 
-`[datum]` is where the monitor ships metrics. With both `endpoint` and `token` set, and the optional `datum` package installed (`pip install pilot[metrics]`), every collection tick is posted as one batch of samples. The JSON-Lines monitor logs are written either way - they stay the Admin UI's source of truth.
+Central endpoint and authentication data come from instance metadata. While Central is enabled and bootstrap is pending, remote-token verification uses only the current staged JWKS URL, audience, and initial key set from instance metadata. Pilot caches that staged issuer in each Admin process until shared config changes or bootstrap completes. After bootstrap, it clears the staged entry and uses only the issuer saved in shared config. The metadata can include `initial_jwks_cache`, the issuer's JWK set. Pilot uses it to initialize an empty JWKS cache before it marks the host bootstrapped, so the first remote token does not wait for an issuer fetch. It does not replace keys already fetched from the issuer. The Central configuration is in the `pilot-central` attribute. Three optional attributes hold [JSON Merge Patches](https://www.rfc-editor.org/rfc/rfc7396) for config files: `pilot-common-config` for `common_config.toml`, `pilot-config` for `bench.toml`, and `pilot-common-site-config` for `sites/common_site_config.json`. For example, `pilot-config` can hold `{"s3": {"bucket": "team-backups"}}`. A patch changes only the keys it names, and `null` resets a key to its default. `pilot-common-config` must not change `central`, because bootstrap owns that table. Pilot rejects unknown TOML keys and validates the result before it writes a file. Pilot applies the patches once, during bootstrap, before it marks the host bootstrapped, and does not read them again. Central must write them before `pilot-central`. Each file has its own attribute because the cloud caps a metadata value at 1 KiB. `central.hostname_aliases` maps a VM hostname pattern to its current local target. The VM ID is assigned at runtime, so use `*` for that part. Pilot creates redirect rules only for aliases whose targets exist on the bench. A redirecting site alias sends clients to the site's primary domain, on the scheme clients reach it with, but still answers `/api/method/ping`, because Central probes the alias for readiness without following redirects. Renaming a site or moving the admin domain re-points the matching alias automatically; remove one when the rule is no longer needed. `pilot setup central` writes these settings - see [Setup Commands](commands.md#setup-commands).
 
-The host-wide system/DB/slow-query monitor log paths (`system_log_path`/`db_log_path`/`slow_query_log_path`) are not configurable at all, in `bench.toml` or `common_config.toml` - they're fixed at `cli_root()/system/logs/{system-stats.log,db-stats.log,slow-queries.json}` (see `pilot/config/monitor.py`).
+Before it applies the Central credential, bootstrap sizes Pilot's MariaDB for the VM's memory, because an image built on another host keeps that host's sizing. It writes `my.cnf` and the unit for the next start, then applies the values to the running server without a restart: the buffer pool and its automatic minimum, `innodb_log_file_size`, `key_buffer_size`, and `max_connections`. An option set in `managed.cnf` keeps its value. The buffer pool cannot grow above the running `innodb_buffer_pool_size_max`, so a larger pool waits for the next start. Higher unit memory limits apply before MariaDB grows. Lower limits apply only after MariaDB uses less than the new `MemoryHigh`. The unit file is written last, after the limits apply; if the usage stays higher or cannot be read for a minute, the old unit stays and a later attempt tries again.
 
-A pre-upgrade bench whose `bench.toml` still carries these fields directly is migrated by the `merge_common_config` patch - see [pilot/patches](../pilot/patches) and `pilot admin run-patches`.
+The same sizing runs again when the host's memory changes, for example after a VM resize. `my.cnf` records the memory it was sized for. The user unit `pilot-mariadb-sizing.service` runs before every start of `pilot-mariadb.service`; when the host memory differs from the recorded value by 100 MB or more, it writes `my.cnf` and the unit for the new memory and sets the new memory limits for this start. MariaDB then starts with the new buffer pool, with no restart. A buffer pool size saved in `managed.cnf` that is larger than the new host allows is removed, so the automatic sizing takes over.
+
+On a host with less than 800 MB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
+
+`mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
+
+The domain provider controls the edge route for each hostname. Its route policy gives Pilot the public scheme, origin scheme, and client IP source.
+
+Pilot configures PROXY protocol v2 when an HTTPS origin needs it. See [Per-domain TLS](#per-domain-tls).
+
+Set `proxy.cloudflare = true` when site domains use Cloudflare's proxy. nginx then takes the client IP from the `CF-Connecting-IP` header, but only from [Cloudflare's addresses](https://www.cloudflare.com/ips/). A domain that resolves to Cloudflare's addresses passes the add-domain DNS check with a warning, because Pilot cannot see the server behind the proxy. This check does not need the setting. In Cloudflare, use the Full (strict) SSL mode. In Flexible mode, Cloudflare sends requests to Pilot over HTTP, Pilot redirects them to HTTPS, and the browser loops. Let's Encrypt checks the domain over HTTP, so turn off Always Use HTTPS in Cloudflare until Pilot issues the certificate.
+
+### Frappe Cloud
+
+`[frappe_cloud] url` is the Frappe Cloud that a site restore copies backups from. The default is `https://cloud.frappe.io`. Set it to use another Frappe Cloud, for example a local Press during development.
+
+### Telemetry
+
+`[telemetry]` is one credential for both shippers. `endpoint` is the base URL of the region's Datum, with no path: metrics append `/v1/ingest` and logs append `/v1/logs/ingest`. `token` is the JWT Central mints for the region, which Datum tells apart by route rather than by token, so one serves both. `logs_enabled` and `metrics_enabled` switch each shipper independently.
+
+Either shipper runs only when its switch is on and both `endpoint` and `token` are set. Logs are written locally regardless of shipping settings.
+
+`pilot setup telemetry` writes this section and installs the log shipper. Central is asked for the credential when `[central] enabled` is set, and what it returns replaces what is already there, because the token expires. `--endpoint` and `--token` override the fetch. `pilot setup production` does the same, once, before configuring either shipper.
+
+The monitor checks this section on every run, so both shippers start when a credential arrives later, such as from Central's bootstrap. It rewrites the Fluent Bit config and restarts Fluent Bit when the endpoint or token changes, and it starts Fluent Bit again when it is not running. Fluent Bit must be installed. `install.sh` installs it on Debian and Ubuntu. `pilot remove logs` stops Fluent Bit and sets `logs_enabled = false`, so the monitor does not start it again.
+
+### Alert Delivery
+
+`[resource_limits]` sets when an alert is raised and where it goes. A usage percentage of `0` disables that alert; `site_uptime` covers sites that stop answering their ping. A condition must hold for five minutes before anything is sent.
+
+Where an alert goes depends on what is configured. A Central-managed host reports every alert to Central; a self-hosted one does not, and the dashboard drops the Central wording along with it. Each entry in `webhook_endpoints` receives alerts either way, as a POST with an `Authorization: Bearer` header. Mail is a third sink, off until a mail server is configured and `email_recipients` is set.
+
+Outgoing mail lives in the bench's `sites/common_site_config.json`, under the keys the framework's Email Account already reads, so a site picks the same mailbox up without any further setup:
+
+```json
+{
+  "mail_server": "smtp.example.com",
+  "mail_port": 587,
+  "auto_email_id": "alerts@example.com",
+  "mail_login": "alerts@example.com",
+  "mail_password": "secret",
+  "use_tls": 1
+}
+```
+
+- `mail_server` is the outgoing mail server, `mail_port` the port it listens on
+- `use_tls` upgrades the connection with STARTTLS
+- `use_ssl` connects over SSL instead, with `use_tls` set to `0`. The framework reads `use_ssl` from Frappe v16 with frappe/frappe#44142.
+- `mail_port` may be left at `0`, which means 465 with SSL and 587 with STARTTLS
+- `auto_email_id` is the address alerts are sent from, and the login name by default
+- `mail_login` only when the server expects a login name that is not that address
+- a relay that takes no credentials gets `disable_mail_smtp_authentication` instead of a password
+
+Each site's `site_config.json` has `email_sender_name`, the display name on mail that the site sends through this mailbox without a sender name of its own, such as a password reset. Mail that a user sends keeps that user's name. A restore keeps the target site's value. Pilot sets it from the first label of the site name when it creates the site, and changes it when the site is renamed. It changes `-` and `_` to spaces and starts each word with a capital letter, such as `Acme Corp` for `acme-corp.example.com`. A rename keeps a value that you set yourself.
+
+The certificate is verified in both modes, so a server with a self-signed certificate is refused rather than trusted silently.
+
+Saving these through the Admin UI opens a session against the server first, so a wrong password or an unreachable host is reported then rather than at the first alert. The Admin API never returns the password, reporting only whether one is stored.
+
+`email_recipients` is edited on the notification settings page, the mailbox on its own one, so either may be saved before the other exists.
+
+## Credentials and URLs
+
+Database passwords are passed through environment variables, not command-line arguments. MariaDB site setup uses a temporary, site-scoped account; Postgres setup requires the configured superuser.
+
+`admin.jwks_url`, `telemetry.endpoint`, and `llm.api_base` must use `http` or `https`, contain no credentials, and must not target link-local or cloud metadata hosts. Loopback and private addresses are allowed. Validation checks the hostname itself, not where DNS resolves it.
+
+After upgrading an old bench, `merge_common_config` moves host-wide fields from `bench.toml` into `common_config.toml`. Run `pilot admin run-patches` if needed.

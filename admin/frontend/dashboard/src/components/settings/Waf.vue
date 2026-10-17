@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { RouterLink } from 'vue-router'
-import { Button, ErrorMessage, FormControl, Spinner, TabButtons, toast } from 'frappe-ui'
+import { Button, ErrorMessage, Select, Spinner, TabButtons, TextInput, Textarea, toast } from 'frappe-ui'
 
 import SettingsSwitch from '@/components/settings/SettingsSwitch.vue'
 import WafCustomRules from '@/components/settings/WafCustomRules.vue'
@@ -9,6 +9,8 @@ import WafCustomRules from '@/components/settings/WafCustomRules.vue'
 import { settingsApi } from '@/api/settings'
 import { ruleProblem } from '@/utils/wafRules'
 import { useUnsavedChanges } from '@/composables/common/useUnsavedChanges'
+import type { WafRuleSettings } from '@/types/settings'
+import { errorMessage } from '@/utils/error'
 
 // "Paused" leaves the module loaded and idle; the Enable switch drops it from
 // the server config. The stored value stays "Off" - only the label differs.
@@ -24,14 +26,14 @@ const SENSITIVITY_OPTIONS = [
   { label: 'Very High', value: 4 },
 ]
 // CRS paranoia levels.
-const SENSITIVITY_HINTS = {
+const SENSITIVITY_HINTS: Record<number, string> = {
   1: 'Very few false positives. Start here.',
   2: 'Admin tooling may start tripping it.',
   3: 'Expect to add exclusions.',
   4: 'Most coverage, most false positives.',
 }
 // DetectionOnly's hint lives in the template - it carries a link.
-const ACTION_HINTS = {
+const ACTION_HINTS: Record<string, string> = {
   Off: 'Loaded but idle. Nothing is inspected.',
   On: 'Matching requests are rejected.',
 }
@@ -50,10 +52,10 @@ const bodyLimit = ref('50m')
 const inspectResponses = ref(false)
 const exclusionsText = ref('')
 const exemptPathsText = ref('')
-const customRules = ref([])
-const ruleFields = ref([])
-const ruleOperators = ref([])
-const ruleActions = ref([])
+const customRules = ref<WafRuleSettings[]>([])
+const ruleFields = ref<string[]>([])
+const ruleOperators = ref<string[]>([])
+const ruleActions = ref<string[]>([])
 
 const sensitivityHint = computed(() => SENSITIVITY_HINTS[Number(paranoia.value)] || '')
 
@@ -67,7 +69,7 @@ const setupNote = computed(() => {
   return ''
 })
 
-const linesToArray = (text) => {
+const linesToArray = (text: string) => {
   return text
     .split('\n')
     .map((line) => line.trim())
@@ -95,13 +97,18 @@ const dirty = computed(() => JSON.stringify(buildPayload()) !== savedPayload.val
 // route-level guard never fires for the shell's param-only navigation.
 useUnsavedChanges(dirty)
 
-const warnIfDirty = (event) => {
+const warnIfDirty = (event: BeforeUnloadEvent) => {
   if (!dirty.value) return
   event.preventDefault()
   event.returnValue = ''
 }
 onMounted(() => window.addEventListener('beforeunload', warnIfDirty))
 onUnmounted(() => window.removeEventListener('beforeunload', warnIfDirty))
+
+// A clicked <summary> keeps focus and paints a ring after the panel toggles.
+const blurSummary = (event: MouseEvent) => {
+  if (event.currentTarget instanceof HTMLElement) event.currentTarget.blur()
+}
 
 const thresholdError = computed(() => {
   const threshold = Number(inboundThreshold.value)
@@ -120,15 +127,12 @@ const save = async () => {
   try {
     const payload = buildPayload()
     const result = await settingsApi.update({ waf: payload })
-    if (!result.ok) {
-      error.value = result.error || 'Failed to save.'
-      return
-    }
+
     savedPayload.value = JSON.stringify(payload)
     toast.success('Web application firewall updated')
-    if (result.nginx_error) toast.error(result.nginx_error)
+    if (result.waf_warning) toast.error(result.waf_warning)
   } catch (e) {
-    error.value = e.message || 'Failed to save.'
+    error.value = errorMessage(e, 'Failed to save.')
   } finally {
     saving.value = false
   }
@@ -156,7 +160,7 @@ onMounted(async () => {
     // Same builder as the save payload, so normalisation is not an edit.
     savedPayload.value = JSON.stringify(buildPayload())
   } catch (e) {
-    error.value = e.message || 'Could not load settings.'
+    error.value = errorMessage(e, 'Could not load settings.')
   } finally {
     loading.value = false
   }
@@ -174,7 +178,7 @@ onMounted(async () => {
         label="Enable web application firewall"
         description="Inspects request contents for SQLi, XSS and path traversal, across all sites and the admin."
         :model-value="enabled"
-        @update:model-value="(v) => (enabled = v)"
+        @update:model-value="(v: boolean) => (enabled = v)"
       />
 
       <p v-if="setupNote" class="flex items-start gap-1.5 text-ink-amber-6 text-p-sm">
@@ -182,9 +186,9 @@ onMounted(async () => {
         <span>{{ setupNote }}</span>
       </p>
 
-      <div class="items-start gap-4 grid grid-cols-1 sm:grid-cols-2">
+      <div class="items-start gap-4 grid md:grid-cols-2">
         <div class="space-y-1.5">
-          <FormControl type="select" label="Action" :options="ACTION_OPTIONS" v-model="mode" />
+          <Select label="Action" :options="ACTION_OPTIONS" v-model="mode" />
           <p v-if="mode === 'DetectionOnly'" class="text-ink-gray-5 text-p-sm">
             Matches are logged, not blocked. Review
             <RouterLink
@@ -198,8 +202,7 @@ onMounted(async () => {
         </div>
 
         <div class="space-y-1.5">
-          <!-- Label markup matches frappe-ui's InputLabel. -->
-          <span class="block text-ink-gray-5 text-base">Sensitivity</span>
+          <span class="block text-ink-gray-5">Sensitivity</span>
           <TabButtons :options="SENSITIVITY_OPTIONS" v-model="paranoia" />
           <p class="text-ink-gray-5 text-p-sm">{{ sensitivityHint }}</p>
         </div>
@@ -216,21 +219,18 @@ onMounted(async () => {
     />
 
     <details class="group">
-      <!-- Chrome marks a clicked summary :focus-visible; blur keeps the focus
-           ring for keyboard only. w-fit so the ring hugs the word. -->
       <summary
-        class="flex items-center gap-1.5 pr-1.5 rounded-1 w-fit text-ink-gray-6 text-base cursor-pointer select-none"
-        @click="(e) => e.currentTarget.blur()"
+        class="flex items-center gap-1.5 pr-1.5 rounded-1 w-fit text-ink-gray-6 cursor-pointer select-none"
+        @click="blurSummary"
       >
         <span
-          class="size-4 transition-transform group-open:rotate-90 lucide-chevron-right"
-        ></span>Advanced
+          class="size-4 transition-transform group-open:rotate-90 lucide-chevron-right" />Advanced
       </summary>
 
       <div class="space-y-4 mt-4">
-        <div class="gap-4 grid grid-cols-1 sm:grid-cols-2 items-start">
+        <div class="gap-4 grid md:grid-cols-2 items-start">
           <div class="space-y-1.5">
-            <FormControl
+            <TextInput
               type="number"
               label="Anomaly threshold"
               min="1"
@@ -243,14 +243,13 @@ onMounted(async () => {
           </div>
 
           <div class="space-y-1.5">
-            <FormControl type="text" label="Max inspected body size" v-model="bodyLimit" />
+            <TextInput label="Max inspected body size" v-model="bodyLimit" />
             <p class="text-ink-gray-5 text-p-sm">Number with a k, m or g suffix, e.g. 50m.</p>
           </div>
         </div>
 
         <div class="space-y-1.5">
-          <FormControl
-            type="textarea"
+          <Textarea
             label="Exempt paths"
             :rows="3"
             placeholder="/api/method/frappe.ping"
@@ -262,8 +261,7 @@ onMounted(async () => {
         </div>
 
         <div class="space-y-1.5">
-          <FormControl
-            type="textarea"
+          <Textarea
             label="Rule exclusions (SecLang)"
             :rows="3"
             placeholder="SecRuleRemoveById 942100"
@@ -278,7 +276,7 @@ onMounted(async () => {
           label="Inspect responses"
           description="Scan outbound responses for leaks. Adds latency."
           :model-value="inspectResponses"
-          @update:model-value="(v) => (inspectResponses = v)"
+          @update:model-value="(v: boolean) => (inspectResponses = v)"
         />
       </div>
     </details>

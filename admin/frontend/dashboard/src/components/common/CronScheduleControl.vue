@@ -2,22 +2,31 @@
 import { computed, onMounted, ref } from 'vue'
 import { Button, Dialog, Dropdown, ErrorMessage, Select } from 'frappe-ui'
 
-import { formatTime } from '@/utils/backup'
-import { cronToPicks, picksToCron } from '@/utils/cron'
+import { formatTime, WEEKDAYS } from '@/utils/backup'
+import { cronToPicks, type Frequency, picksToCron, type SchedulePicks } from '@/utils/cron'
+import { errorMessage } from '@/utils/error'
 
-const props = defineProps({
-  title: { type: String, default: '' },
+interface Props {
+  title?: string
   // Lowercase plural noun used in button/dialog copy, e.g. "backups", "snapshots".
-  noun: { type: String, required: true },
-  enabledHint: { type: String, default: '' },
-  disabledHint: { type: String, default: '' },
-  disableBody: { type: String, required: true },
-  retentionHint: { type: String, default: '' },
+  noun: string
+  enabledHint?: string
+  disabledHint?: string
+  disableBody: string
+  retentionHint?: string
   // Hide the title/hint text, rendering only the enable button or schedule dropdown.
-  titleless: { type: Boolean, default: false },
-  fetchSchedule: { type: Function, required: true }, // () => Promise<{ schedule: string|null }>
-  setSchedule: { type: Function, required: true }, // (cron: string) => Promise<void>, throws on failure
-  removeSchedule: { type: Function, required: true }, // () => Promise<void>, throws on failure
+  titleless?: boolean
+  fetchSchedule: () => Promise<{ schedule: string | null }>
+  setSchedule: (cron: string) => Promise<void>
+  removeSchedule: () => Promise<void>
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  title: '',
+  enabledHint: '',
+  disabledHint: '',
+  retentionHint: '',
+  titleless: false,
 })
 
 const FREQ_OPTIONS = [
@@ -26,31 +35,27 @@ const FREQ_OPTIONS = [
   { label: 'Monthly', value: 'monthly' },
 ]
 
-const WEEKDAY_OPTIONS = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-].map((label, value) => ({ label, value }))
+const WEEKDAY_OPTIONS = WEEKDAYS.map((label, value) => ({ label, value }))
 
 const monthDayOptions = Array.from({ length: 31 }, (_, i) => ({ label: `${i + 1}`, value: i + 1 }))
 
 const hourOptions = Array.from({ length: 24 }, (_, h) => ({ label: formatTime(h), value: h }))
 
-const WEEKDAY_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
 // Local-time presets; the server stores their UTC equivalents.
-const PRESETS = [
-  { label: 'Daily, 2:00 AM', picks: { frequency: 'daily', weekday: 0, monthDay: 1, hour: 2, minute: 0 } },
-  { label: 'Weekly, Sunday 2:00 AM', picks: { frequency: 'weekly', weekday: 0, monthDay: 1, hour: 2, minute: 0 } },
+const PRESETS: { label: string; picks: SchedulePicks }[] = [
+  {
+    label: 'Daily, 2:00 AM',
+    picks: { frequency: 'daily', weekday: 0, monthDay: 1, hour: 2, minute: 0 },
+  },
+  {
+    label: 'Weekly, Sunday 2:00 AM',
+    picks: { frequency: 'weekly', weekday: 0, monthDay: 1, hour: 2, minute: 0 },
+  },
 ]
 
-const presetCron = (index) => picksToCron(PRESETS[index].picks)
+const presetCron = (index: number) => picksToCron(PRESETS[index].picks)
 
-const matchingPreset = (picks) =>
+const matchingPreset = (picks: SchedulePicks) =>
   PRESETS.findIndex(
     (preset) =>
       preset.picks.frequency === picks.frequency &&
@@ -63,11 +68,14 @@ const disabled = ref(true)
 const loading = ref(false)
 const error = ref('')
 
-const schedulePreset = ref(0)
+const schedulePreset = ref<number | 'custom'>(0)
 const showCustomDialog = ref(false)
 const showDisableConfirm = ref(false)
 const scheduleSaving = ref(false)
 const schedFrequency = ref('daily')
+
+const toFrequency = (value: string): Frequency =>
+  value === 'weekly' || value === 'monthly' ? value : 'daily'
 const schedWeekday = ref(0)
 const schedMonthDay = ref(1)
 const schedHour = ref(2)
@@ -83,8 +91,7 @@ const schedHourPick = computed({
 
 const customScheduleLabel = computed(() => {
   const time = formatTime(schedHour.value, schedMinute.value)
-  if (schedFrequency.value === 'weekly')
-    return `Weekly, ${WEEKDAY_FULL[schedWeekday.value]} ${time}`
+  if (schedFrequency.value === 'weekly') return `Weekly, ${WEEKDAYS[schedWeekday.value]} ${time}`
   if (schedFrequency.value === 'monthly') return `Monthly, ${schedMonthDay.value} ${time}`
   return `Daily, ${time}`
 })
@@ -121,7 +128,7 @@ const scheduleOptions = computed(() => {
 // The pickers hold local time; the server stores the schedule in UTC.
 const schedCron = computed(() =>
   picksToCron({
-    frequency: schedFrequency.value,
+    frequency: toFrequency(schedFrequency.value),
     weekday: schedWeekday.value,
     monthDay: schedMonthDay.value,
     hour: schedHour.value,
@@ -129,7 +136,7 @@ const schedCron = computed(() =>
   }),
 )
 
-const parseCronToState = (cron) => {
+const parseCronToState = (cron: string) => {
   const picks = cronToPicks(cron)
   schedFrequency.value = picks.frequency
   schedWeekday.value = picks.weekday
@@ -149,19 +156,19 @@ const load = async () => {
     disabled.value = false
     const matched = matchingPreset(parseCronToState(data.schedule))
     schedulePreset.value = matched === -1 ? 'custom' : matched
-  } catch (e) {
-    error.value = e.message || 'Failed to load schedule.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Failed to load schedule.')
   }
 }
 
-const setPreset = async (index) => {
+const setPreset = async (index: number) => {
   error.value = ''
   try {
     await props.setSchedule(presetCron(index))
     schedulePreset.value = index
     disabled.value = false
-  } catch (e) {
-    error.value = e.message || 'Failed to save schedule.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Failed to save schedule.')
   }
 }
 
@@ -173,8 +180,8 @@ const saveCustomSchedule = async () => {
     schedulePreset.value = 'custom'
     disabled.value = false
     showCustomDialog.value = false
-  } catch (e) {
-    error.value = e.message || 'Failed to save schedule.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Failed to save schedule.')
   } finally {
     scheduleSaving.value = false
   }
@@ -187,8 +194,8 @@ const disable = async () => {
     await props.removeSchedule()
     disabled.value = true
     showDisableConfirm.value = false
-  } catch (e) {
-    error.value = e.message || `Failed to disable ${props.noun}.`
+  } catch (caught) {
+    error.value = errorMessage(caught, `Failed to disable ${props.noun}.`)
   } finally {
     loading.value = false
   }
@@ -201,8 +208,8 @@ const enable = async () => {
     await props.setSchedule(presetCron(0))
     disabled.value = false
     schedulePreset.value = 0
-  } catch (e) {
-    error.value = e.message || `Failed to enable ${props.noun}.`
+  } catch (caught) {
+    error.value = errorMessage(caught, `Failed to enable ${props.noun}.`)
   } finally {
     loading.value = false
   }
@@ -225,9 +232,7 @@ defineExpose({ disabled, currentScheduleLabel, loading, enable })
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
-        <Button v-if="disabled" size="sm" :loading="loading" @click="enable"
-          >Enable {{ noun }}</Button
-        >
+        <Button v-if="disabled" :loading="loading" @click="enable">Enable {{ noun }}</Button>
         <Dropdown v-else :options="scheduleOptions">
           <template #default="{ open }">
             <Button variant="subtle" size="sm" :loading="loading" :active="open">
@@ -247,44 +252,48 @@ defineExpose({ disabled, currentScheduleLabel, loading, enable })
   <!-- Custom schedule dialog -->
   <Dialog v-model="showCustomDialog" :title="`Custom ${noun} schedule`" size="sm">
     <div class="space-y-4">
-      <div class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Frequency</p>
-        <Select v-model="schedFrequency" :options="FREQ_OPTIONS" class="w-full" />
-      </div>
+      <Select label="Frequency" v-model="schedFrequency" :options="FREQ_OPTIONS" class="w-full" />
 
-      <div v-if="schedFrequency === 'weekly'" class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Day of week</p>
-        <Select v-model="schedWeekday" :options="WEEKDAY_OPTIONS" class="w-full" />
-      </div>
+      <Select
+        v-if="schedFrequency === 'weekly'"
+        label="Day of week"
+        v-model="schedWeekday"
+        :options="WEEKDAY_OPTIONS"
+        class="w-full"
+      />
 
-      <div v-if="schedFrequency === 'monthly'" class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Day of month</p>
-        <Select v-model="schedMonthDay" :options="monthDayOptions" class="w-full" />
-      </div>
+      <Select
+        v-if="schedFrequency === 'monthly'"
+        label="Day of month"
+        v-model="schedMonthDay"
+        :options="monthDayOptions"
+        class="w-full"
+      />
 
-      <div class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Time</p>
-        <Select v-model.number="schedHourPick" :options="hourOptions" class="w-full" />
-      </div>
+      <Select label="Time" v-model.number="schedHourPick" :options="hourOptions" class="w-full" />
 
       <p v-if="retentionHint" class="text-ink-gray-4 text-p-sm">{{ retentionHint }}</p>
       <ErrorMessage v-if="error" :message="error" />
     </div>
 
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showCustomDialog = false">Cancel</Button>
-      <Button variant="solid" :loading="scheduleSaving" @click="saveCustomSchedule"
-        >Save schedule</Button
-      >
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showCustomDialog = false">Cancel</Button>
+        <Button variant="solid" :loading="scheduleSaving" @click="saveCustomSchedule"
+          >Save schedule</Button
+        >
+      </div>
+    </template>
   </Dialog>
 
   <!-- Disable confirmation -->
   <Dialog v-model="showDisableConfirm" :title="`Disable ${noun}`" size="sm">
     <p class="text-ink-gray-7 text-sm">{{ disableBody }}</p>
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showDisableConfirm = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="loading" @click="disable">Disable</Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showDisableConfirm = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="loading" @click="disable">Disable</Button>
+      </div>
+    </template>
   </Dialog>
 </template>

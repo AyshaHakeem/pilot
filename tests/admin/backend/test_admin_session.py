@@ -435,21 +435,36 @@ def test_setup_endpoint_fails_closed_when_config_is_corrupt(tmp_path: Path) -> N
     assert response.status_code == 503
 
 
-def test_has_scope_bench_token_allows_any_site() -> None:
-    assert Session.has_scope({"scope": "bench"}, "example.com")
-    assert Session.has_scope({"scope": "bench"}, "other.com")
+def test_has_scope_bench_token_allows_any_site(tmp_path: Path) -> None:
+    session = Session(_bench(tmp_path))
+    assert session.has_scope({"scope": "bench"}, "example.com")
+    assert session.has_scope({"scope": "bench"}, "other.com")
 
 
-def test_has_scope_site_token_allows_matching_site() -> None:
-    assert Session.has_scope({"scope": "site", "site": "example.com"}, "example.com")
+def test_has_scope_site_token_allows_matching_site(tmp_path: Path) -> None:
+    assert Session(_bench(tmp_path)).has_scope(
+        {"scope": "site", "site": "example.com"},
+        "example.com",
+    )
 
 
-def test_has_scope_site_token_rejects_different_site() -> None:
-    assert not Session.has_scope({"scope": "site", "site": "example.com"}, "other.com")
+def test_has_scope_site_token_rejects_different_site(tmp_path: Path) -> None:
+    assert not Session(_bench(tmp_path)).has_scope(
+        {"scope": "site", "site": "example.com"},
+        "other.com",
+    )
 
 
-def test_has_scope_none_claims_rejected() -> None:
-    assert not Session.has_scope(None, "example.com")
+@pytest.mark.parametrize("claimed", [1, ["example.com"], {"site": "example.com"}])
+def test_has_scope_rejects_a_non_string_site_claim(tmp_path: Path, claimed) -> None:
+    assert not Session(_bench(tmp_path)).has_scope(
+        {"scope": "site", "site": claimed},
+        "example.com",
+    )
+
+
+def test_has_scope_none_claims_rejected(tmp_path: Path) -> None:
+    assert not Session(_bench(tmp_path)).has_scope(None, "example.com")
 
 
 @pytest.mark.parametrize(
@@ -1287,7 +1302,7 @@ def test_revoking_all_clears_active(tmp_path: Path) -> None:
 def test_discarding_an_unknown_jti_does_not_rewrite(tmp_path: Path) -> None:
     from admin.backend.internal.session import ActiveTokens, Session
 
-    client = _client(tmp_path)
+    _client(tmp_path)
     bench = Bench(tmp_path / "benches" / "current")
     Session(bench).issue_session_token()
     path = tmp_path / "benches" / "current" / ActiveTokens.FILENAME
@@ -1296,3 +1311,23 @@ def test_discarding_an_unknown_jti_does_not_rewrite(tmp_path: Path) -> None:
     ActiveTokens(bench).discard("never-existed")
 
     assert path.stat().st_mtime_ns == before
+
+
+def test_bootstrap_tells_the_ui_central_is_off_by_default(tmp_path: Path) -> None:
+    """The dashboard hides its Central surfaces on a self-hosted bench, so it has
+    to be told which one this is."""
+    client = _signed_in_client(tmp_path)
+
+    assert client.get("/api/v1/bootstrap").get_json()["central"] is False
+
+
+def test_bootstrap_reports_central_when_it_is_managed(tmp_path: Path) -> None:
+    from pilot.config.common import CommonConfig
+
+    client = _signed_in_client(tmp_path)
+    with CommonConfig.open(tmp_path / "benches") as common:
+        # Enabled but not bootstrapped is the pending screen, which says nothing else.
+        common.central.enabled = True
+        common.central.bootstrapped = True
+
+    assert client.get("/api/v1/bootstrap").get_json()["central"] is True

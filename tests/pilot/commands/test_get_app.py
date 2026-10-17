@@ -41,13 +41,37 @@ def test_full_flow_runs_when_app_not_registered(tmp_path: Path) -> None:
         patch.object(App, "validate") as mock_validate,
         patch.object(App, "_install_into_environment") as mock_install,
         patch.object(App, "_build_assets_via_env_manager") as mock_build,
+        patch.object(type(bench), "reload_workers") as mock_reload,
     ):
         cmd.run()
 
+    # Production workers must restart to import the new app.
+    mock_reload.assert_called_once()
     mock_clone.assert_called_once()
     mock_validate.assert_called_once()
     mock_install.assert_called_once()
     mock_build.assert_called_once()
+
+
+def test_skip_assets_does_not_build_app_assets(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp", skip_assets=True)
+
+    with (
+        patch.object(
+            App,
+            "clone",
+            autospec=True,
+            side_effect=lambda app, on_progress=None: app.path.mkdir(parents=True, exist_ok=True),
+        ),
+        patch.object(App, "validate"),
+        patch.object(App, "_install_into_environment"),
+        patch.object(App, "_build_assets_via_env_manager") as mock_build,
+    ):
+        cmd.run()
+
+    mock_build.assert_not_called()
 
 
 def test_run_short_circuits_when_app_already_registered(tmp_path: Path) -> None:
@@ -62,9 +86,11 @@ def test_run_short_circuits_when_app_already_registered(tmp_path: Path) -> None:
         patch.object(App, "validate") as mock_validate,
         patch.object(App, "_install_into_environment") as mock_install,
         patch.object(App, "_build_assets_via_env_manager") as mock_build,
+        patch.object(type(bench), "reload_workers") as mock_reload,
     ):
         cmd.run()
 
+    mock_reload.assert_not_called()
     mock_clone.assert_not_called()
     mock_validate.assert_not_called()
     mock_install.assert_not_called()
@@ -134,14 +160,20 @@ def test_still_installs_missing_dependency_when_parent_already_installed(tmp_pat
         patch.object(App, "checkout_commit"),
         patch.object(App, "validate"),
         patch.object(App, "_install_into_environment"),
-        patch.object(App, "_build_assets_via_env_manager"),
+        patch.object(App, "_build_assets_via_env_manager") as mock_build,
     ):
-        cmd = GetAppCommand(bench, repo="https://github.com/frappe/helpdesk", install_dependencies=True)
+        cmd = GetAppCommand(
+            bench,
+            repo="https://github.com/frappe/helpdesk",
+            install_dependencies=True,
+            skip_assets=True,
+        )
         cmd.run()
 
     # helpdesk itself short-circuits (already installed); telephony is the
     # only app that needed an actual clone.
     mock_clone.assert_called_once()
+    mock_build.assert_not_called()
     assert [app.config.name for app in cmd.installed_dependencies] == ["telephony"]
 
 
@@ -175,3 +207,36 @@ def test_bench_is_app_installed_reflects_apps_txt_contents(tmp_path: Path) -> No
 
     (bench.sites_path / "apps.txt").write_text("frappe\nerpnext\n")
     assert bench.is_app_installed("erpnext") is True
+
+
+def test_commit_is_checked_out_on_the_branch(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.create_directories()
+    commit = "b" * 40
+    cmd = GetAppCommand(bench, repo="https://github.com/frappe/myapp", branch="version-16", commit=commit)
+
+    with (
+        patch.object(
+            App,
+            "clone",
+            autospec=True,
+            side_effect=lambda app, on_progress=None: app.path.mkdir(parents=True, exist_ok=True),
+        ),
+        patch.object(App, "checkout_commit") as checkout_commit,
+        patch.object(App, "validate"),
+        patch.object(App, "_install_into_environment"),
+        patch.object(App, "_build_assets_via_env_manager"),
+    ):
+        cmd.run()
+
+    assert cmd.app.config.branch == "version-16"
+    checkout_commit.assert_called_once_with(commit)
+
+
+def test_without_a_branch_the_repository_default_is_used(tmp_path: Path) -> None:
+    # Many Frappe apps default to develop and have no main branch.
+    bench = make_bench(tmp_path)
+
+    cmd = GetAppCommand(bench, repo="https://github.com/frappe/telephony")
+
+    assert cmd.app.config.branch == ""

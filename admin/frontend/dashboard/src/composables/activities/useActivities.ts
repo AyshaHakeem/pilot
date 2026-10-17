@@ -2,23 +2,14 @@ import { ref } from 'vue'
 
 import { auditApi } from '@/api/audit'
 import type { AuditEntry } from '@/types/audit'
+import type { AuditPage } from '@/types/settings'
+import { errorMessage } from '@/utils/error'
 
 interface ActivityFilters {
   type?: string
   site?: string
   status?: string
 }
-
-interface AuditPage {
-  data: AuditEntry[]
-  meta: { limit: number; next_cursor: string | null }
-}
-
-const activities = ref<AuditEntry[]>([])
-const loading = ref(false)
-const loadingMore = ref(false)
-const error = ref('')
-const cursor = ref<string | null>(null)
 
 const auditParams = (filters: ActivityFilters, forCursor?: string | null) => {
   const params: Record<string, string> = {}
@@ -30,6 +21,12 @@ const auditParams = (filters: ActivityFilters, forCursor?: string | null) => {
 }
 
 export const useActivities = () => {
+  const activities = ref<AuditEntry[]>([])
+  const loading = ref(false)
+  const loadingMore = ref(false)
+  const error = ref('')
+  const cursor = ref<string | null>(null)
+
   const load = async (filters: ActivityFilters = {}) => {
     loading.value = true
     error.value = ''
@@ -38,8 +35,8 @@ export const useActivities = () => {
       const page: AuditPage = await auditApi.list(auditParams(filters))
       activities.value = page.data
       cursor.value = page.meta.next_cursor
-    } catch (caught: any) {
-      error.value = caught.message || 'Failed to load activity'
+    } catch (caught) {
+      error.value = errorMessage(caught, 'Failed to load activity')
       activities.value = []
     } finally {
       loading.value = false
@@ -53,8 +50,8 @@ export const useActivities = () => {
       const page: AuditPage = await auditApi.list(auditParams(filters, cursor.value))
       activities.value = [...activities.value, ...page.data]
       cursor.value = page.meta.next_cursor
-    } catch (caught: any) {
-      error.value = caught.message || 'Failed to load more activity'
+    } catch (caught) {
+      error.value = errorMessage(caught, 'Failed to load more activity')
     } finally {
       loadingMore.value = false
     }

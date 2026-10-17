@@ -1,18 +1,20 @@
 <script setup lang="ts">
+import { Badge, Button, ErrorMessage, Select, TabButtons, Tooltip } from 'frappe-ui'
+import type { SelectOptionValue } from 'frappe-ui'
 import { computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Button, Dropdown, ErrorMessage, TabButtons } from 'frappe-ui'
 
 import EmptyState from '@/components/common/EmptyState.vue'
-import ListRowSkeleton from '@/components/common/ListRowSkeleton.vue'
-import StatusListView from '@/components/common/StatusListView.vue'
+import ListSkeleton from '@/components/common/ListSkeleton.vue'
 import StickyToolbar from '@/components/common/StickyToolbar.vue'
+import Table from '@/components/common/Table.vue'
 
 import { useIsMobile } from '@/composables/common/useIsMobile'
 import { useTasks } from '@/composables/tasks/useTasks'
 
 import {
   commandLabel,
+  fmtDateTime,
   siteLabel,
   statusConfig,
   TASK_TYPES,
@@ -52,17 +54,14 @@ const visibleTasks = computed(() =>
   ),
 )
 
-// Numeric widths are fr units (ListView convention) so the columns stretch to
-// fill the row instead of leaving dead space.
 const columns = [
-  { label: 'Task', key: 'title', align: 'left', width: 2 },
-  { label: 'Site', key: 'site', align: 'left', width: 2 },
-  { label: 'Status', key: 'badge', align: 'left', width: 1.5 },
-  { label: 'Duration', key: 'duration', align: 'left', width: 1 },
-  { label: 'Last run', key: 'timing', align: 'right', width: 2 },
+  { label: 'Task', key: 'title', class: 'w-1/3' },
+  { label: 'Site', key: 'site' },
+  { label: 'Status', key: 'badge' },
+  { label: 'Duration', key: 'duration' },
+  { label: 'Last run', key: 'timing' },
 ]
 
-// ListRowItem reads row[column.key], so each task is flattened to what renders.
 const rows = computed(() =>
   visibleTasks.value.map((task) => ({
     id: task.task_id,
@@ -71,47 +70,45 @@ const rows = computed(() =>
     badge: statusConfig(task),
     duration: taskDuration(task),
     timing: taskLastRun(task),
+    timingAt: fmtDateTime(task.started_at || task.queued_at),
   })),
 )
 
-const getRowRoute = (row) => taskDetailRoute(row.id)
+const getRowRoute = (row: { id: string }) => taskDetailRoute(row.id)
 
 // "Other" is a fallback for unknown commands; listed only once one exists.
-const typeMenu = computed(() => {
+const typeOptions = computed(() => {
   const present = new Set(tasks.value.map(taskType))
   return [
-    { label: 'All types', value: '' },
+    { label: 'All types', value: '', icon: 'lucide-shapes' },
     ...TASK_TYPES.filter(
       ({ value }) => value !== 'other' || present.has('other') || typeFilter.value === 'other',
     ),
-  ].map(({ value, label }) => ({ label, onClick: () => onTypeChange(value) }))
+  ]
 })
 
 // Built from the loaded tasks; a site arriving via the URL is kept even
 // when nothing matches, so the trigger still names what is filtering.
-const siteMenu = computed(() => {
+const siteOptions = computed(() => {
   const sites = new Set(tasks.value.map(siteLabel))
   if (siteFilter.value) sites.add(siteFilter.value)
   return [
     { label: 'All sites', value: '' },
     ...[...sites].sort().map((site) => ({ label: site, value: site })),
-  ].map(({ value, label }) => ({ label, onClick: () => onSiteChange(value) }))
+  ]
 })
 
-const typeLabel = computed(
-  () => TASK_TYPES.find(({ value }) => value === typeFilter.value)?.label || 'All types',
-)
-const siteLabelText = computed(() => siteFilter.value || 'All sites')
-
 // Patch, not replace: changing one filter must not clear the other.
-const setFilterQuery = (patch) => {
+const setFilterQuery = (patch: Record<string, string>) => {
   const query = { ...route.query, ...patch }
   for (const key of Object.keys(query)) if (!query[key]) delete query[key]
   router.replace({ name: 'Tasks', query })
 }
 
-const onSiteChange = (site) => setFilterQuery({ site })
-const onTypeChange = (type) => setFilterQuery({ type })
+const onSiteChange = (site: SelectOptionValue | null | undefined) =>
+  setFilterQuery({ site: String(site ?? '') })
+const onTypeChange = (type: SelectOptionValue | null | undefined) =>
+  setFilterQuery({ type: String(type ?? '') })
 
 // An empty list means something different when a filter is on - saying "no tasks
 // yet" there would be a lie.
@@ -119,87 +116,77 @@ const isFiltered = computed(
   () => statusFilter.value !== 'all' || Boolean(siteFilter.value) || Boolean(typeFilter.value),
 )
 
-const onFilterChange = (value) => {
-  setFilterQuery({ status: value === 'all' ? '' : value })
-  load(value)
+const onFilterChange = (value: string | number) => {
+  setFilterQuery({ status: value === 'all' ? '' : String(value) })
+  load(String(value))
 }
 
 onMounted(() => load(statusFilter.value))
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
-    <StickyToolbar class="flex sm:flex-row flex-col sm:items-center gap-2">
+  <div class="px-3 md:px-4">
+    <StickyToolbar class="flex flex-wrap gap-2">
       <TabButtons
-        class="shrink-0"
+        class="w-full sm:w-auto"
         :size="isMobile ? 'md' : 'sm'"
         :options="filterOptions"
         :modelValue="statusFilter"
         @update:modelValue="onFilterChange"
       />
-      <div class="flex flex-1 items-center gap-2 min-w-0">
-        <Dropdown :options="typeMenu">
-          <template #default="{ open }">
-            <Button
-              variant="subtle"
-              :size="isMobile ? 'md' : 'sm'"
-              :active="open"
-              class="[&>.truncate]:text-left text-base"
-            >
-              <template #suffix><span class="size-4 shrink-0 lucide-chevron-down" /></template>
-              {{ typeLabel }}
-            </Button>
-          </template>
-        </Dropdown>
 
-        <div class="flex-1 sm:flex-none min-w-0">
-          <Dropdown :options="siteMenu">
-            <template #default="{ open }">
-              <Button
-                variant="subtle"
-                :size="isMobile ? 'md' : 'sm'"
-                :active="open"
-                class="[&>.truncate]:flex-1 [&>.truncate]:text-left text-base w-full sm:w-auto min-w-0"
-              >
-                <template #suffix><span class="size-4 shrink-0 lucide-chevron-down" /></template>
-                {{ siteLabelText }}
-              </Button>
-            </template>
-          </Dropdown>
-        </div>
+      <Select
+        :model-value="typeFilter"
+        :options="typeOptions"
+        :size="isMobile ? 'md' : 'sm'"
+        side="bottom"
+        align="start"
+        @update:model-value="onTypeChange"
+      />
 
-        <Button
-          class="ml-auto sm:ml-auto"
-          variant="subtle"
-          :size="isMobile ? 'md' : 'sm'"
-          icon="lucide-refresh-cw"
-          label="Refresh"
-          tooltip="Refresh"
-          :loading="loading"
-          @click="load(statusFilter)"
-        />
-      </div>
+      <Select
+        :model-value="siteFilter"
+        :options="siteOptions"
+        :size="isMobile ? 'md' : 'sm'"
+        side="bottom"
+        align="start"
+        class="flex-1 sm:flex-none min-w-0"
+        @update:model-value="onSiteChange"
+      />
+
+      <Button
+        class="ml-auto"
+        :size="isMobile ? 'md' : 'sm'"
+        icon="lucide-refresh-cw"
+        label="Refresh"
+        tooltip="Refresh"
+        :loading="loading"
+        @click="load(statusFilter)"
+      />
     </StickyToolbar>
 
-    <div v-if="loading" class="-mx-3 mt-4">
-      <ListRowSkeleton v-for="index in 6" :key="index" :index="index - 1" />
-    </div>
+    <ListSkeleton v-if="loading" />
 
-    <div v-else-if="error" class="mt-4">
+    <template v-else-if="error">
       <ErrorMessage :message="error" />
-    </div>
+    </template>
 
-    <StatusListView
-      v-else-if="rows.length"
-      class="mt-4"
-      :columns="columns"
-      :rows="rows"
-      :get-row-route="getRowRoute"
-    />
+    <Table v-else-if="rows.length" :columns="columns" :rows="rows">
+      <template #title="{ row }">
+        <router-link :to="getRowRoute(row)">{{ row.title }}</router-link>
+      </template>
+
+      <template #timing="{ row }">
+        <Tooltip :text="row.timingAt"><span>{{ row.timing }}</span></Tooltip>
+      </template>
+
+      <template #badge="{ row }">
+        <Badge v-if="row.badge" :label="row.badge.label" :theme="row.badge.theme" />
+      </template>
+    </Table>
 
     <EmptyState
       v-else
-      class="mt-8"
       icon="lucide-list-checks"
       :title="isFiltered ? 'No matching tasks' : 'No tasks yet'"
       :description="

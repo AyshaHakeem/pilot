@@ -1,13 +1,18 @@
-"""BenchInitializer._provision_or_verify: existing database handling."""
+"""`pilot init`: existing database handling, the --no-dev opt-out, and --commit."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from pilot.commands.bench.initialize import InitCommand
+from pilot.config import BenchConfig
+from pilot.core.bench import Bench
 from pilot.core.bench.initializer import BenchInitializer
 from pilot.exceptions import BenchError
+from tests.pilot.commands.test_commands import make_bench
 
 
 def _initializer() -> BenchInitializer:
@@ -92,3 +97,76 @@ def test_ensure_database_credentials_skips_sqlite() -> None:
     BenchInitializer(bench)._ensure_database_credentials()
 
     bench.config.write.assert_not_called()
+
+
+def test_no_dev_persists_the_opt_out_before_initialising(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.config.write(tmp_path)
+
+    with patch.object(Bench, "initialize") as initialize:
+        InitCommand(bench=bench, no_dev=True).run()
+
+    initialize.assert_called_once()
+    assert BenchConfig.read(tmp_path).install_dev_extra is False
+
+
+def test_init_keeps_the_dev_extra_by_default(tmp_path: Path) -> None:
+    bench = make_bench(tmp_path)
+    bench.config.write(tmp_path)
+
+    with patch.object(Bench, "initialize"):
+        InitCommand(bench=bench).run()
+
+    assert BenchConfig.read(tmp_path).install_dev_extra is True
+
+
+def test_commit_pins_the_framework_app_on_its_branch(tmp_path: Path) -> None:
+    from pilot.core.app import App
+
+    bench = make_bench(tmp_path)
+    commit = "4515014c87ece6cb20ee91d2cfb121c5cbd1ff4a"
+
+    with (
+        patch.object(App, "clone") as clone,
+        patch.object(App, "checkout_commit") as checkout_commit,
+        patch.object(Bench, "write_apps_txt"),
+    ):
+        BenchInitializer(bench, commit)._install_framework_apps(MagicMock(), lambda message: None)
+
+    clone.assert_called_once_with()
+    checkout_commit.assert_called_once_with(commit)
+    assert bench.config.framework_app.branch == "version-16"
+
+
+def test_new_bench_enables_server_scripts_unless_set_by_hand(tmp_path) -> None:
+    import json
+
+    bench = make_bench(tmp_path)
+    bench.sites_path.mkdir(parents=True)
+    config_path = bench.sites_path / "common_site_config.json"
+
+    BenchInitializer(bench)._create_bench_structure()
+    assert json.loads(config_path.read_text())["server_script_enabled"] is True
+
+    config_path.write_text(json.dumps({"server_script_enabled": False}))
+    BenchInitializer(bench)._create_bench_structure()
+    assert json.loads(config_path.read_text())["server_script_enabled"] is False
+
+
+def test_a_failed_init_keeps_the_task_records(tmp_path: Path) -> None:
+    """The wizard runs init as a task; deleting `tasks/` cut its event stream ("Lost connection")."""
+    bench = make_bench(tmp_path)
+    record = bench.path / "tasks" / "20261015-000000-abcdef" / "meta.json"
+    record.parent.mkdir(parents=True)
+    record.write_text("{}")
+    initializer = BenchInitializer(bench)
+
+    def create_structure_then_fail(on_progress) -> None:
+        initializer._create_bench_structure()
+        raise BenchError("clone failed")
+
+    with patch.object(initializer, "_run_steps", create_structure_then_fail), pytest.raises(BenchError):
+        initializer.run()
+
+    assert record.exists()
+    assert not bench.apps_path.exists()

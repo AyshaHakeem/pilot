@@ -1,24 +1,42 @@
-/* The embed's whole stylesheet, adopted into the shadow root.
- * Not frappe-ui/style.css: that is these same directives plus an Inter @font-face
- * that adopted sheets ignore and Desk already serves. */
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/* The dialog's overlay is `position: fixed` with no z-index of its own, so it
- * stacks against Desk's chrome and loses. Desk chrome tops out at z-index 2000
- * (toasts); navbar is 1030, menus 1060, tooltips 1070. Put the whole embed in
- * one stacking context just above that ceiling so the fixed overlay dims all of
- * it. `relative` sets the context without becoming a containing block, so the
- * overlay still covers the viewport. */
 :host {
   position: relative;
-  z-index: 2100;
+  z-index: 1999;
+  font-family: InterVar, InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--ink-gray-8);
 }
 
-/* Frappe UI's conic-gradient spinner repaints the shadow host every frame in
- * Safari, which makes the dialog flash. App actions use the local transform
- * spinner instead; other busy controls retain a stable disabled indicator. */
-.fui-spinner {
-  animation: none !important;
+.cloud-settings-root { color-scheme: light; }
+.cloud-settings-root[data-theme="dark"] { color-scheme: dark; }
+
+/* Keep wide tables inside their own scroll region. */
+.cloud-settings-root [data-slot="scroll-area-viewport"] > div {
+  display: block !important;
+}
+
+@media (max-width: 639px) {
+  .dialog-scroll-container:has(.cloud-settings-sidebar) > [data-position] {
+    padding: 0;
+    min-height: 100dvh;
+  }
+
+  [role="dialog"]:has(.cloud-settings-sidebar) {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    border-radius: 0;
+    /* Keep content clear of the notch and home indicator in a full-screen app. */
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+      env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+  }
+
+  .cloud-settings-close {
+    top: calc(0.5rem + env(safe-area-inset-top, 0px));
+    right: calc(0.5rem + env(safe-area-inset-right, 0px));
+  }
 }

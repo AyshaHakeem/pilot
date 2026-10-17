@@ -35,7 +35,7 @@ class SiteStorageReport:
 
 class SiteStorageCollector:
     """Every site's files and database size, kept in one file so the Admin API
-    answers without walking the disk. The site-storage timer refreshes it;
+    answers without walking the disk. The pilot-storage timer refreshes it;
     reach it as `bench.site_storage`."""
 
     def __init__(self, bench: "Bench") -> None:
@@ -102,10 +102,14 @@ def collect_all_benches() -> None:
     """One timer pass over every bench on the host. A stopped database on one
     must not cost the others their refresh."""
     from pilot.core.bench import Bench
+    from pilot.core.bench.uploads import BackupUpload
 
     sentinel = cli_root() / "benches" / ".site-storage-placeholder"
     for bench_path, bench_config in iter_sibling_benches(sentinel):
+        bench = Bench(bench_config, bench_path)
         try:
-            SiteStorageCollector(Bench(bench_config, bench_path)).collect()
+            # Otherwise only a new upload removes abandoned ones.
+            BackupUpload.remove_stale(bench)
+            SiteStorageCollector(bench).collect()
         except Exception as error:
             print(f"{bench_config.name}: could not collect site storage: {error}", file=sys.stderr)

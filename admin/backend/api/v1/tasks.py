@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
 
 from flask import (
@@ -18,6 +19,7 @@ from admin.backend.api.responses import (
     error_response,
     no_content_response,
 )
+from admin.backend.draining import is_draining
 from pilot.exceptions import (
     TaskConflictError,
     TaskNotCancellableError,
@@ -52,8 +54,19 @@ def list_tasks():
                 f"Unknown task status: {status_filter!r}.",
                 422,
             )
+    limit_arg = request.args.get("limit", "50")
     try:
-        tasks = reader.list_tasks()
+        limit = int(limit_arg)
+    except ValueError:
+        limit = 0
+    if limit < 1:
+        return error_response(
+            "invalid_task_limit",
+            f"The limit parameter must be a positive integer, got {limit_arg!r}.",
+            422,
+        )
+    try:
+        tasks = reader.list_tasks(limit=limit)
     except Exception:
         return error_response("task_list_unavailable", "Could not read tasks.", 500)
     if wanted_status is not None:
@@ -161,21 +174,26 @@ def task_events(task_id: str):
     except ValueError:
         skip = 0
 
-    def generate():
-        event_id = 0
-        for event in reader.stream_output(task_id):
-            if event["type"] == "status":
-                yield sse_message(event)
-                continue
-            event_id += 1
-            if event_id > skip:
-                yield sse_message(event, event_id)
-
     return Response(
-        stream_with_context(generate()),
+        stream_with_context(_task_event_messages(reader, task_id, skip)),
         mimetype="text/event-stream",
         headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
     )
+
+
+def _task_event_messages(reader: TaskReader, task_id: str, skip: int) -> Iterator[str]:
+    """SSE messages, without the output events the client already has."""
+    event_id = 0
+    for event in reader.stream_output(task_id, should_stop=is_draining):
+        if event is None:
+            yield ": heartbeat\n\n"
+            continue
+        if event["type"] == "status":
+            yield sse_message(event)
+            continue
+        event_id += 1
+        if event_id > skip:
+            yield sse_message(event, event_id)
 
 
 @tasks_bp.get("/<task_id>/output/content")

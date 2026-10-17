@@ -4,8 +4,10 @@ import { Button, Dialog, ErrorMessage, TextInput } from 'frappe-ui'
 
 import Table from '@/components/common/Table.vue'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { sitesApi } from '@/api/sites'
+import type { DnsRecord, DnsRecords } from '@/types/siteDomains'
+import { errorMessage } from '@/utils/error'
 
 const DNS_RECORD_COLUMNS = [
   { key: 'type', label: 'Type' },
@@ -13,29 +15,41 @@ const DNS_RECORD_COLUMNS = [
   { key: 'value', label: 'Points to' },
 ]
 
-const props = defineProps({ siteName: { type: String, required: true } })
+interface Props {
+  siteName: string
+  emailRequired?: boolean
+}
+
+interface DnsRecordGroup {
+  type: string
+  records: DnsRecord[]
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits(['added'])
 
 const show = defineModel({ default: false })
 
 const step = ref('input')
 const domain = ref('')
+const email = ref('')
 const error = ref('')
 const continuing = ref(false)
 const adding = ref(false)
-const dnsRecordGroups = ref([])
+const dnsRecordGroups = ref<DnsRecordGroup[]>([])
 
 // Reset to a blank first step each time the dialog opens.
 watch(show, (open) => {
   if (!open) return
   step.value = 'input'
   domain.value = ''
+  email.value = ''
   error.value = ''
   dnsRecordGroups.value = []
 })
 
-const toRecordGroups = (records) => {
-  const groups = []
+const toRecordGroups = (records: DnsRecords): DnsRecordGroup[] => {
+  const groups: DnsRecordGroup[] = []
   if (records?.cname?.length) groups.push({ type: 'CNAME', records: records.cname })
   if (records?.a?.length) groups.push({ type: 'A', records: records.a })
   return groups
@@ -48,14 +62,14 @@ const continueAdd = async () => {
   continuing.value = true
   try {
     const data = await sitesApi.domains.dnsRecords(props.siteName, value)
-    if (data.error) {
+    if (hasApiError(data)) {
       error.value = apiErrorMessage(data, 'Could not generate DNS records.')
       return
     }
     dnsRecordGroups.value = toRecordGroups(data)
     step.value = 'records'
   } catch (e) {
-    error.value = e.message || 'Failed to validate domain.'
+    error.value = errorMessage(e, 'Failed to validate domain.')
   } finally {
     continuing.value = false
   }
@@ -65,7 +79,7 @@ const confirmAdd = async () => {
   error.value = ''
   adding.value = true
   try {
-    const data = await sitesApi.domains.add(props.siteName, domain.value.trim())
+    const data = await sitesApi.domains.add(props.siteName, domain.value.trim(), email.value.trim())
     if (!data.task_id) {
       error.value = apiErrorMessage(data, 'Failed to add domain.')
       return
@@ -73,7 +87,7 @@ const confirmAdd = async () => {
     show.value = false
     emit('added')
   } catch (e) {
-    error.value = e.message || 'Failed to add domain.'
+    error.value = errorMessage(e, 'Failed to add domain.')
   } finally {
     adding.value = false
   }
@@ -81,11 +95,11 @@ const confirmAdd = async () => {
 </script>
 
 <template>
-  <Dialog v-model="show" title="Use your own domain" size="lg">
+  <Dialog v-model="show" title="Use your own domain" size="2xl">
     <template v-if="step === 'input'">
-      <p class="text-ink-gray-7 text-sm">
-        To add a custom domain, you must already own it. If you don't have one, buy it and come
-        back here.
+      <p class="text-ink-gray-7 text-p-sm">
+        To add a custom domain, you must already own it. If you don't have one, buy it and come back
+        here.
       </p>
 
       <TextInput
@@ -99,13 +113,29 @@ const confirmAdd = async () => {
         </template>
       </TextInput>
 
+      <TextInput
+        v-if="emailRequired"
+        v-model="email"
+        type="email"
+        placeholder="you@example.com"
+        class="mt-4 w-full"
+        @keydown.enter="continueAdd"
+      >
+        <template #label>
+          <span class="text-sm">Let's Encrypt email</span>
+        </template>
+      </TextInput>
+      <p v-if="emailRequired" class="mt-1.5 text-ink-gray-5 text-p-xs">
+        Required to issue and renew the domain's certificate.
+      </p>
+
       <ErrorMessage v-if="error" :message="error" class="mt-2" />
       <div class="flex justify-end gap-2 mt-4">
-        <Button variant="subtle" @click="show = false">Cancel</Button>
+        <Button @click="show = false">Cancel</Button>
         <Button
           variant="solid"
           :loading="continuing"
-          :disabled="!domain.trim()"
+          :disabled="!domain.trim() || (emailRequired && !email.trim())"
           @click="continueAdd"
         >
           Continue
@@ -115,10 +145,10 @@ const confirmAdd = async () => {
 
     <template v-else>
       <template v-if="dnsRecordGroups.length">
-        <p class="text-ink-gray-7 text-sm">
+        <p class="text-ink-gray-7 text-p-sm">
           <template v-if="dnsRecordGroups.length > 1">
-            Add <span class="font-medium text-ink-gray-8">either one</span> of these records at
-            your domain provider.
+            Add <span class="font-medium text-ink-gray-8">either one</span> of these records at your
+            domain provider.
           </template>
 
           <template v-else>Add this record at your domain provider.</template>
@@ -137,7 +167,7 @@ const confirmAdd = async () => {
           />
         </div>
 
-        <p class="mt-3 text-ink-gray-5 text-xs">
+        <p class="mt-3 text-ink-gray-5 text-p-xs">
           DNS changes can take a few minutes to propagate.
         </p>
       </template>
@@ -147,12 +177,12 @@ const confirmAdd = async () => {
           <span class="size-6 text-ink-green-2 lucide-check" />
         </div>
 
-        <p class="font-medium text-ink-gray-8 text-base">No DNS records needed</p>
+        <p class="font-medium text-ink-gray-8">No DNS records needed</p>
       </div>
 
       <ErrorMessage v-if="error" :message="error" class="mt-2" />
       <div class="flex justify-end gap-2 mt-4">
-        <Button variant="subtle" @click="show = false">Cancel</Button>
+        <Button @click="show = false">Cancel</Button>
         <Button variant="solid" :loading="adding" @click="confirmAdd">
           {{ dnsRecordGroups.length ? 'Verify DNS' : 'Register' }}
         </Button>

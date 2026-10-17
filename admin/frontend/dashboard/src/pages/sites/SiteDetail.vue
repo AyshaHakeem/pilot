@@ -1,28 +1,40 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Badge, Button, Dropdown, ErrorMessage, Skeleton, TabButtons, toast } from 'frappe-ui'
+import {
+  Badge,
+  type BadgeProps,
+  Button,
+  Dropdown,
+  ErrorMessage,
+  Skeleton,
+  TabButtons,
+  toast,
+} from 'frappe-ui'
 
+import PageHero from '@/components/common/PageHero.vue'
+import StickyToolbar from '@/components/common/StickyToolbar.vue'
 import SiteApps from '@/components/sites/Apps.vue'
 import SiteBackups from '@/components/sites/Backups.vue'
 import SiteConfig from '@/components/sites/Config.vue'
 import SiteSettings from '@/components/sites/Settings.vue'
-import PageHero from '@/components/common/PageHero.vue'
 import Activities from '@/pages/Activities.vue'
-import StickyToolbar from '@/components/common/StickyToolbar.vue'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
+import { tasksApi } from '@/api/tasks'
+import { useAppRegistry } from '@/composables/apps/useAppRegistry'
 import { useBreadcrumbs } from '@/composables/common/useBreadcrumbs'
+import { useIsMobile } from '@/composables/common/useIsMobile'
 import { useSite } from '@/composables/sites/useSite'
 import { useSiteStorage } from '@/composables/sites/useSiteStorage'
-import { useAppRegistry } from '@/composables/apps/useAppRegistry'
-import { useIsMobile } from '@/composables/common/useIsMobile'
-import { openTaskDetailPage } from '@/utils/taskRoute'
+import { errorMessage } from '@/utils/error'
 import { toSentenceCase } from '@/utils/format'
+import { siteLabel } from '@/utils/taskFormat'
+import { openTaskDetailPage } from '@/utils/taskRoute'
 
 const route = useRoute()
 const router = useRouter()
-const siteName = route.params.name
+const siteName = Array.isArray(route.params.name) ? route.params.name[0] : route.params.name
 
 const { setBreadcrumbs } = useBreadcrumbs()
 const { site, loading, error, status, load, reload, login, backup, apps, loadApps } =
@@ -33,8 +45,14 @@ const storageUsed = computed(() => storageLabel(siteName))
 
 setBreadcrumbs([{ label: 'Sites', route: { name: 'Sites' } }, { label: siteName }])
 
-const STATUS_THEMES = { online: 'gray', broken: 'red', offline: 'orange', provisioning: 'blue' }
-const STATUS_LABELS = {
+const STATUS_THEMES: Record<string, BadgeProps['theme']> = {
+  online: 'green',
+  broken: 'red',
+  offline: 'amber',
+  provisioning: 'blue',
+}
+
+const STATUS_LABELS: Record<string, string> = {
   online: 'Active',
   broken: 'Broken',
   offline: 'Paused',
@@ -53,7 +71,8 @@ const tabs = [
 ]
 
 const VALID_TABS = tabs.map((t) => t.value)
-const activeTab = ref(VALID_TABS.includes(route.params.tab) ? route.params.tab : 'apps')
+const tabParam = Array.isArray(route.params.tab) ? route.params.tab[0] : route.params.tab
+const activeTab = ref(VALID_TABS.includes(tabParam) ? tabParam : 'apps')
 
 watch(activeTab, (tab) => {
   router.replace({ name: 'SiteDetail', params: { name: siteName, tab } })
@@ -62,7 +81,8 @@ watch(activeTab, (tab) => {
 watch(
   () => route.params.tab,
   (tab) => {
-    if (tab && VALID_TABS.includes(tab) && tab !== activeTab.value) activeTab.value = tab
+    const value = Array.isArray(tab) ? tab[0] : tab
+    if (value && VALID_TABS.includes(value) && value !== activeTab.value) activeTab.value = value
   },
 )
 
@@ -71,12 +91,15 @@ watchEffect(() => {
   if (site.value) document.title = `${site.value.name} | ${tabLabel.value}`
 })
 
-const APP_ACTIONS = { 'install-app': 'installed', 'uninstall-app': 'uninstalled' }
+const APP_ACTIONS: Record<string, string> = {
+  'install-app': 'installed',
+  'uninstall-app': 'uninstalled',
+}
 const appRegistry = useAppRegistry()
 const appAction = computed(() => {
   const app = route.query.app
   const action = route.query.action
-  if (typeof app !== 'string' || !(action in APP_ACTIONS)) return null
+  if (typeof app !== 'string' || typeof action !== 'string' || !(action in APP_ACTIONS)) return null
   return { app, action }
 })
 watch(
@@ -96,6 +119,7 @@ watch(
 const isMobile = useIsMobile()
 
 const openSite = () => {
+  if (!site.value) return
   window.open(`${site.value.url}/desk`, '_blank')
 }
 
@@ -105,7 +129,7 @@ const setupSite = async () => {
   try {
     await login()
   } catch (caught) {
-    toast.error(caught.message || 'Could not open the setup wizard')
+    toast.error(errorMessage(caught, 'Could not open the setup wizard'))
   } finally {
     settingUpSite.value = false
   }
@@ -119,21 +143,37 @@ const goToAnalytics = () => {
   router.push({ name: 'Analytics', query: { view: 'site', window: '24h', site: siteName } })
 }
 
+const viewJobs = () => router.push({ name: 'Tasks', query: { site: siteName } })
+
+const viewCreateJob = async () => {
+  try {
+    const tasks = await tasksApi.list()
+    const job = tasks.find(
+      (task) => ['queued', 'running'].includes(task.status) && siteLabel(task) === siteName,
+    )
+
+    if (job) openTaskDetailPage(router, job.task_id)
+    else viewJobs()
+  } catch (caught) {
+    toast.error(errorMessage(caught, 'Could not load the site job'))
+  }
+}
+
 const loginAsAdmin = () => {
   toast.promise(login({ onHint: (hint) => toast.info(hint) }), {
     loading: 'Logging in as admin',
     success: 'Logged in as admin',
-    error: (caught) => caught?.message || 'Could not log in as admin',
+    error: (caught: unknown) => errorMessage(caught, 'Could not log in as admin'),
   })
 }
 
 const backupNow = async () => {
   try {
     const result = await backup()
-    if (result.ok) openTaskDetailPage(router, result.task_id)
-    else toast.error(apiErrorMessage(result, 'Could not start backup'))
+    if (hasApiError(result)) toast.error(apiErrorMessage(result, 'Could not start backup'))
+    else openTaskDetailPage(router, result.task_id)
   } catch (caught) {
-    toast.error(caught.message || 'Could not start backup')
+    toast.error(errorMessage(caught, 'Could not start backup'))
   }
 }
 
@@ -146,21 +186,18 @@ const menuOptions = computed(() => [
     : []),
   { label: 'Login as admin', icon: 'lucide-log-in', onClick: loginAsAdmin },
   { label: 'Back up now', icon: 'lucide-archive', onClick: backupNow },
-  {
-    label: 'View jobs',
-    icon: 'lucide-list-checks',
-    onClick: () => router.push({ name: 'Tasks', query: { site: site.value.name } }),
-  },
+  { label: 'View jobs', icon: 'lucide-list-checks', onClick: viewJobs },
 ])
 
 // Provisioning and a pending setup wizard both resolve without us: poll quietly
 // until they do, so the badge and the header button settle on their own.
 const POLL_INTERVAL_MS = 5000
 const isSettling = computed(
-  () => status.value === 'provisioning' || (status.value === 'online' && !site.value.setup_complete),
+  () =>
+    status.value === 'provisioning' || (status.value === 'online' && !site.value?.setup_complete),
 )
 
-let poll = null
+let poll: ReturnType<typeof setInterval> | null = null
 watch(
   isSettling,
   (settling) => {
@@ -207,41 +244,38 @@ onMounted(() => {
       </template>
     </PageHero>
 
-    <div class="mx-auto w-full max-w-3xl">
+    <div class="px-3 md:px-4 pb-3 md:pb-4 mx-auto w-full max-w-3xl">
       <StickyToolbar>
         <Skeleton class="rounded-4 w-64 h-7 sm:h-8" />
       </StickyToolbar>
     </div>
   </template>
 
-  <div v-else-if="error" class="py-12">
-    <ErrorMessage :message="error" />
-  </div>
+  <ErrorMessage v-else-if="error" class="px-3 md:px-4 py-12" :message="error" />
 
   <template v-else-if="site">
     <PageHero icon="lucide-globe">
       <template #title>
-        <h1 class="font-medium text-ink-gray-9 text-lg truncate">
-          {{ site.name }}
+        <h1 class="text-lg-medium truncate">
+          {{ site.primary_domain }}
         </h1>
 
-        <Badge
-          :label="statusLabel"
-          :theme="statusBadgeTheme"
-          variant="subtle"
-          size="md"
-          class="shrink-0"
-        />
+        <Badge :label="statusLabel" :theme="statusBadgeTheme" class="shrink-0" />
       </template>
 
       <template v-if="storageUsed" #subtitle>{{ storageUsed }} used</template>
       <template #actions>
-        <Button variant="ghost" size="sm" class="hidden sm:flex" @click="goToAnalytics">
+        <Button v-if="status === 'provisioning'" variant="ghost" @click="viewCreateJob">
+          <template #prefix><span class="size-4 lucide-list-checks" /></template>
+          View job
+        </Button>
+
+        <Button v-else variant="ghost" class="hidden sm:flex" @click="goToAnalytics">
           <template #prefix><span class="size-4 lucide-chart-line" /></template>
           View analytics
         </Button>
 
-        <Button size="sm" class="hidden sm:flex" @click="goToMarketplace">
+        <Button class="hidden sm:flex" @click="goToMarketplace">
           <template #prefix><span class="size-4 lucide-plus" /></template>
           Install app
         </Button>
@@ -249,8 +283,6 @@ onMounted(() => {
         <Dropdown :options="menuOptions">
           <template #default="{ open }">
             <Button
-              variant="subtle"
-              size="sm"
               :active="open"
               icon="lucide-ellipsis"
               label="Site actions"
@@ -261,13 +293,11 @@ onMounted(() => {
       </template>
     </PageHero>
 
-    <div class="mx-auto w-full max-w-3xl">
-      <!-- Tabs -->
+    <div class="px-4 lg:px-0 pb-3 md:pb-4 mx-auto w-full max-w-3xl">
       <StickyToolbar>
         <TabButtons v-model="activeTab" :options="tabs" :size="isMobile ? 'md' : 'sm'" />
       </StickyToolbar>
 
-      <!-- Sections -->
       <SiteApps v-if="activeTab === 'apps'" :site-name="siteName" />
       <SiteBackups v-else-if="activeTab === 'backups'" :site-name="siteName" />
       <SiteConfig v-else-if="activeTab === 'config'" :site-name="siteName" />
@@ -279,12 +309,11 @@ onMounted(() => {
   <Teleport defer to="#header-actions">
     <Button
       :variant="site?.setup_complete ? 'subtle' : 'solid'"
-      size="sm"
       :loading="settingUpSite"
       @click="site?.setup_complete ? openSite() : setupSite()"
     >
       <template #prefix><span class="size-4 lucide-external-link" /></template>
-      <span class="hidden sm:inline">{{ site?.setup_complete ? 'Open site' : 'Setup site' }}</span>
+      <span class="hidden sm:inline">{{ site?.setup_complete ? 'Visit site' : 'Setup site' }}</span>
       <span class="sm:hidden">{{ site?.setup_complete ? 'Open' : 'Setup' }}</span>
     </Button>
   </Teleport>

@@ -16,6 +16,11 @@ _TRUE_SINGLES_VALUES = frozenset({"1", "true"})
 PROTECTED_CONFIG_KEYS = frozenset(
     {
         "backup_retention",
+        # Pilot pins it on a rename; a site-scoped caller setting it could squat a
+        # certificate lineage another site or a future one would need.
+        "cert_name",
+        "cloud_server_url",
+        "cloud_settings_embed_url",
         "db_host",
         "db_name",
         "db_password",
@@ -28,6 +33,7 @@ PROTECTED_CONFIG_KEYS = frozenset(
         "installed_apps",
         "pilot_auth_token",
         "pilot_endpoint",
+        "route",
         "ssl",
     }
 )
@@ -71,24 +77,31 @@ def exclude_disabled_apps(apps: list[str], bench_root: Path, site_name: str) -> 
 
 
 def query_disabled_apps_via_db(bench_root: Path, site_name: str) -> list[str]:
-    """Apps the site keeps but holds out of use, read from the `disabled_apps` global -
-    the same value Frappe itself gates on. The `disabled` column on Installed Application
-    only mirrors this and can drift, so it is not read here. Empty when unreadable."""
+    """Read the site's disabled apps from Frappe's global setting."""
+    return _query_global_app_list(bench_root, site_name, "disabled_apps") or []
+
+
+def query_installed_apps_setting_via_db(bench_root: Path, site_name: str) -> list[str] | None:
+    """The installed apps Frappe committed in its global setting. None when unreadable."""
+    return _query_global_app_list(bench_root, site_name, "installed_apps")
+
+
+def _query_global_app_list(bench_root: Path, site_name: str, key: str) -> list[str] | None:
     rows = _query_site_database(
         bench_root,
         site_name,
         lambda database: (
             f"SELECT defvalue FROM {database.quote_identifier('tabDefaultValue')} "
-            "WHERE parent = '__global' AND defkey = 'disabled_apps'"
+            f"WHERE parent = '__global' AND defkey = '{key}'"
         ),
     )
     if not rows:
-        return []
+        return None
     try:
-        disabled = json.loads(str(rows[0][0]) or "[]")
+        apps = json.loads(str(rows[0][0]) or "[]")
     except json.JSONDecodeError:
-        return []
-    return [app for app in disabled if isinstance(app, str)] if isinstance(disabled, list) else []
+        return None
+    return [app for app in apps if isinstance(app, str)] if isinstance(apps, list) else None
 
 
 def has_app_disabling(bench_root: Path, site_name: str) -> bool:
@@ -120,11 +133,7 @@ def query_installed_apps_via_db(bench_root: Path, site_name: str) -> list[str] |
 
 
 def is_setup_complete(bench_root: Path, site_name: str) -> bool | None:
-    """Whether every app in use that ships a setup wizard has finished it. Read from the
-    same table `frappe.is_setup_complete()` reads, not the System Settings flag, which
-    only catches up when the app list is rewritten. A disabled app is skipped - it
-    contributes no wizard, so it can never finish one. None means the database was
-    unreachable, so setup state is unknown."""
+    """Whether every active setup-wizard app has finished configuration."""
     apps = query_setup_wizard_apps_via_db(bench_root, site_name)
     if not apps:
         return _query_site_setup_flag(bench_root, site_name)
@@ -188,6 +197,24 @@ def set_site_ssl_flag(sites_root: Path, site_name: str, enabled: bool) -> None:
     with exclusive_file_lock(config_path):
         config = json.loads(config_path.read_text())
         config["ssl"] = enabled
+        replace_private_text_locked(config_path, json.dumps(config, indent=1))
+
+
+def set_site_config_values(sites_root: Path, site_name: str, values: dict) -> None:
+    config_path = safe_site_config_path(sites_root, site_name)
+    with exclusive_file_lock(config_path):
+        config = json.loads(config_path.read_text())
+        config.update(values)
+        replace_private_text_locked(config_path, json.dumps(config, indent=1))
+
+
+def clear_certificate_pin(sites_root: Path, site_name: str) -> None:
+    """Drop a site's pinned certificate lineage, under the config lock."""
+    config_path = safe_site_config_path(sites_root, site_name)
+    with exclusive_file_lock(config_path):
+        config = json.loads(config_path.read_text())
+        if config.pop("cert_name", None) is None:
+            return
         replace_private_text_locked(config_path, json.dumps(config, indent=1))
 
 

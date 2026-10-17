@@ -11,11 +11,13 @@ from pathlib import Path
 import psutil
 
 from pilot.core.alerts import ALERT_SUSTAINED_SECONDS, SustainedAlerts, notify
+from pilot.core.bench.telemetry import DatumCredential
 from pilot.core.notification.events import record_alert
 from pilot.core.server.monitoring_config import MonitorConfigurator
 from pilot.core.server.monitoring_datum import MetricShipper
 from pilot.core.server.monitoring_proc import ProcMetricsReader
 from pilot.core.server.monitoring_processes import ProcessResolver
+from pilot.managers.fluentbit import LogsConfigurator
 from pilot.utils import cli_root, iter_sibling_benches
 
 if typing.TYPE_CHECKING:
@@ -144,7 +146,7 @@ class Monitor:
         return self.system_log_path.with_suffix(".alerts")
 
     def _alert_payload(self, breached: list[str], system_record: dict) -> dict[str, typing.Any]:
-        """Central's report_pilot_event schema: event, message, context."""
+        """Alert body for the webhook, mail, and Central sinks: event, message, context."""
         limits = self.bench.config.resource_limits
         readings = self._readings(system_record)
         crossed = [
@@ -366,12 +368,17 @@ def main() -> None:
     if not monitors:
         return
 
+    # Before the shipper and Fluent Bit read the token, so both ship with the rotated one.
+    bench = monitors[0].bench
+    if bench.config.central.enabled:
+        DatumCredential(bench, bench.config.telemetry.token, on_progress=print).rotate_if_expiring()
+
     for monitor in monitors:
         monitor.sample_cpu()
         monitor.sample_io()
     time.sleep(CPU_SAMPLE_INTERVAL)
 
-    shipper = MetricShipper(monitors[0].bench.config.datum)
+    shipper = MetricShipper(bench.config.telemetry)
     for monitor in monitors:
         monitor.compute_cpu()
         monitor.compute_io()
@@ -385,6 +392,8 @@ def main() -> None:
     host.collect_slow_queries()
     # One tick, one POST, after every log is on disk.
     shipper.send()
+    # Logs read the same config, so a credential that arrives later starts both.
+    LogsConfigurator().sync(host.bench.config.telemetry)
 
 
 if __name__ == "__main__":

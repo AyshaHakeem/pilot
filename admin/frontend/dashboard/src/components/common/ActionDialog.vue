@@ -1,25 +1,50 @@
 <script setup lang="ts">
-import { Avatar, Button, Dialog, ErrorMessage } from 'frappe-ui'
+import { Avatar, Button, type ButtonProps, Dialog, type DialogSize, ErrorMessage } from 'frappe-ui'
 
 import AppIcon from '@/components/apps/AppIcon.vue'
 
-defineProps({
-  title: { type: String, required: true },
-  size: { type: String, default: 'md' },
-  // { label, description, badge, icon } - `icon` picks a lucide tile, otherwise
-  // the app logo is used via { name, logo }.
-  subject: { type: Object, default: null },
-  // { title, message } rendered as the destructive-action callout.
-  warning: { type: Object, default: null },
-  error: { type: String, default: '' },
-  confirmLabel: { type: String, required: true },
-  confirmTheme: { type: String, default: 'gray' },
-  cancelLabel: { type: String, default: 'Cancel' },
-  loading: { type: Boolean, default: false },
-  disabled: { type: Boolean, default: false },
+// `icon` picks a lucide tile, otherwise the app logo is used via { name, logo }.
+interface ActionSubject {
+  label?: string
+  name?: string
+  badge?: string
+  description?: string
+  icon?: string
+  logo?: string | null
+}
+
+interface ActionWarning {
+  title: string
+  message?: string
+}
+
+interface Props {
+  title: string
+  size?: DialogSize
+  subject?: ActionSubject | null
+  warning?: ActionWarning | null
+  error?: string
+  confirmLabel: string
+  confirmTheme?: ButtonProps['theme']
+  cancelLabel?: string
+  loading?: boolean
+  disabled?: boolean
+  hideActions?: boolean
+}
+
+withDefaults(defineProps<Props>(), {
+  size: 'md',
+  subject: null,
+  warning: null,
+  error: '',
+  confirmTheme: 'gray',
+  cancelLabel: 'Cancel',
+  loading: false,
+  disabled: false,
+  hideActions: false,
 })
 
-const open = defineModel('open')
+const open = defineModel<boolean>('open')
 const emit = defineEmits(['confirm'])
 </script>
 
@@ -34,14 +59,14 @@ const emit = defineEmits(['confirm'])
 
           <AppIcon
             v-else
-            :name="subject.name || subject.label"
+            :name="subject.name || subject.label || ''"
             :label="subject.label"
             :logo="subject.logo || ''"
             size="xl"
           />
           <div class="min-w-0">
             <div class="flex items-center gap-1.5">
-              <p class="font-medium text-ink-gray-8 text-base truncate">{{ subject.label }}</p>
+              <p class="font-medium text-ink-gray-8 truncate">{{ subject.label }}</p>
               <span v-if="subject.badge" class="text-ink-gray-5 text-xs shrink-0">
                 {{ subject.badge }}
               </span>
@@ -70,7 +95,9 @@ const emit = defineEmits(['confirm'])
       <slot name="after-warning" />
 
       <ErrorMessage v-if="error" :message="error" />
+    </div>
 
+    <template v-if="!hideActions" #actions>
       <div class="flex justify-end gap-2">
         <Button variant="subtle" @click="open = false">{{ cancelLabel }}</Button>
         <Button
@@ -83,6 +110,6 @@ const emit = defineEmits(['confirm'])
           {{ confirmLabel }}
         </Button>
       </div>
-    </div>
+    </template>
   </Dialog>
 </template>

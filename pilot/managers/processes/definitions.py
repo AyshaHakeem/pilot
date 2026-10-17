@@ -27,6 +27,7 @@ class ProcessDefinition:
     restart_on_failure: bool = True
     pre_run: list[str] = field(default_factory=list)  # argv run before the process starts
     post_run: list[str] = field(default_factory=list)  # argv run after it stops
+    socket_file: Path | None = None  # removed before each start; a stale one blocks listen()
 
 
 def hook_wrapped_argv(pd: ProcessDefinition) -> list[str]:
@@ -103,6 +104,7 @@ class ProcessDefinitionBuilder:
                 self.socketio_definition(),
                 self.admin_definition(),
                 *worker_defs,
+                self.schedule_definition(),
             ]
         defs.append(self.redis_definition("redis_cache", "redis_cache.conf"))
         defs.append(self.redis_definition("redis_queue", "redis_queue.conf"))
@@ -155,6 +157,8 @@ class ProcessDefinitionBuilder:
             )
         if pd.name == "web":
             return self.web_definition(dev=True)
+        if pd.name == "socketio":
+            return self.socketio_definition(dev=True)
         return pd
 
     def python_env(self) -> dict:
@@ -227,7 +231,8 @@ class ProcessDefinitionBuilder:
             stop_timeout=lite_mode.stop_timeout,
         )
 
-    def socketio_definition(self) -> ProcessDefinition:
+    def socketio_definition(self, dev: bool = False) -> ProcessDefinition:
+        socket = None if dev else self.bench.realtime_socket
         if self.bench.config.socketio_backend == "python":
             argv = [str(self.python), "-m", "frappe.realtime.server"]
             working_dir = self.bench.path
@@ -235,13 +240,14 @@ class ProcessDefinitionBuilder:
         else:
             argv = ["node", f"{self.bench.apps_path}/frappe/socketio.js"]
             working_dir = self.bench.sites_path
-            backend_env = {}
+            backend_env = {"FRAPPE_SOCKETIO_UDS": str(socket)} if socket else {}
         return ProcessDefinition(
             name="socketio",
             argv=argv,
             log_file=self.bench.logs_path / "socketio.log",
             env=backend_env,
             working_dir=working_dir,
+            socket_file=socket,
         )
 
     def watch_definition(self) -> ProcessDefinition:
@@ -297,6 +303,16 @@ class ProcessDefinitionBuilder:
             )
             for i in range(1, count + 1)
         ]
+
+    def schedule_definition(self) -> ProcessDefinition:
+        """Plain `frappe worker` has no scheduler; lite and worker-pool run their own."""
+        return ProcessDefinition(
+            name="schedule",
+            argv=[str(self.python), "-m", "frappe.utils.bench_helper", "frappe", "schedule"],
+            log_file=self.bench.logs_path / "schedule.log",
+            env=self.python_env(),
+            working_dir=self.bench.sites_path,
+        )
 
     def redis_definition(self, name: str, config_filename: str) -> ProcessDefinition:
         from pilot.managers.redis import redis_server_binary

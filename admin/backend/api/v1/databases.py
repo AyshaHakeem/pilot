@@ -18,6 +18,7 @@ from pilot.exceptions import DatabaseError, TaskConflictError
 from pilot.tasks.restart_database import RestartDatabaseTask
 from pilot.tasks.set_innodb_buffer_pool_size import SetInnoDBBufferPoolSizeTask
 from pilot.tasks.set_mariadb_configuration import SetMariaDBConfigurationTask
+from pilot.tasks.set_mariadb_memory_share import SetMariaDBMemoryShareTask
 from pilot.tasks.set_max_database_connections import SetMaxDatabaseConnectionsTask
 from pilot.tasks.set_performance_schema import SetPerformanceSchemaTask
 
@@ -97,7 +98,13 @@ def list_query_sites() -> ResponseReturnValue:
             config = json.loads((d / "site_config.json").read_text())
         except (OSError, ValueError):
             config = {}
-        sites.append({"name": d.name, "db_type": config.get("db_type", "mariadb")})
+        sites.append(
+            {
+                "name": d.name,
+                "db_type": config.get("db_type", "mariadb"),
+                "db_name": config.get("db_name", ""),
+            }
+        )
     return jsonify(sites)
 
 
@@ -377,6 +384,36 @@ def set_max_connections():
         )
 
 
+@database_bp.post("/quick-actions/memory-share")
+def set_memory_share():
+    forbidden = guard_bench_management()
+    if forbidden is not None:
+        return forbidden
+
+    data = request.get_json(silent=True)
+    memory_share = data.get("memory_share") if isinstance(data, dict) else None
+    if type(memory_share) not in (int, float):
+        return error_response("invalid_memory_share", "memory_share must be a number.", 422)
+
+    try:
+        actions = _quick_actions()
+        actions.require_memory_share(memory_share)
+        bench = _bench()
+        task_id = SetMariaDBMemoryShareTask.queue(
+            bench,
+            memory_share=float(memory_share),
+            idempotency_key=request.headers.get("Idempotency-Key"),
+            resource_key=_DATABASE_RESOURCE_KEY,
+        )
+        return accepted_task_response(bench.path, task_id)
+    except (DatabaseError, TaskConflictError) as exc:
+        return error_response("database_action_unavailable", str(exc), 409)
+    except ValueError as exc:
+        return error_response("invalid_memory_share", str(exc), 422)
+    except Exception:
+        return error_response("database_action_failed", "Could not queue the memory split change.", 500)
+
+
 @database_bp.get("/processlist")
 def get_process_list():
     forbidden = guard_bench_management()
@@ -418,6 +455,35 @@ def get_lock_wait_rows():
         return error_response("lockwaits_unavailable", str(exc), 422)
     except Exception:
         return error_response("lockwaits_unavailable", "Could not read database lock waits.", 500)
+
+
+@database_bp.get("/performance-report")
+def get_performance_report() -> ResponseReturnValue:
+    provider = _provider()
+    sections = {
+        "time_consuming_queries": provider.get_time_consuming_queries,
+        "full_table_scan_queries": provider.get_full_table_scan_queries,
+        "unused_indexes": provider.get_unused_indexes,
+        "redundant_indexes": provider.get_redundant_indexes,
+    }
+    section = sections.get(request.args.get("report_type", ""))
+    if section is None:
+        return error_response("invalid_report_type", f"Expected one of {', '.join(sections)}.", 422)
+    try:
+        limit = max(1, min(int(request.args.get("limit", 20)), 200))
+        offset = max(0, int(request.args.get("offset", 0)))
+    except ValueError:
+        return error_response("invalid_page", "limit and offset must be whole numbers.", 422)
+    try:
+        return jsonify(section(request.args.get("site", ""), limit, offset))
+    except DatabaseError as exc:
+        return error_response("performance_report_unavailable", str(exc), 422)
+    except Exception:
+        return error_response(
+            "performance_report_unavailable",
+            "Could not read the database performance report.",
+            500,
+        )
 
 
 @database_bp.get("/size")

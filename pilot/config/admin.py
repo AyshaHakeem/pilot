@@ -1,6 +1,8 @@
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
+from pilot.config.route import RoutePolicy
 from pilot.exceptions import ConfigError
 
 _HOSTNAME_PATTERN = re.compile(
@@ -30,11 +32,18 @@ class AdminConfig:
     jwks_audience: str = ""
     domain: str = ""
     tls: bool = False
+    route: RoutePolicy | None = None
     allow_bench_management: bool = field(default_factory=default_allow_bench_management)
     # Break-glass codes for when no enrolled device is available. Stored in the clear so
     # an operator with server access can still read them; the API returns them only when
     # they are issued, never on demand.
     recovery_codes: list[str] = field(default_factory=list)
+
+    @property
+    def central_url(self) -> str:
+        """Central's origin. Central serves its JWKS from its own host."""
+        url = urlsplit(self.jwks_url)
+        return f"{url.scheme}://{url.netloc}" if url.scheme and url.netloc else ""
 
     @classmethod
     def from_dict(cls, data: dict) -> "AdminConfig":
@@ -48,6 +57,7 @@ class AdminConfig:
             jwks_audience=data.get("jwks_audience", ""),
             domain=data.get("domain", ""),
             tls=data.get("tls", False),
+            route=RoutePolicy.from_dict(data["route"]) if data.get("route") else None,
             allow_bench_management=data.get("allow_bench_management", default_allow_bench_management()),
             recovery_codes=list(data.get("recovery_codes", [])),
         )
@@ -67,6 +77,10 @@ class AdminConfig:
     def internal_port(self) -> int:
         """Localhost-only Gunicorn port behind nginx."""
         return self.port + 1
+
+    @property
+    def route_policy(self) -> RoutePolicy:
+        return self.route or RoutePolicy.direct(self.tls)
 
     def validate(self, production_enabled: bool, bench_name: str) -> None:
         if not self.domain:

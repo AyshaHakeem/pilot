@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from datetime import datetime
 from pathlib import Path
 from typing import Literal, TypedDict
@@ -20,6 +20,8 @@ from pilot.managers.task.models import (
 from pilot.utils import open_private
 
 _TASK_POLL_SECONDS = 0.5
+# A write is the only way to see that a client went away, so a quiet stream still writes.
+HEARTBEAT_SECONDS = 15
 _SYSLOG_RE = re.compile(r"^<\d+>\d+ \S+ \S+ \S+ \S+ \S+ \S+ (.*)$")
 
 
@@ -96,15 +98,19 @@ class TaskReader:
         self._files = TaskFiles(self._bench_root / "tasks")
         self._queue = TaskQueue(bench_root)
 
-    def list_tasks(self, limit: int | None = 50) -> list[TaskInfo]:
+    def list_tasks(self, limit: int | None = 50, include_unlisted: bool = False) -> list[TaskInfo]:
+        from pilot.internal.tasks.runner import is_command_listed
+
         tasks: list[TaskInfo] = []
         queue_positions = self._queue.positions()
         for entry in self._files.task_dirs():
             try:
-                tasks.append(_read_task_dir(self, entry, queue_positions))
+                task = _read_task_dir(self, entry, queue_positions)
             except Exception as exc:
                 logging.debug("Skipping unreadable task directory %s: %s", entry, exc)
                 continue
+            if include_unlisted or is_command_listed(task.command):
+                tasks.append(task)
 
         tasks.sort(key=lambda task: task.queued_at, reverse=True)
         return tasks if limit is None else tasks[:limit]
@@ -141,7 +147,11 @@ class TaskReader:
             if pending:
                 yield display_line(pending)
 
-    def stream_output(self, task_id: str) -> Generator[TaskStreamEvent, None, None]:
+    def stream_output(
+        self, task_id: str, should_stop: Callable[[], bool] = lambda: False
+    ) -> Generator[TaskStreamEvent | None, None, None]:
+        """Events until the task ends or `should_stop`; the client resumes by Last-Event-ID.
+        None is a heartbeat, sent when the task writes nothing for HEARTBEAT_SECONDS."""
         task = self.read_task(task_id)
         output_path = task.output_path
         last_state = (task.status, task.queue_position)
@@ -150,10 +160,12 @@ class TaskReader:
         open_private(output_path, "a").close()
         with open(output_path, "r", errors="replace", newline="") as log_file:
             cur = ""
+            last_write = time.monotonic()
             while True:
                 chunk = log_file.read(8192)
                 if chunk:
                     cur = yield from self._stream_chunk(chunk, cur)
+                    last_write = time.monotonic()
                     continue
 
                 task = self.read_task(task_id)
@@ -165,6 +177,11 @@ class TaskReader:
                 if not task.status.is_active:
                     yield from self._stream_done(task, cur)
                     return
+                if should_stop():
+                    return
+                if time.monotonic() - last_write >= HEARTBEAT_SECONDS:
+                    yield None
+                    last_write = time.monotonic()
 
                 time.sleep(_TASK_POLL_SECONDS)
 

@@ -821,3 +821,107 @@ def test_purge_succeeds(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     provider.purge_binlogs.assert_called_once_with("mysql-bin.000002")
+
+
+def test_a_performance_section_returns_the_provider_payload(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    section = {
+        "data": [
+            {
+                "database": "site_db",
+                "table": "tabUser",
+                "redundant_index": "lft",
+                "redundant_index_columns": "lft",
+                "dominant_index": "lft_rgt",
+                "dominant_index_columns": "lft,rgt",
+            }
+        ],
+        "has_next_page": True,
+    }
+    patcher, provider = _patched_provider(**{"get_redundant_indexes.return_value": section})
+    with patcher:
+        response = client.get("/api/v1/database/performance-report?report_type=redundant_indexes&site=shop.local")
+
+    assert response.status_code == 200
+    assert response.get_json() == section
+    provider.get_redundant_indexes.assert_called_once_with("shop.local", 20, 0)
+
+
+def test_a_performance_section_defaults_to_the_whole_server_and_first_page(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    patcher, provider = _patched_provider(**{"get_unused_indexes.return_value": {}})
+    with patcher:
+        client.get("/api/v1/database/performance-report?report_type=unused_indexes")
+
+    provider.get_unused_indexes.assert_called_once_with("", 20, 0)
+
+
+def test_a_performance_section_passes_the_requested_page_through(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    patcher, provider = _patched_provider(**{"get_unused_indexes.return_value": {}})
+    with patcher:
+        client.get("/api/v1/database/performance-report?report_type=unused_indexes&limit=50&offset=100")
+
+    provider.get_unused_indexes.assert_called_once_with("", 50, 100)
+
+
+def test_a_performance_section_rejects_a_non_numeric_page(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    patcher, _ = _patched_provider(**{"get_unused_indexes.return_value": {}})
+    with patcher:
+        response = client.get("/api/v1/database/performance-report?report_type=unused_indexes&limit=all")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"]["code"] == "invalid_page"
+
+
+def test_an_unknown_report_type_is_rejected(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    patcher, _ = _patched_provider(**{"get_unused_indexes.return_value": {}})
+    with patcher:
+        response = client.get("/api/v1/database/performance-report?report_type=nope")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"]["code"] == "invalid_report_type"
+
+
+def test_a_performance_section_maps_unsupported_engine_to_422(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    patcher, _ = _patched_provider(
+        **{
+            "get_time_consuming_queries.side_effect": DatabaseError(
+                "The selected engine does not support this operation"
+            )
+        }
+    )
+    with patcher:
+        response = client.get("/api/v1/database/performance-report?report_type=time_consuming_queries")
+
+    assert response.status_code == 422
+    assert response.get_json()["error"]["code"] == "performance_report_unavailable"
+
+
+def test_memory_share_queues_guarded_task(tmp_path: Path) -> None:
+    client = _client(tmp_path / "benches" / "current")
+    actions = Mock()
+    with (
+        patch("admin.backend.api.v1.databases._quick_actions", return_value=actions),
+        patch("admin.backend.api.v1.databases.SetMariaDBMemoryShareTask.queue", return_value="task-5") as queue,
+        patch("admin.backend.api.v1.databases.accepted_task_response", return_value=({"task_id": "task-5"}, 202)),
+    ):
+        response = client.post("/api/v1/database/quick-actions/memory-share", json={"memory_share": 0.6})
+
+    assert response.status_code == 202
+    actions.require_memory_share.assert_called_once_with(0.6)
+    assert queue.call_args.kwargs["memory_share"] == 0.6
+    assert queue.call_args.kwargs["resource_key"] == "database-server"
+
+
+@pytest.mark.parametrize("payload", [{}, {"memory_share": "0.6"}, {"memory_share": True}])
+def test_memory_share_must_be_a_number(tmp_path: Path, payload: dict) -> None:
+    response = _client(tmp_path / "benches" / "current").post(
+        "/api/v1/database/quick-actions/memory-share", json=payload
+    )
+
+    assert response.status_code == 422
+    assert response.get_json()["error"]["code"] == "invalid_memory_share"

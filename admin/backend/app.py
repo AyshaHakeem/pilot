@@ -128,7 +128,7 @@ def register_editor_frontend(app: Flask) -> None:
 def register_in_app_embed_frontend(app: Flask) -> None:
     """Serve Desk's Cloud Settings IIFE at the URL Frappe boots into desk.
 
-    Desk loads `{pilot_endpoint}/embed/cloud-settings/cloud-settings.js` cross-origin.
+    Desk loads `{cloud_settings_embed_url}/embed/cloud-settings/cloud-settings.js` cross-origin.
     This must be registered before the dashboard SPA catch-all, which would otherwise
     answer with index.html and break script load.
     """
@@ -173,7 +173,9 @@ def register_frontend(app: Flask) -> None:
                 # path inside the build instead of reaching bench.toml.
                 response = send_from_directory(dashboard_dir, path)
             except NotFound:
-                pass  # unknown route: the SPA router owns it
+                # A rebuild deletes old hashed chunks; index.html in their place fails as a script.
+                if path.startswith("assets/"):
+                    return "Asset not found.", 404
             else:
                 return _immutable(response) if path.startswith("assets/") else response
         return send_file(str(dashboard_dir / "index.html"))
@@ -230,6 +232,8 @@ def is_secure_cookie(bench_root: Path) -> bool:
         return False
     if not config.production.enabled:
         return False
+    if route := getattr(config.admin, "route", None):
+        return route.public_tls
     if config.admin.tls:
         return True
 

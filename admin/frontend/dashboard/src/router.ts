@@ -1,8 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
-
+import { authApi } from '@/api/auth'
 import { useSession } from '@/composables/auth/useSession'
 import { safeRedirect } from '@/utils/redirect'
-import { authApi } from '@/api/auth'
 
 const routes = [
   {
@@ -10,6 +9,12 @@ const routes = [
     name: 'Setup',
     component: () => import('@/pages/setup/Setup.vue'),
     meta: { title: 'Setup', fullScreen: true },
+  },
+  {
+    path: '/pending',
+    name: 'Pending',
+    component: () => import('@/pages/pending/Pending.vue'),
+    meta: { title: 'Waiting for configuration', fullScreen: true },
   },
   {
     path: '/login',
@@ -52,7 +57,7 @@ const routes = [
   {
     path: '/insights/analytics',
     name: 'Analytics',
-    component: () => import('@/pages/dashboard/Analytics.vue'),
+    component: () => import('@/pages/Analytics.vue'),
     meta: { title: 'Analytics', group: 'Insights' },
   },
   {
@@ -143,8 +148,9 @@ router.beforeEach(async (to) => {
   // link) are swallowed - the next pass through this guard will see no
   // session cookie and fall through to the normal /login redirect below.
   if (to.query.sid) {
+    const sid = typeof to.query.sid === 'string' ? to.query.sid : ''
     try {
-      await authApi.loginWithSid(to.query.sid)
+      await authApi.loginWithSid(sid)
     } catch {
       /* fall through to the unauthenticated redirect below */
     }
@@ -154,6 +160,10 @@ router.beforeEach(async (to) => {
 
   const { session, ensureSession } = useSession()
   await ensureSession()
+  // A waiting host has no password yet, so this stop precedes the session checks.
+  if (session.pending) return to.name === 'Pending' ? true : { name: 'Pending' }
+  if (to.name === 'Pending') return { path: '/' }
+
   // Setup authenticates like every other page. Without a session the sign-in page is
   // the only stop; the wizard's own link (printed by `pilot start`) carries a ?sid=.
   if (session.wizard && !session.authenticated)
@@ -173,7 +183,21 @@ router.beforeEach(async (to) => {
   return true
 })
 
+// A rebuild replaces the hashed route chunks, so an open tab cannot load the pages it
+// has not visited yet. One full load fetches the new build; the marker stops a loop.
+const RELOAD_MARKER = 'pilot:chunk-reload'
+
+router.onError((error, to) => {
+  const isChunkError = /dynamically imported module|Importing a module script failed/.test(
+    String(error?.message),
+  )
+  if (!isChunkError || sessionStorage.getItem(RELOAD_MARKER) === to.fullPath) return
+  sessionStorage.setItem(RELOAD_MARKER, to.fullPath)
+  window.location.assign(to.fullPath)
+})
+
 router.afterEach((to) => {
+  sessionStorage.removeItem(RELOAD_MARKER)
   if (to.name !== 'SiteDetail') {
     document.title = to.meta?.title ? `${to.meta.title} - Pilot` : 'Pilot'
   }

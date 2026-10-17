@@ -1,6 +1,5 @@
 import contextlib
 import os
-import shutil
 import signal
 import subprocess
 import sys
@@ -56,7 +55,7 @@ def make_private_directory(path: Path, *, parents: bool = False) -> None:
 def admin_url(config: "BenchConfig", dev_host: str = "localhost") -> str:
     admin = config.admin
     if config.production.enabled:
-        scheme = "https" if admin.tls else "http"
+        scheme = admin.route_policy.public_scheme
         return f"{scheme}://{admin.domain}"
     return f"http://{dev_host}:{admin.port}"
 
@@ -310,8 +309,6 @@ def matches_wildcard(domain: str, patterns: list[str]) -> bool:
 
 def _bench_hosts(bench_dir: Path, config: "BenchConfig") -> Iterator[str]:
     """Yield every normalized hostname claimed by a bench."""
-    import json
-
     if config.admin.domain:
         yield normalize_host(config.admin.domain)
     sites_dir = bench_dir / "sites"
@@ -319,16 +316,27 @@ def _bench_hosts(bench_dir: Path, config: "BenchConfig") -> Iterator[str]:
         return
     for site in sites_dir.iterdir():
         cfg = site / "site_config.json"
-        if not cfg.exists():
-            continue
-        yield normalize_host(site.name)
-        try:
-            for alias in json.loads(cfg.read_text()).get("domains", []) or []:
-                name = alias.get("domain") if isinstance(alias, dict) else alias
-                if name:
-                    yield normalize_host(str(name))
-        except Exception:
-            continue
+        if cfg.exists():
+            yield normalize_host(site.name)
+            yield from _site_config_hosts(cfg)
+
+
+def _site_config_hosts(cfg: Path) -> Iterator[str]:
+    """Yield custom domains and any pinned certificate hostname."""
+    import json
+
+    try:
+        raw = json.loads(cfg.read_text())
+    except Exception:
+        return
+    if not isinstance(raw, dict):
+        return
+    for alias in raw.get("domains", []) or []:
+        name = alias.get("domain") if isinstance(alias, dict) else alias
+        if name:
+            yield normalize_host(str(name))
+    if pinned := raw.get("cert_name"):
+        yield normalize_host(str(pinned))
 
 
 def host_owner(bench_path: Path, host: str) -> str | None:
@@ -362,22 +370,6 @@ def installed_app_version(env_path: Path, name: str) -> str:
     return ""
 
 
-def git_has_local_changes(path: Path) -> bool:
-    """True if the repo at *path* has uncommitted edits or commits not yet on upstream."""
-    from pilot.internal.git import GitRepo
-
-    return GitRepo(path).has_local_changes
-
-
-def get_yarn_bin() -> str:
-    if yarn := shutil.which("yarn"):
-        return yarn
-    local_yarn = Path.home() / ".local" / "bin" / "yarn"
-    if local_yarn.exists():
-        return str(local_yarn)
-    raise BenchError("yarn not found - run pilot init to install it.")
-
-
 def redact_text(text: str, secrets: list[str] | None) -> str:
     if not text or not secrets:
         return text
@@ -406,9 +398,7 @@ def run_command(
     return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
 
 
-def _run_command_tee(
-    argv: list[str], cwd: Path | None, env: dict | None
-) -> subprocess.CompletedProcess:
+def _run_command_tee(argv: list[str], cwd: Path | None, env: dict | None) -> subprocess.CompletedProcess:
     """Stream combined output live while capturing it for later classification."""
     process = subprocess.Popen(
         argv,

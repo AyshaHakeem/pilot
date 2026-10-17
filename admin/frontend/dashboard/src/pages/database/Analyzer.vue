@@ -1,104 +1,111 @@
 <script setup lang="ts">
-import { useRoute } from 'vue-router'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-
+import { useRoute } from 'vue-router'
 import {
   Button,
   Checkbox,
   Dialog,
   ErrorMessage,
-  FormControl,
   LoadingText,
+  Select,
+  Skeleton,
+  Switch,
   Tooltip,
   toast,
 } from 'frappe-ui'
 
-import {
-  ListHeader,
-  ListRowItem,
-  ListRows,
-  ListView,
-} from 'frappe-ui/experimental'
-
-import SizeBreakup from '@/components/database/SizeBreakup.vue'
+import Table from '@/components/common/Table.vue'
 import DatabasePanel from '@/components/database/DatabasePanel.vue'
+import IndexAnalysisPanel from '@/components/database/IndexAnalysisPanel.vue'
+import QueryAnalysisPanel from '@/components/database/QueryAnalysisPanel.vue'
+import SizeBreakup from '@/components/database/SizeBreakup.vue'
 import TableSizesDialog from '@/components/database/TableSizesDialog.vue'
 
 import { databaseApi } from '@/api/database'
+import { apiErrorMessage, hasApiError } from '@/api/client'
+import { errorMessage } from '@/utils/error'
 import { formatBytes } from '@/utils/format'
-import { apiErrorMessage } from '@/api/client'
-import { relativeTime } from '@/utils/taskFormat'
+import { relativeTime } from '@/utils/time'
+import type {
+  BinlogFile,
+  DatabaseDiagnostics,
+  DatabaseProcess,
+  DatabaseSite,
+  DatabaseSize,
+  LockWaitRow,
+  UnsupportedDatabaseDiagnostics,
+} from '@/types/database'
 
 const AUTO_REFRESH_INTERVAL_MS = 2000
 
 const processColumns = [
-  { label: '#', key: 'number', align: 'left', width: '2.5rem' },
-  { label: 'ID', key: 'id', align: 'left', width: 1 },
-  { label: 'State', key: 'state', align: 'left', width: 1 },
-  { label: 'Time', key: 'time', align: 'right', width: 1 },
-  { label: 'User', key: 'user', align: 'left', width: 1 },
-  { label: 'Host', key: 'host', align: 'left', width: 1.5 },
-  { label: 'Command', key: 'command', align: 'left', width: 1 },
-  { label: 'Query', key: 'query', align: 'left', width: 3 },
-  { label: '', key: 'actions', align: 'right', width: '5rem' },
+  { label: '#', key: 'number', class: 'w-10' },
+  { label: 'ID', key: 'id', class: 'w-[10%]' },
+  { label: 'State', key: 'state', class: 'w-[10%]' },
+  { label: 'Time', key: 'time', class: 'w-[10%]' },
+  { label: 'User', key: 'user', class: 'w-[10%]' },
+  { label: 'Host', key: 'host', class: 'w-[24%]' },
+  { label: 'Command', key: 'command', class: 'w-[10%]' },
+  { label: 'Query', key: 'query', class: 'w-[12%]' },
+  { label: '', key: 'actions', class: 'w-20' },
 ]
 
 const lockColumns = [
-  { label: '#', key: 'number', align: 'left', width: '2rem' },
-  { label: 'ID', key: 'id', align: 'left', width: 0.8 },
-  { label: 'Type', key: 'type', align: 'left', width: 0.8 },
-  { label: 'Mode', key: 'mode', align: 'left', width: 0.8 },
-  { label: 'Table', key: 'table', align: 'left', width: 1.2 },
-  { label: 'Index', key: 'index', align: 'left', width: 0.8 },
-  { label: 'State', key: 'state', align: 'left', width: 0.8 },
-  { label: 'Started', key: 'started', align: 'left', width: 1.2 },
-  { label: 'Query', key: 'query', align: 'left', width: 1.5 },
-  { label: 'Rows Locked', key: 'rowsLocked', align: 'right', width: 0.9 },
-  { label: 'Rows Modified', key: 'rowsModified', align: 'right', width: 1 },
+  { label: '#', key: 'number', class: 'w-10' },
+  { label: 'ID', key: 'id', class: 'w-[8%]' },
+  { label: 'Type', key: 'type', class: 'w-[8%]' },
+  { label: 'Mode', key: 'mode', class: 'w-[8%]' },
+  { label: 'Table', key: 'table', class: 'w-[12%]' },
+  { label: 'Index', key: 'index', class: 'w-[8%]' },
+  { label: 'State', key: 'state', class: 'w-[8%]' },
+  { label: 'Started', key: 'started', class: 'w-[12%]' },
+  { label: 'Query', key: 'query', class: 'w-[15%]' },
+  { label: 'Rows Locked', key: 'rowsLocked', class: 'w-[9%]' },
+  { label: 'Rows Modified', key: 'rowsModified', class: 'w-[10%]' },
 ]
 
 const binlogColumns = [
-  { label: '#', key: 'number', align: 'left', width: '2rem' },
-  { label: '', key: 'selected', align: 'left', width: '2rem' },
-  { label: 'File', key: 'name', align: 'left', width: 2 },
-  { label: 'Date', key: 'date', align: 'left', width: 1.5 },
-  { label: 'Size', key: 'size', align: 'right', width: 1 },
-  { label: '', key: 'actions', align: 'right', width: '3rem' },
+  { label: '#', key: 'number', class: 'w-10' },
+  { label: '', key: 'selected', class: 'w-10' },
+  { label: 'File', key: 'name', class: 'w-[44%]' },
+  { label: 'Date', key: 'date', class: 'w-[33%]' },
+  { label: 'Size', key: 'size', class: 'w-[23%]' },
+  { label: '', key: 'actions', class: 'w-12' },
 ]
 
 const route = useRoute()
 
 const loading = ref(false)
 const error = ref('')
-const diagnostics = ref(null)
+const diagnostics = ref<DatabaseDiagnostics | UnsupportedDatabaseDiagnostics | null>(null)
 const configuredEngine = ref('')
-const sites = ref([])
+const sites = ref<DatabaseSite[]>([])
 const selectedSite = ref('')
 
-const processes = ref([])
+const processes = ref<DatabaseProcess[]>([])
 const processesLoading = ref(false)
 const processesError = ref('')
 
-const lockWaits = ref([])
+const lockWaits = ref<LockWaitRow[]>([])
 const lockWaitsLoading = ref(false)
 const lockWaitsError = ref('')
 const autoRefreshLocks = ref(true)
-let lockWaitsTimer = null
+let lockWaitsTimer: ReturnType<typeof setTimeout> | null = null
 let lockWaitsPollVersion = 0
-let lockWaitsRequest = null
-let lockWaitsRequestSite = null
+let lockWaitsRequest: Promise<void> | null = null
+let lockWaitsRequestSite: string | null = null
 let lockWaitsReloadQueued = false
 
-const binlogs = ref([])
+const binlogs = ref<BinlogFile[]>([])
 const binlogsLoading = ref(false)
 const binlogsError = ref('')
 
-const size = ref(null)
+const size = ref<DatabaseSize | null>(null)
 const sizeLoading = ref(false)
 const sizeError = ref('')
 const showTableSizes = ref(false)
 
-const killTarget = ref(null)
+const killTarget = ref<DatabaseProcess | null>(null)
 const showKillDialog = ref(false)
 const killing = ref(false)
 const killError = ref('')
@@ -143,7 +150,7 @@ const binlogRows = computed(() =>
   binlogs.value.map((file, index) => ({
     number: index + 1,
     name: file.name,
-    date: fileAge(file),
+    date: relativeTime(file.modified_ms ?? 0),
     size: formatBytes(file.size_bytes),
     index,
     isActive: index === binlogs.value.length - 1,
@@ -188,7 +195,10 @@ const lockColumnsBadge = computed(() =>
 )
 
 // Binary logs are a MariaDB concept; the engine reports no status when it has none.
-const hasBinlogs = computed(() => Boolean(diagnostics.value?.binlog))
+const hasBinlogs = computed(() => {
+  const current = diagnostics.value
+  return current?.supported === true && Boolean(current.binlog)
+})
 
 // Only sites on this server can be scoped to; a SQLite site owns a file, not a
 // database on the bench's engine.
@@ -201,52 +211,57 @@ const siteOptions = computed(() => [
 
 const scopeBadge = computed(() => selectedSite.value)
 
-const MAX_QUERY_LENGTH = 120
+const siteByDatabase = computed(() =>
+  Object.fromEntries(
+    sites.value.filter((site) => site.db_name).map((site) => [site.db_name, site.name]),
+  ),
+)
+
+const MAX_QUERY_LENGTH = 30
 
 // Long queries can be arbitrarily large single-line strings that would
 // otherwise force the table wider than the page.
-const truncateQuery = (query) => {
+const truncateQuery = (query: string | null) => {
   if (!query) return '—'
   return query.length > MAX_QUERY_LENGTH ? `${query.slice(0, MAX_QUERY_LENGTH)}…` : query
 }
 
-const formatSeconds = (seconds) => {
+const formatSeconds = (seconds: number | null) => {
   return seconds == null ? '—' : `${Math.round(seconds)}s`
-}
-
-const fileAge = (file) => {
-  return file.modified_ms ? relativeTime(new Date(file.modified_ms).toISOString()) : '—'
 }
 
 // Purging is contiguous from the oldest file, so ticking one file ticks every
 // older file with it and unticking one clears everything newer.
-const toggle = (index, checked) => {
+const toggle = (index: number, checked: boolean) => {
   selectedIndex.value = checked ? index : index - 1
 }
 
-const confirmKill = (process) => {
+const confirmKill = (process: DatabaseProcess) => {
   killTarget.value = process
   killError.value = ''
   showKillDialog.value = true
 }
 
 const kill = async () => {
+  const target = killTarget.value
+  if (!target) return
+
   killing.value = true
   killError.value = ''
   try {
-    const result = await databaseApi.killProcess(killTarget.value.id)
-    if (result.error) throw new Error(apiErrorMessage(result, 'Could not kill the process.'))
+    const result = await databaseApi.killProcess(target.id)
+    if (hasApiError(result)) throw new Error(apiErrorMessage(result, 'Could not kill the process.'))
     showKillDialog.value = false
-    toast.success(`Killed process ${killTarget.value.id}`)
+    toast.success(`Killed process ${target.id}`)
     await loadProcesses()
-  } catch (e) {
-    killError.value = e.message || 'Could not kill the process.'
+  } catch (caught) {
+    killError.value = errorMessage(caught, 'Could not kill the process.')
   } finally {
     killing.value = false
   }
 }
 
-const confirmPurge = (index) => {
+const confirmPurge = (index: number) => {
   pendingIndex.value = index
   purgeError.value = ''
   showPurgeDialog.value = true
@@ -260,13 +275,16 @@ const purge = async () => {
   purgeError.value = ''
   try {
     const result = await databaseApi.binlogs.purge(keepFrom.name)
-    if (result.error) throw new Error(apiErrorMessage(result, 'Could not delete binary logs.'))
+    if (hasApiError(result)) {
+      throw new Error(apiErrorMessage(result, 'Could not delete binary logs.'))
+    }
+
     showPurgeDialog.value = false
     selectedIndex.value = -1
     toast.success('Binary logs deleted')
     await loadBinlogs()
-  } catch (e) {
-    purgeError.value = e.message || 'Could not delete binary logs.'
+  } catch (caught) {
+    purgeError.value = errorMessage(caught, 'Could not delete binary logs.')
   } finally {
     purging.value = false
   }
@@ -277,11 +295,13 @@ const loadProcesses = async () => {
   processesError.value = ''
   try {
     const result = await databaseApi.processList(selectedSite.value)
-    if (result?.error)
+    if (hasApiError(result)) {
       throw new Error(apiErrorMessage(result, 'Could not load database processes.'))
+    }
+
     processes.value = Array.isArray(result) ? result : []
-  } catch (e) {
-    processesError.value = e.message || 'Could not load database processes.'
+  } catch (caught) {
+    processesError.value = errorMessage(caught, 'Could not load database processes.')
   } finally {
     processesLoading.value = false
   }
@@ -320,12 +340,14 @@ const fetchLockWaits = async () => {
       lockWaitsReloadQueued = true
       return
     }
-    if (result?.error)
+    if (hasApiError(result)) {
       throw new Error(apiErrorMessage(result, 'Could not load database lock waits.'))
+    }
+
     lockWaits.value = Array.isArray(result) ? result : []
-  } catch (e) {
+  } catch (caught) {
     if (site !== selectedSite.value) lockWaitsReloadQueued = true
-    else lockWaitsError.value = e.message || 'Could not load database lock waits.'
+    else lockWaitsError.value = errorMessage(caught, 'Could not load database lock waits.')
   }
 }
 
@@ -334,14 +356,22 @@ const loadSize = async () => {
   sizeError.value = ''
   try {
     const result = await databaseApi.size(selectedSite.value)
-    if (result?.error) throw new Error(apiErrorMessage(result, 'Could not read the database size.'))
+    if (hasApiError(result)) {
+      throw new Error(apiErrorMessage(result, 'Could not read the database size.'))
+    }
+
     size.value = result
-  } catch (e) {
+  } catch (caught) {
     size.value = null
-    sizeError.value = e.message || 'Could not read the database size.'
+    sizeError.value = errorMessage(caught, 'Could not read the database size.')
   } finally {
     sizeLoading.value = false
   }
+}
+
+const openLockWaits = () => {
+  loadLockWaits()
+  if (autoRefreshLocks.value) startLockWaitsAutoRefresh()
 }
 
 const loadBinlogs = async () => {
@@ -349,17 +379,17 @@ const loadBinlogs = async () => {
   binlogsError.value = ''
   try {
     const result = await databaseApi.binlogs.list()
-    if (result?.error) throw new Error(apiErrorMessage(result, 'Could not load binary logs.'))
+    if (hasApiError(result)) throw new Error(apiErrorMessage(result, 'Could not load binary logs.'))
     binlogs.value = Array.isArray(result) ? result : []
     selectedIndex.value = -1
-  } catch (e) {
-    binlogsError.value = e.message || 'Could not load binary logs.'
+  } catch (caught) {
+    binlogsError.value = errorMessage(caught, 'Could not load binary logs.')
   } finally {
     binlogsLoading.value = false
   }
 }
 
-const pollLockWaits = async (version) => {
+const pollLockWaits = async (version: number) => {
   await loadLockWaits()
   if (version !== lockWaitsPollVersion || !autoRefreshLocks.value) return
   lockWaitsTimer = setTimeout(() => pollLockWaits(version), AUTO_REFRESH_INTERVAL_MS)
@@ -397,17 +427,17 @@ const load = async () => {
   if (route.query.site) selectedSite.value = String(route.query.site)
   try {
     const result = await databaseApi.diagnostics()
-    if (result.error)
+    if (hasApiError(result)) {
       throw new Error(apiErrorMessage(result, 'Could not load database diagnostics.'))
+    }
+
     diagnostics.value = result
     configuredEngine.value = result.engine
     if (!result.supported) return
-    const panels = [loadSites(), loadSize(), loadProcesses(), loadLockWaits()]
-    if (hasBinlogs.value) panels.push(loadBinlogs())
-    await Promise.all(panels)
-    if (autoRefreshLocks.value) startLockWaitsAutoRefresh()
-  } catch (e) {
-    error.value = e.message || 'Could not load database diagnostics.'
+    // The rest of the panels start collapsed and load themselves on first expand.
+    await Promise.all([loadSites(), loadSize()])
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Could not load database diagnostics.')
   } finally {
     loading.value = false
   }
@@ -427,19 +457,16 @@ onMounted(load)
 
 <template>
   <Teleport defer to="#header-actions">
-    <FormControl
+    <Select
       v-if="siteOptions.length > 1"
-      type="select"
       v-model="selectedSite"
       :options="siteOptions"
       class="w-32 sm:w-44"
     />
   </Teleport>
 
-  <div class="flex flex-col gap-4">
-    <div v-if="loading && !diagnostics" class="flex justify-center py-16">
-      <LoadingText />
-    </div>
+  <div class="p-3 md:p-4 flex flex-col gap-4">
+    <LoadingText v-if="loading && !diagnostics" class="justify-center py-16" />
 
     <div
       v-else-if="diagnostics && !diagnostics.supported"
@@ -447,7 +474,7 @@ onMounted(load)
     >
       <span class="size-6 text-ink-gray-3 lucide-database" />
       <p class="font-medium text-ink-gray-7 text-sm">No database server</p>
-      <p class="max-w-sm text-ink-gray-5 text-xs">{{ diagnostics.reason }}</p>
+      <p class="max-w-sm text-ink-gray-5 text-p-xs">{{ diagnostics.reason }}</p>
     </div>
 
     <ErrorMessage v-else-if="error" :message="error" />
@@ -456,16 +483,29 @@ onMounted(load)
       <DatabasePanel
         title="Database Size Breakup"
         subtitle="Analyze how storage is used"
+        hide-chevron
         :badge="selectedSite ? scopeBadge : 'Server-wide'"
         :loading="sizeLoading"
         @refresh="loadSize"
       >
         <template v-if="selectedSite" #actions>
-          <Button variant="subtle" size="sm" @click="showTableSizes = true">View Details</Button>
+          <Button @click="showTableSizes = true">View Details</Button>
         </template>
 
         <ErrorMessage v-if="sizeError" :message="sizeError" class="m-4" />
-        <p v-else-if="!size" class="py-6 text-ink-gray-5 text-sm text-center">
+
+        <div v-else-if="sizeLoading" class="px-4 pb-4">
+          <Skeleton class="rounded-full w-full h-5" />
+          <div v-for="row in 3" :key="row" class="flex justify-between gap-4 py-2">
+            <Skeleton class="rounded-4 w-32 h-4" />
+            <Skeleton class="rounded-4 w-16 h-4" />
+          </div>
+        </div>
+
+        <p
+          v-else-if="!size"
+          class="py-10 border-t border-outline-gray-2 text-ink-gray-5 text-sm text-center"
+        >
           No results to display
         </p>
 
@@ -477,37 +517,31 @@ onMounted(load)
         subtitle="Analyze the processes of the database"
         :badge="scopeBadge"
         :loading="processesLoading"
+        @open="loadProcesses"
         @refresh="loadProcesses"
       >
         <ErrorMessage v-if="processesError" :message="processesError" class="m-4" />
-        <ListView
-          v-else
-          class="p-4 !w-full"
+        <Table
+          v-else-if="processRows.length"
+          class="px-4 pb-4"
           :columns="processColumns"
           :rows="processRows"
-          row-key="number"
-          :options="{ selectable: false, showTooltip: false }"
         >
-          <template #cell="{ column, row, item }">
-            <div v-if="column.key === 'actions'" class="flex justify-end">
-              <Button
-                variant="ghost"
-                theme="red"
-                size="sm"
-                iconLeft="lucide-x"
-                @click="confirmKill(row.process)"
-              >
-                Kill
-              </Button>
-            </div>
-
-            <ListRowItem v-else :column="column" :row="row" :item="item" :align="column.align" />
+          <template #actions="{ row }">
+            <Button
+              variant="ghost"
+              theme="red"
+              iconLeft="lucide-x"
+              @click="confirmKill(row.process)"
+            >
+              Kill
+            </Button>
           </template>
+        </Table>
 
-          <ListHeader />
-          <ListRows v-if="processRows.length" />
-          <p v-else class="py-6 text-ink-gray-5 text-sm text-center">No results to display</p>
-        </ListView>
+        <p v-else class="py-10 border-t border-outline-gray-2 text-ink-gray-5 text-sm text-center">
+          No results to display
+        </p>
       </DatabasePanel>
 
       <DatabasePanel
@@ -515,29 +549,44 @@ onMounted(load)
         subtitle="Analyze the lock waits of the database"
         :badge="[scopeBadge, lockColumnsBadge]"
         :loading="lockWaitsLoading"
-        show-auto-refresh
-        :auto-refresh="autoRefreshLocks"
-        @update:auto-refresh="autoRefreshLocks = $event"
+        @open="openLockWaits"
         @refresh="loadLockWaits"
       >
+        <template #actions>
+          <label class="flex items-center gap-2 cursor-pointer">
+            <Switch v-model="autoRefreshLocks" />
+            <span class="text-ink-gray-7 text-sm">Auto Refresh</span>
+          </label>
+        </template>
+
         <ErrorMessage v-if="lockWaitsError" :message="lockWaitsError" class="m-4" />
-        <ListView
-          v-else
-          class="p-4 !w-full"
+        <Table
+          v-else-if="lockRows.length"
+          class="px-4 pb-4"
           :columns="lockColumns"
           :rows="lockRows"
-          row-key="number"
-          :options="{ selectable: false, showTooltip: false }"
-        >
-          <template #cell="{ column, row, item }">
-            <ListRowItem :column="column" :row="row" :item="item" :align="column.align" />
-          </template>
+        />
 
-          <ListHeader />
-          <ListRows v-if="lockRows.length" />
-          <p v-else class="py-6 text-ink-gray-5 text-sm text-center">No results to display</p>
-        </ListView>
+        <p v-else class="py-10 border-t border-outline-gray-2 text-ink-gray-5 text-sm text-center">
+          No results to display
+        </p>
       </DatabasePanel>
+
+      <QueryAnalysisPanel
+        :site="selectedSite"
+        :badge="scopeBadge"
+        :enabled="Boolean(diagnostics?.performance_schema_enabled)"
+        :show-site="!selectedSite"
+        :site-by-database="siteByDatabase"
+      />
+
+      <IndexAnalysisPanel
+        :site="selectedSite"
+        :badge="scopeBadge"
+        :enabled="Boolean(diagnostics?.performance_schema_enabled)"
+        :show-site="!selectedSite"
+        :site-by-database="siteByDatabase"
+      />
 
       <DatabasePanel
         v-if="hasBinlogs"
@@ -545,47 +594,43 @@ onMounted(load)
         subtitle="Manage the binary logs of the database"
         :badge="selectedSite ? 'Server-wide' : ''"
         :loading="binlogsLoading"
+        @open="loadBinlogs"
         @refresh="loadBinlogs"
       >
         <ErrorMessage v-if="binlogsError" :message="binlogsError" class="m-4" />
+
+        <p
+          v-else-if="!binlogRows.length"
+          class="py-10 border-t border-outline-gray-2 text-ink-gray-5 text-sm text-center"
+        >
+          No results to display
+        </p>
+
         <div v-else class="p-4">
-          <ListView
-            class="!w-full"
-            :columns="binlogColumns"
-            :rows="binlogRows"
-            row-key="number"
-            :options="{ selectable: false, showTooltip: false }"
-          >
-            <template #cell="{ column, row, item }">
+          <Table :columns="binlogColumns" :rows="binlogRows">
+            <template #selected="{ row }">
               <Checkbox
-                v-if="column.key === 'selected'"
                 :modelValue="row.index <= selectedIndex"
                 :disabled="row.isActive"
-                @update:modelValue="toggle(row.index, $event)"
+                @update:modelValue="toggle(row.index, Boolean($event))"
               />
-              <div v-else-if="column.key === 'actions'" class="flex justify-end">
-                <Tooltip v-if="!row.isActive" text="Delete this file and every older one">
-                  <Button
-                    variant="ghost"
-                    theme="red"
-                    size="sm"
-                    icon="lucide-trash-2"
-                    label="Delete binary logs"
-                    @click="confirmPurge(row.index)"
-                  />
-                </Tooltip>
-              </div>
-
-              <ListRowItem v-else :column="column" :row="row" :item="item" :align="column.align" />
             </template>
 
-            <ListHeader />
-            <ListRows v-if="binlogRows.length" />
-            <p v-else class="py-6 text-ink-gray-5 text-sm text-center">No results to display</p>
-          </ListView>
+            <template #actions="{ row }">
+              <Tooltip v-if="!row.isActive" text="Delete this file and every older one">
+                <Button
+                  variant="ghost"
+                  theme="red"
+                  icon="lucide-trash-2"
+                  label="Delete binary logs"
+                  @click="confirmPurge(row.index)"
+                />
+              </Tooltip>
+            </template>
+          </Table>
 
           <div v-if="binlogs.length" class="flex flex-wrap justify-between items-center gap-2 mt-3">
-            <p class="text-ink-gray-5 text-xs">
+            <p class="text-ink-gray-5 text-p-xs">
               The newest log is in use and cannot be deleted. Selecting a file also selects every
               older one, because the server can only purge them together.
             </p>
@@ -609,12 +654,12 @@ onMounted(load)
   <TableSizesDialog v-model:open="showTableSizes" :site="selectedSite" />
 
   <Dialog v-model="showKillDialog" title="Kill database process" size="sm">
-    <p class="text-ink-gray-7 text-sm">
+    <p class="text-ink-gray-7 text-sm leading-relaxed">
       Close connection <strong>{{ killTarget?.id }}</strong> and roll back whatever it is running?
       Any bench sharing this server may own it.
     </p>
 
-    <dl class="space-y-1.5 bg-surface-gray-1 mt-3 p-3 rounded-6 text-xs">
+    <dl class="flex flex-col gap-2 mt-4 text-sm">
       <div
         v-for="item in killDetails"
         :key="item.label"
@@ -623,20 +668,23 @@ onMounted(load)
         <dt class="text-ink-gray-5 shrink-0">{{ item.label }}</dt>
         <dd class="font-medium text-ink-gray-8 truncate">{{ item.value }}</dd>
       </div>
-
-      <div v-if="killQuery" class="space-y-1.5 pt-1.5 border-t border-outline-gray-2">
-        <dt class="text-ink-gray-5">Query</dt>
-        <dd class="max-h-24 overflow-y-auto font-mono font-medium text-ink-gray-8 break-all">
-          {{ killQuery }}
-        </dd>
-      </div>
     </dl>
 
-    <ErrorMessage v-if="killError" :message="killError" class="mt-3" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showKillDialog = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="killing" @click="kill">Kill process</Button>
-    </div>
+    <p v-if="killQuery" class="mt-4 mb-1.5 text-ink-gray-5 text-sm">Query</p>
+
+    <pre
+      v-if="killQuery"
+      class="bg-surface-gray-2 p-3 rounded-4 max-h-40 overflow-auto font-mono text-ink-gray-8 text-sm leading-relaxed whitespace-pre-wrap break-words"
+    >{{ killQuery }}</pre>
+
+    <ErrorMessage v-if="killError" :message="killError" class="mt-4" />
+
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button @click="showKillDialog = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="killing" @click="kill">Kill process</Button>
+      </div>
+    </template>
   </Dialog>
 
   <Dialog v-model="showPurgeDialog" title="Delete binary logs" size="sm">
@@ -661,19 +709,11 @@ onMounted(load)
     </dl>
 
     <ErrorMessage v-if="purgeError" :message="purgeError" class="mt-3" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showPurgeDialog = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="purging" @click="purge">Delete</Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showPurgeDialog = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="purging" @click="purge">Delete</Button>
+      </div>
+    </template>
   </Dialog>
 </template>
-
-<style scoped>
-/* A `1fr` grid track takes its minimum from the item's min-content width, so a
-   long header label or query would widen the table past the panel and add a
-   horizontal scrollbar. Letting the cells shrink keeps every column in view. */
-:deep(.grid) > * {
-  min-width: 0;
-  overflow: hidden;
-}
-</style>

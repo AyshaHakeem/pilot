@@ -5,15 +5,16 @@ import {
   isTaskActive,
   isTaskCancellable,
   redirectRouteOnSuccess,
-  relativeTime,
   SERVER_SCOPE,
   siteLabel,
   siteRoute,
   statusConfig,
-  taskScope,
   taskDuration,
   taskLastRun,
+  taskScope,
 } from './taskFormat.ts'
+
+import { relativeTime } from './time.ts'
 
 test('queued tasks have their own presentation', () => {
   assert.equal(statusConfig({ status: 'queued' }).label, 'Queued')
@@ -25,11 +26,6 @@ test('queued and running tasks are active', () => {
   assert.equal(isTaskActive({ status: 'running' }), true)
   assert.equal(isTaskActive({ status: 'success' }), false)
   assert.equal(isTaskActive(null), false)
-})
-
-test('task timing tolerates a missing timestamp', () => {
-  assert.equal(relativeTime(null), '')
-  assert.equal(relativeTime(undefined), '')
 })
 
 test('siteLabel names the site, or the server when a task has none', () => {
@@ -55,8 +51,14 @@ test('taskScope names the server when a task is not bound to a site', () => {
   })
   assert.deepEqual(taskScope({ command: 'build', args: {} }), {
     label: 'Server',
-    route: { name: 'Server' },
+    route: null,
   })
+})
+
+test('Enable SSL names its site, and bench-wide Let\'s Encrypt names the server', () => {
+  assert.equal(siteLabel({ command: 'setup-letsencrypt', args: { site: 'a.local' } }), 'a.local')
+  assert.equal(siteLabel({ command: 'setup-letsencrypt', args: { site: '' } }), SERVER_SCOPE)
+  assert.equal(siteLabel({ command: 'revert-site', args: { site: 'a.local' } }), 'a.local')
 })
 
 test('site-creating and app tasks redirect to the site page on success', () => {
@@ -98,6 +100,11 @@ test('site-creating and app tasks redirect to the site page on success', () => {
     redirectRouteOnSuccess({ command: 'get-and-install-app', args: { site: 'a.local', repo: 'x' } }),
     { name: 'SiteDetail', params: { name: 'a.local' } },
   )
+
+  assert.deepEqual(redirectRouteOnSuccess({ command: 'new-app', args: { name: 'people_ops' } }), {
+    name: 'Marketplace',
+  })
+
   // A dropped site has no detail page left to land on.
   assert.deepEqual(redirectRouteOnSuccess({ command: 'drop-site', args: { site: 'a.local' } }), {
     name: 'Sites',

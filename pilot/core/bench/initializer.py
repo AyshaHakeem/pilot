@@ -4,17 +4,21 @@ import shutil
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from pilot.config.common_site_config import update_common_site_config
+
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
 
-_BENCH_DIRS = ("apps", "sites", "logs", "config", "pids", "env", "admin", "tasks")
+# `tasks` is left out: the task store creates it.
+_BENCH_DIRS = ("apps", "sites", "logs", "config", "pids", "env", "admin")
 
 
 class BenchInitializer:
     """Initializes a fresh bench and rolls back partial setup on failure."""
 
-    def __init__(self, bench: "Bench") -> None:
+    def __init__(self, bench: "Bench", commit: str = "") -> None:
         self.bench = bench
+        self.commit = commit
         self._rollback_actions: list[tuple[str, Callable[[], None]]] = []
 
     def run(self, on_progress: Callable[[str], None] = lambda message: None) -> None:
@@ -83,6 +87,8 @@ class BenchInitializer:
     def _create_bench_structure(self) -> None:
         self.bench.create_directories()
         self.bench.write_common_site_config()
+        with update_common_site_config(self.bench.sites_path) as config:
+            config.setdefault("server_script_enabled", True)
         self._rollback_actions.append(("bench directories", self._remove_bench_dirs))
 
     def _create_virtualenv(self, python_env_manager) -> None:
@@ -94,6 +100,9 @@ class BenchInitializer:
             if not app.is_cloned:
                 on_progress(f"  Cloning {app.config.name}...")
                 app.clone()
+            if self.commit and app.config.name == self.bench.config.framework_app.name:
+                on_progress(f"  Checking out {app.config.name} at {self.commit[:8]}...")
+                app.checkout_commit(self.commit)
             on_progress(f"  Installing {app.config.name}...")
             python_env_manager.install_app(app)
         self.bench.write_apps_txt()

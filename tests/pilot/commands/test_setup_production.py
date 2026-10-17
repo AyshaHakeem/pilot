@@ -1,11 +1,10 @@
-"""Tests for ProductionSetup helpers and letsencrypt gating."""
-
 from __future__ import annotations
 
 import json
 import sys
 import tomllib
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -32,8 +31,7 @@ def _make_bench(
     benches_dir = tmp_path / "benches"
     bench_dir = benches_dir / name
     (bench_dir / "sites").mkdir(parents=True, exist_ok=True)
-    # mariadb/letsencrypt are host-shared state (common_config.toml), not
-    # bench.toml fields, since this change.
+    # MariaDB and Let's Encrypt remain in host-shared config.
     CommonConfig(
         mariadb=MariaDBConfig(root_password="root"),
         letsencrypt=LetsEncryptConfig(email=email),
@@ -47,6 +45,13 @@ def _make_bench(
     )
     config = BenchConfig.from_file(bench_dir / "bench.toml")
     return Bench(config, bench_dir)
+
+
+def _make_site(bench: Bench, name: str, *, ssl: bool = False) -> Path:
+    site_path = bench.sites_path / name
+    site_path.mkdir(parents=True)
+    (site_path / "site_config.json").write_text(json.dumps({"db_name": "site", "ssl": ssl}))
+    return site_path
 
 
 def test_persist_preserves_other_fields(tmp_path: Path) -> None:
@@ -171,7 +176,7 @@ def test_resolve_target_applies_letsencrypt_email(tmp_path: Path) -> None:
 
 
 def test_require_production_inputs_needs_admin_domain(tmp_path: Path) -> None:
-    # Fresh, undeployed bench: empty domain, no process manager yet (so it loads).
+    # Fresh bench: empty domain and no process manager.
     bench = _make_bench(tmp_path, admin_domain="", process_manager="")
     cmd = ProductionSetup(bench, process_manager="systemd")
     cmd._resolve_target()
@@ -192,6 +197,15 @@ def test_require_production_inputs_passes_with_domain_and_email(tmp_path: Path) 
     cmd = ProductionSetup(bench, process_manager="systemd")
     cmd._resolve_target()
     cmd._require_production_inputs()  # no raise
+
+
+def test_require_production_inputs_needs_email_for_existing_public_site(tmp_path: Path) -> None:
+    bench = _make_bench(tmp_path, admin_domain="admin.localhost", email="")
+    _make_site(bench, "site.example.com")
+    cmd = ProductionSetup(bench)
+
+    with pytest.raises(BenchError, match="contact email is required"):
+        cmd._require_production_inputs()
 
 
 def test_setup_monitoring_runs_privileged_setup_at_provision_time(tmp_path: Path, monkeypatch) -> None:
@@ -275,6 +289,17 @@ def test_setup_letsencrypt_swallows_when_best_effort(tmp_path: Path, monkeypatch
     assert "dns not ready" in capsys.readouterr().err
 
 
+def test_setup_letsencrypt_enables_existing_public_sites(tmp_path: Path) -> None:
+    bench = _make_bench(tmp_path, admin_domain="admin.localhost", email="x@y.com")
+    site_path = _make_site(bench, "site.example.com")
+
+    with patch.object(Bench, "setup_letsencrypt") as setup_letsencrypt:
+        ProductionSetup(bench)._setup_letsencrypt_if_needed()
+
+    setup_letsencrypt.assert_called_once_with()
+    assert json.loads((site_path / "site_config.json").read_text())["ssl"] is True
+
+
 def test_persist_production_state_writes_enabled_and_drops_nginx(tmp_path: Path) -> None:
     bench = _make_bench(tmp_path, process_manager="supervisor")
     # legacy nginx key present in toml
@@ -294,3 +319,57 @@ def test_persist_production_state_writes_enabled_and_drops_nginx(tmp_path: Path)
     assert "nginx" not in data["production"]
     assert data["admin"]["tls"] is True
     assert data["admin"]["enabled"] is True
+
+
+def test_persist_production_state_keeps_the_letsencrypt_email(tmp_path: Path) -> None:
+    from pilot.config.common import CommonConfig
+
+    bench = _make_bench(tmp_path, process_manager="systemd")
+    cmd = ProductionSetup(bench, letsencrypt_email="ops@example.com")
+    cmd._resolve_target()
+    cmd._persist_production_state()
+
+    assert CommonConfig.read(bench.path.parent).letsencrypt.email == "ops@example.com"
+
+
+
+
+def test_letsencrypt_is_required_for_a_custom_tls_domain_with_admin_tls_off(tmp_path: Path) -> None:
+    """A cloud site's local TLS still requires an email."""
+    from pilot.managers.letsencrypt import is_letsencrypt_required, letsencrypt_email_required
+
+    bench = _make_bench(tmp_path, admin_domain="vm-1.zone.example", email="ops@example.com")
+    bench.config.admin.tls = False
+    site_path = _make_site(bench, "site-a1.zone.example")
+    (site_path / "site_config.json").write_text(
+        json.dumps({"ssl": False, "domains": [{"domain": "shop.customer.com", "tls": True}]})
+    )
+
+    assert letsencrypt_email_required(bench) is True
+    assert is_letsencrypt_required(bench) is True
+
+
+def test_letsencrypt_is_not_required_for_a_fully_proxied_bench(tmp_path: Path) -> None:
+    from pilot.managers.letsencrypt import letsencrypt_email_required
+
+    bench = _make_bench(tmp_path, admin_domain="vm-1.zone.example", email="ops@example.com")
+    bench.config.admin.tls = False
+    site_path = _make_site(bench, "site-a1.zone.example")
+    (site_path / "site_config.json").write_text(json.dumps({"ssl": False}))
+
+    assert letsencrypt_email_required(bench) is False
+
+
+def test_a_host_without_fluent_bit_still_deploys(tmp_path: Path, capsys) -> None:
+    # Debian and Ubuntu do not package fluent-bit.
+    bench = _make_bench(tmp_path, process_manager="systemd")
+    bench.config.telemetry.endpoint = "https://datum.example.com"
+    bench.config.telemetry.token = "token"
+
+    with patch(
+        "pilot.managers.fluentbit.LogsConfigurator.setup",
+        side_effect=BenchError("Required: fluent-bit."),
+    ):
+        ProductionSetup(bench)._setup_log_shipping()
+
+    assert "logs are not shipped" in capsys.readouterr().err

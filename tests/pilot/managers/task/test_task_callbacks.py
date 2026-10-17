@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -70,6 +71,28 @@ def test_remove_failed_site_preserves_files_when_database_drop_fails(
         )
 
     assert (site_path / "site_config.json").is_file()
+
+
+def test_drop_failed_site_skips_the_backup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    site_path = tmp_path / "sites" / "new.localhost"
+    site_path.mkdir(parents=True)
+    (site_path / "site_config.json").write_text("{}")
+    drops = []
+
+    class FakeBench:
+        def __init__(self, bench_root: Path) -> None:
+            pass
+
+        def site(self, name: str) -> SimpleNamespace:
+            return SimpleNamespace(drop=lambda **kwargs: drops.append((name, kwargs)))
+
+    monkeypatch.setattr("pilot.core.bench.Bench", FakeBench)
+
+    assert callbacks._drop_failed_site(tmp_path, "new.localhost", site_path)
+    assert drops == [("new.localhost", {"no_backup": True})]
 
 
 def test_remove_from_hosts_matches_address_and_hostname_tokens(
@@ -186,3 +209,19 @@ def test_cleanup_site_restore_refuses_symlinked_upload_root(tmp_path: Path) -> N
         )
 
     assert upload_dir.exists()
+
+
+def test_cleanup_site_restore_removes_the_downloads_of_its_own_task_only(tmp_path: Path) -> None:
+    """A task process that dies cannot remove its downloads, so the failure callback does."""
+    restores = tmp_path / "tmp" / "restores"
+    own, other = restores / "20261006-030650-f261c6-abc", restores / "20261006-031000-aaaaaa-def"
+    own.mkdir(parents=True)
+    other.mkdir()
+    (own / "files.tar").write_text("backup")
+
+    callbacks.run_callback(
+        {"operation": "cleanup-site-restore", "args": {"site": "a.localhost", "upload_dir": ""}},
+        {"bench_root": str(tmp_path), "task_id": "20261006-030650-f261c6"},
+    )
+
+    assert not own.exists() and other.exists()

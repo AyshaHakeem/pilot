@@ -7,10 +7,13 @@ import tomllib
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pilot.exceptions import BenchError
+from pilot.core.app.node_packages import PACKAGE_MANAGERS, YARN, NodePackages
+from pilot.exceptions import BenchError, CommandError
 from pilot.managers.platform import add_mysqlclient_flags, is_macos, which
 from pilot.managers.python_assets import PythonAssetBuilder
-from pilot.utils import get_yarn_bin, run_command
+from pilot.utils import run_command
+
+MINIMUM_NODE_MAJOR = 24
 
 if TYPE_CHECKING:
     from pilot.core.app import App
@@ -151,24 +154,36 @@ class PythonEnvManager:
         run_command([uv, "venv", "--python", version, str(self.bench.env_path)], stream_output=True)
 
     def _build_env(self) -> dict:
-        """Build subprocess env with yarn on PATH and macOS mysqlclient flags."""
+        """Build subprocess env with yarn and pnpm on PATH and macOS mysqlclient flags."""
         env = os.environ.copy()
 
-        try:
-            yarn_dir = str(Path(get_yarn_bin()).parent)
-            env["PATH"] = os.pathsep.join([yarn_dir, env.get("PATH", "")])
-        except BenchError:
-            pass  # yarn not installed yet (e.g. compiling C extensions pre-node)
+        # A tool can be missing, for example while C extensions compile before Node is set up.
+        for manager in PACKAGE_MANAGERS:
+            if manager.is_installed:
+                env["PATH"] = os.pathsep.join([str(Path(manager.bin).parent), env.get("PATH", "")])
 
         add_mysqlclient_flags(env)
 
         return env
 
     def install_app(self, app: "App") -> None:
+        """Install the app editable. A dev extra that does not resolve does not block it."""
+        target = app.editable_target
+        try:
+            self._install_editable(target)
+        except CommandError:
+            if target == str(app.path):
+                raise
+            print(
+                f"Warning: the dev extra of {app.config.name} does not install; installing {app.config.name} without it."
+            )
+            self._install_editable(str(app.path))
+
+    def _install_editable(self, target: str) -> None:
         uv = ensure_uv()
         python = str(self.bench.env_path / "bin" / "python")
         run_command(
-            [uv, "pip", "install", "--python", python, "-e", app.editable_target],
+            [uv, "pip", "install", "--python", python, "-e", target],
             stream_output=True,
             env=self._build_env(),
         )
@@ -181,8 +196,19 @@ class PythonEnvManager:
     def install_node(self) -> None:
         if not which("node"):
             self._install_node()
-        if not which("yarn"):
-            self._install_yarn()
+        self.require_node_version()
+        YARN.ensure_installed()
+
+    @staticmethod
+    def require_node_version() -> None:
+        """Frappe v16 needs Node 24. Fail here rather than later inside `yarn install`."""
+        version = run_command(["node", "--version"]).stdout.decode().strip()
+        major = int(version.lstrip("v").split(".", 1)[0])
+        if major < MINIMUM_NODE_MAJOR:
+            raise BenchError(
+                f"Node.js {MINIMUM_NODE_MAJOR} or later is required, but `node` on PATH is {version} "
+                f"({which('node')}). Install Node.js {MINIMUM_NODE_MAJOR} or put it first on PATH."
+            )
 
     def _install_node(self) -> None:
         if is_macos():
@@ -192,22 +218,9 @@ class PythonEnvManager:
             "Node.js is not installed. Re-run install.sh as root to install it, or install it yourself."
         )
 
-    def _install_yarn(self) -> None:
-        if is_macos():
-            run_command(["npm", "install", "-g", "yarn"])
-        else:
-            npm_prefix = Path.home() / ".local"
-            npm_prefix.mkdir(parents=True, exist_ok=True)
-            run_command(["npm", "install", "-g", "yarn", "--prefix", str(npm_prefix)])
-
     def install_node_dependencies(self) -> None:
         for app in self.bench.apps():
-            if (app.path / "package.json").exists():
-                run_command(
-                    [get_yarn_bin(), "install", "--frozen-lockfile"],
-                    cwd=app.path,
-                    stream_output=True,
-                )
+            NodePackages(app.path).install()
 
     def build_assets(self) -> None:
         self._assets.build_assets()

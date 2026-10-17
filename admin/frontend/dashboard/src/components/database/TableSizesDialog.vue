@@ -1,27 +1,34 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Dialog, ErrorMessage, LoadingText } from 'frappe-ui'
-import { ListView } from 'frappe-ui/experimental'
 
-import { apiErrorMessage } from '@/api/client'
+import Table from '@/components/common/Table.vue'
+
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { databaseApi } from '@/api/database'
 import { formatBytes } from '@/utils/format'
+import type { TableSize } from '@/types/database'
+import { errorMessage } from '@/utils/error'
 
-const props = defineProps({
-  site: { type: String, default: '' },
+interface Props {
+  site?: string
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  site: '',
 })
 
 const open = defineModel('open', { type: Boolean, default: false })
 
 const columns = [
-  { label: 'Table', key: 'name', align: 'left', width: 3 },
-  { label: 'Data', key: 'data', align: 'right', width: 1 },
-  { label: 'Index', key: 'index', align: 'right', width: 1 },
-  { label: 'Claimable', key: 'claimable', align: 'right', width: 1 },
-  { label: 'Total', key: 'total', align: 'right', width: 1 },
+  { label: 'Table', key: 'name', class: 'w-[44%]' },
+  { label: 'Data', key: 'data', class: 'w-[14%]' },
+  { label: 'Index', key: 'index', class: 'w-[14%]' },
+  { label: 'Claimable', key: 'claimable', class: 'w-[14%]' },
+  { label: 'Total', key: 'total', class: 'w-[14%]' },
 ]
 
-const tables = ref([])
+const tables = ref<TableSize[]>([])
 const loading = ref(false)
 const error = ref('')
 
@@ -45,10 +52,10 @@ const load = async () => {
   tables.value = []
   try {
     const result = await databaseApi.tableSizes(props.site)
-    if (result?.error) throw new Error(apiErrorMessage(result, 'Could not read table sizes.'))
+    if (hasApiError(result)) throw new Error(apiErrorMessage(result, 'Could not read table sizes.'))
     tables.value = Array.isArray(result) ? result : []
-  } catch (e) {
-    error.value = e.message || 'Could not read table sizes.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Could not read table sizes.')
   } finally {
     loading.value = false
   }
@@ -57,9 +64,7 @@ const load = async () => {
 
 <template>
   <Dialog v-model="open" :title="`Table sizes on ${site}`" size="3xl">
-    <div v-if="loading" class="flex justify-center py-10">
-      <LoadingText />
-    </div>
+    <LoadingText v-if="loading" class="justify-center py-10" />
 
     <ErrorMessage v-else-if="error" :message="error" />
 
@@ -67,14 +72,6 @@ const load = async () => {
       No results to display
     </p>
 
-    <div v-else class="max-h-[60vh] overflow-y-auto">
-      <ListView
-        class="!w-full"
-        :columns="columns"
-        :rows="rows"
-        row-key="name"
-        :options="{ selectable: false, showTooltip: false }"
-      />
-    </div>
+    <Table v-else :columns="columns" :rows="rows" height="max-h-[60vh]" />
   </Dialog>
 </template>

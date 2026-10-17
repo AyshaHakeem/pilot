@@ -47,6 +47,7 @@ PROVIDER_LABELS = {
     "aws": "Amazon S3",
     "digitalocean": "DigitalOcean Spaces",
     "hetzner": "Hetzner Object Storage",
+    "frappe": "Frappe Cloud",
 }
 
 SUPPORTED_REGIONS = {
@@ -86,7 +87,7 @@ class S3:
     region_name: str
     provider: str
     bucket_name: str
-    endpoint_url: str = field(init=False)
+    endpoint_url: str = ""
     client: Any = field(init=False)
 
     def __post_init__(self):
@@ -94,10 +95,11 @@ class S3:
             load_boto3()
         except ImportError as error:
             raise RuntimeError("boto3 is not installed. Run: pip install boto3") from error
-        try:
-            self.endpoint_url = build_endpoint_url(self.provider, self.region_name)
-        except ValueError as error:
-            raise S3IntegrationError(str(error)) from error
+        if not self.endpoint_url:
+            try:
+                self.endpoint_url = build_endpoint_url(self.provider, self.region_name)
+            except ValueError as error:
+                raise S3IntegrationError(str(error)) from error
         addressing_style = "virtual" if self.provider == "aws" else "path"
 
         self.client = boto3.client(
@@ -120,6 +122,7 @@ class S3:
             region_name=config.region,
             provider=config.provider,
             bucket_name=config.bucket,
+            endpoint_url=config.endpoint_url,
         )
         client.create_bucket_if_not_present(config.bucket)
         return client
@@ -215,12 +218,16 @@ class S3:
             ) from error
 
     def list_objects(self, bucket_name: str, prefix: str) -> list[str]:
+        return list(self.get_object_sizes(bucket_name, prefix))
+
+    def get_object_sizes(self, bucket_name: str, prefix: str) -> dict[str, int]:
+        """Size in bytes of each object under `prefix`, keyed by object key."""
         try:
             paginator = self.client.get_paginator("list_objects_v2")
-            keys: list[str] = []
+            sizes: dict[str, int] = {}
             for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
-                keys.extend(obj["Key"] for obj in page.get("Contents", []))
-            return keys
+                sizes.update((obj["Key"], obj["Size"]) for obj in page.get("Contents", []))
+            return sizes
         except ClientError as error:
             raise S3IntegrationError(
                 f"Failed to list '{bucket_name}/{prefix}': {error.response['Error'].get('Message', error)}",

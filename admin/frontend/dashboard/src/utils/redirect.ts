@@ -1,18 +1,8 @@
-export const safeRedirect = (value, fallback = '/') => {
+export const safeRedirect = (value: unknown, fallback = '/') => {
   return typeof value === 'string' &&
     value.startsWith('/') &&
     !value.startsWith('//') &&
     !value.startsWith('/login')
     ? value
     : fallback
-}
-
-// Off-SPA targets (the code editor) have no route here and need a full load.
-export const redirectAfterLogin = (router, value) => {
-  const target = safeRedirect(value)
-  if (router.resolve(target).matched.length) {
-    router.replace(target)
-  } else {
-    window.location.assign(target)
-  }
 }

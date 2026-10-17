@@ -1,15 +1,21 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
 import { ErrorMessage, Spinner, Switch, toast } from 'frappe-ui'
-
-import SettingsRow from '@/components/settings/SettingsRow.vue'
-import Version from '@/components/settings/Version.vue'
-
+import { onMounted, ref } from 'vue'
 import { settingsApi } from '@/api/settings'
+import Git from '@/components/settings/Git.vue'
+import LLM from '@/components/settings/LLM.vue'
+import Mail from '@/components/settings/Mail.vue'
+import Notifications from '@/components/settings/Notifications.vue'
+import S3Bucket from '@/components/settings/S3Bucket.vue'
+import SettingsRow from '@/components/settings/SettingsRow.vue'
+import { GENERAL_SECTIONS } from '@/components/settings/sections'
+import Version from '@/components/settings/Version.vue'
+import Workers from '@/components/settings/Workers.vue'
 import { useSession } from '@/composables/auth/useSession'
-import { GENERAL_SECTIONS as sections } from '@/components/settings/sections'
+import { errorMessage } from '@/utils/error'
 
-const openSection = defineModel('openSection')
+const openSection = defineModel<{ id: string } | null>('openSection')
+const sections = GENERAL_SECTIONS.filter((section) => !section.parent)
 
 const { session } = useSession()
 
@@ -20,7 +26,7 @@ const allowDeveloperMode = ref(false)
 const liteMode = ref(false)
 const liteModeSupported = ref(false)
 
-const toggleAllowDeveloperMode = async (value) => {
+const toggleAllowDeveloperMode = async (value: boolean) => {
   saving.value = true
   error.value = ''
   try {
@@ -29,13 +35,13 @@ const toggleAllowDeveloperMode = async (value) => {
     session.developerMode = value
     toast.success(`Developer mode ${value ? 'allowed' : 'disallowed'}`)
   } catch (e) {
-    error.value = e.message || 'Could not update developer mode setting.'
+    error.value = errorMessage(e, 'Could not update developer mode setting.')
   } finally {
     saving.value = false
   }
 }
 
-const toggleLiteMode = async (value) => {
+const toggleLiteMode = async (value: boolean) => {
   saving.value = true
   error.value = ''
   try {
@@ -43,7 +49,7 @@ const toggleLiteMode = async (value) => {
     liteMode.value = value
     toast.success(`Lite mode ${value ? 'enabled' : 'disabled'}. Rebuilding the process set.`)
   } catch (e) {
-    error.value = e.message || 'Could not update lite mode setting.'
+    error.value = errorMessage(e, 'Could not update lite mode setting.')
   } finally {
     saving.value = false
   }
@@ -68,12 +74,19 @@ onMounted(async () => {
     <Spinner size="lg" class="text-ink-gray-4" />
   </div>
 
-  <div v-else-if="openSection">
-    <component :is="openSection.component" />
-  </div>
+  <Git
+    v-else-if="openSection?.id === 'github' || openSection?.id === 'github-token'"
+    v-model:open-section="openSection"
+  />
+  <S3Bucket v-else-if="openSection?.id === 's3-bucket'" />
+  <LLM v-else-if="openSection?.id === 'llm'" />
+  <Notifications v-else-if="openSection?.id === 'notifications'" />
+  <Mail v-else-if="openSection?.id === 'mail'" />
+  <Workers v-else-if="openSection?.id === 'workers'" />
 
-  <div v-else>
+  <template v-else>
     <ErrorMessage v-if="error" :message="error" class="mb-4" />
+
     <div class="-mx-2.5 divide-y divide-outline-alpha-gray-1 hover-merges-dividers">
       <SettingsRow
         label="Allow developer mode"
@@ -81,8 +94,6 @@ onMounted(async () => {
         interactive
         @click="!saving && toggleAllowDeveloperMode(!allowDeveloperMode)"
       >
-        <!-- The Switch handles its own clicks; without stop the row would toggle
-             a second time and land back where it started. -->
         <Switch
           :model-value="allowDeveloperMode"
           :disabled="saving"
@@ -120,5 +131,5 @@ onMounted(async () => {
 
       <Version />
     </div>
-  </div>
+  </template>
 </template>

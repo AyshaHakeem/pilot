@@ -2,13 +2,20 @@
 import { ref, watch } from 'vue'
 
 import { monitorApi } from '@/api/monitor'
+import type { WafAnalytics } from '@/types/stats'
 
-const props = defineProps({ window: { type: String, default: '24h' } })
+interface Props {
+  window?: string
+}
 
-const data = ref(null)
+const props = withDefaults(defineProps<Props>(), {
+  window: '24h',
+})
+
+const data = ref<WafAnalytics | null>(null)
 
 // The WAF log has no per-second "live" feed; fall back to the shortest window.
-const resolveWindow = (w) => {
+const resolveWindow = (w: string) => {
   return w === 'live' ? '30m' : w
 }
 
@@ -27,7 +34,7 @@ watch(() => props.window, load, { immediate: true })
   <div v-if="data && data.log_present" class="mb-6">
     <div class="flex items-center gap-2 mb-3">
       <span class="size-4 text-ink-gray-6 lucide-shield-alert" />
-      <h2 class="font-semibold text-ink-gray-9 text-base">Web application firewall</h2>
+      <h2 class="font-semibold">Web application firewall</h2>
       <span
         v-if="data.mode === 'DetectionOnly'"
         class="bg-surface-amber-2 px-2 py-0.5 rounded-full text-ink-amber-2 text-xs"
@@ -38,7 +45,7 @@ watch(() => props.window, load, { immediate: true })
     <div class="gap-4 grid grid-cols-2 sm:grid-cols-3 mb-4">
       <div class="bg-surface-white px-4 py-3 border rounded-6 border-outline-gray-2">
         <div class="text-ink-gray-6 text-sm">Flagged requests</div>
-        <div class="mt-1 font-semibold text-ink-gray-9 text-xl">{{ totals.flagged }}</div>
+        <div class="mt-1 font-semibold text-xl">{{ data.totals.flagged }}</div>
       </div>
 
       <div class="bg-surface-white px-4 py-3 border rounded-6 border-outline-gray-2">
@@ -47,19 +54,19 @@ watch(() => props.window, load, { immediate: true })
         </div>
 
         <div class="mt-1 font-semibold text-ink-red-3 text-xl">
-          {{ data.mode === 'On' ? totals.blocked : totals.would_block }}
+          {{ data.mode === 'On' ? data.totals.blocked : data.totals.would_block }}
         </div>
       </div>
 
       <div class="bg-surface-white px-4 py-3 border rounded-6 border-outline-gray-2">
         <div class="text-ink-gray-6 text-sm">Detected only</div>
-        <div class="mt-1 font-semibold text-ink-gray-9 text-xl">
-          {{ totals.flagged - totals.would_block }}
+        <div class="mt-1 font-semibold text-xl">
+          {{ data.totals.flagged - data.totals.would_block }}
         </div>
       </div>
     </div>
 
-    <div class="gap-4 grid grid-cols-1 sm:grid-cols-2">
+    <div class="gap-4 grid md:grid-cols-2">
       <div class="bg-surface-white p-4 border rounded-6 border-outline-gray-2">
         <div class="mb-2 text-ink-gray-6 text-sm">Top rules</div>
         <div v-if="!data.top_rules.length" class="text-ink-gray-5 text-xs">

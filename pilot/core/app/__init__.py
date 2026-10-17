@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
+import json
 import re
 import shutil
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -32,6 +34,11 @@ class NewAppOptions:
     license: str = ""
     branch: str = ""
     github_workflow: bool = False
+
+    def __post_init__(self) -> None:
+        missing = [name for name in ("description", "publisher", "email") if not getattr(self, name).strip()]
+        if missing:
+            raise BenchError(f"App {', '.join(missing)} cannot be blank.")
 
     def as_answers(self) -> str:
         answers = [
@@ -154,6 +161,68 @@ class App:
         return self._repository.repo.head_sha
 
     @property
+    def has_source_changes(self) -> bool:
+        """Uncommitted edits that published assets lack. Files the asset build rewrites do not count,
+        or one server build would rule out prebuilt assets for good. Commits need no check: archives
+        are found by commit, and a shallow pinned checkout reads as ahead of its upstream."""
+        from pilot.core.app.prebuilt_assets import build_output_paths
+
+        repo = self._repository.repo
+        outputs = build_output_paths(self)
+        build_lockfiles = self.failed_build_lockfiles
+        return any(
+            Path(path).name != "components.d.ts"
+            and not any(path == output or path.startswith(f"{output}/") for output in outputs)
+            and (path not in build_lockfiles or build_lockfiles[path] != self._content_hash(path))
+            for path in repo.changed_paths
+        )
+
+    @property
+    def failed_build_lockfiles(self) -> dict[str, str]:
+        """Content hashes of the lockfiles that failed builds' own installs changed."""
+        try:
+            return json.loads(self._failed_build_lockfiles_path.read_text())
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    @property
+    def _failed_build_lockfiles_path(self) -> Path:
+        return self._repository.repo.git_dir / "pilot-failed-build-lockfiles.json"
+
+    def _content_hash(self, path: str) -> str:
+        file = self.path / path
+        return hashlib.sha256(file.read_bytes()).hexdigest() if file.is_file() else ""
+
+    @contextlib.contextmanager
+    def record_lockfiles_on_failure(self) -> Iterator[None]:
+        """Record the lockfiles a failed build's installs changed, so they do not rule out
+        prebuilt assets. A later edit changes the hash and counts as a change."""
+        from pilot.core.app.node_packages import PACKAGE_MANAGERS
+        from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
+
+        repo = self._repository.repo
+        before = set(repo.changed_paths)
+        try:
+            yield
+        except BaseException:
+            lockfiles = {manager.lockfile for manager in PACKAGE_MANAGERS}
+            changed = {
+                path: self._content_hash(path)
+                for path in repo.changed_paths
+                if path not in before and Path(path).name in lockfiles and (self.path / path).is_file()
+            }
+            if changed:
+                with exclusive_file_lock(self._failed_build_lockfiles_path):
+                    recorded = self.failed_build_lockfiles | changed
+                    replace_private_text_locked(self._failed_build_lockfiles_path, json.dumps(recorded))
+            raise
+
+    @property
+    def has_page_islands(self) -> bool:
+        """Whether the app has Frappe UI pages, whose islands Frappe builds."""
+        return any((self.path / self.config.name).glob("*/page/*/*.island.js"))
+
+    @property
     def current_branch(self) -> str:
         """The branch checked out on disk, empty when HEAD is detached."""
         return self._repository.repo.branch
@@ -166,6 +235,9 @@ class App:
 
     def update_target(self) -> RevisionPin | None:
         return self._repository.update_target()
+
+    def has_migrate_changes(self, pin: RevisionPin) -> bool:
+        return self._repository.has_migrate_changes(pin)
 
     @property
     def marketplace_entry(self) -> dict | None:
@@ -200,7 +272,7 @@ class App:
         up. A tree already in apps/ is moved into staging rather than cloned again."""
         if not self.is_staged:
             on_progress(f"Cloning {self.config.name}...")
-            self._repository.clone()
+            self._repository.clone(on_progress)
             return
 
         shutil.rmtree(self.path, ignore_errors=True)  # leftovers from an interrupted run
@@ -212,7 +284,7 @@ class App:
             return
 
         on_progress(f"Cloning {self.config.name}...")
-        self._repository.clone()
+        self._repository.clone(on_progress)
 
     def update(self, pin: RevisionPin | None = None) -> None:
         self._repository.update(pin)
@@ -223,6 +295,15 @@ class App:
     def checkout_commit(self, sha: str) -> None:
         """Check out a specific commit SHA, refetching it from origin if needed."""
         self._repository.checkout_pinned_commit(sha)
+
+    def return_to(self, branch: str, sha: str) -> None:
+        """Go back to `sha` with `branch` tracked again, as before a branch switch. A commit
+        hash or empty `branch` leaves the checkout detached, as it was."""
+        if branch and not self.is_commit_hash(branch):
+            self.switch_branch(branch)
+        else:
+            self.config.branch = branch
+        self.checkout_commit(sha)
 
     def _pyproject(self) -> dict:
         """Parsed pyproject.toml, or an empty dict when it is missing or malformed."""
@@ -242,8 +323,10 @@ class App:
     def editable_target(self) -> str:
         """Target for `uv pip install -e`. A dev bench also pulls the app's dev extra,
         which is where frappe keeps watchdog, the reloader `--dev` refuses to start
-        without."""
-        if self.bench.config.production.enabled or not self.has_dev_extra:
+        without. `bench.install_dev_extra = false` opts out on a bench that will never
+        run the reloader."""
+        config = self.bench.config
+        if config.production.enabled or not config.install_dev_extra or not self.has_dev_extra:
             return str(self.path)
         return f"{self.path}[dev]"
 
@@ -263,16 +346,14 @@ class App:
                     return child.name
         return conventional
 
-    def build_assets(self) -> None:
-        if not (self.path / "package.json").exists():
-            return
-        run_command(["yarn", "--cwd", str(self.path), "build"])
-
     def _skip_already_installed(
-        self, on_progress: Callable[[str], None], install_dependencies: bool = False
+        self,
+        on_progress: Callable[[str], None],
+        install_dependencies: bool = False,
+        skip_assets: bool = False,
     ) -> AppInstallResult:
         app = self.bench.app(self.module_name)
-        dependencies = app._install_dependencies(on_progress) if install_dependencies else []
+        dependencies = app._install_dependencies(on_progress, skip_assets) if install_dependencies else []
         on_progress(f"'{app.config.name}' already installed, skipping.")
         return AppInstallResult(app, already_installed=True, installed_dependencies=dependencies)
 
@@ -280,12 +361,13 @@ class App:
         self,
         *,
         install_dependencies: bool = False,
+        skip_assets: bool = False,
         commit: str = "",
         on_progress: Callable[[str], None] = lambda message: None,
     ) -> AppInstallResult:
         """Pinned commit based Clone, validate, install, register, and build app assets."""
         if self.bench.is_app_installed(self.config.name):
-            return self._skip_already_installed(on_progress, install_dependencies)
+            return self._skip_already_installed(on_progress, install_dependencies, skip_assets)
 
         existing_clone = self.existing_clone_path
         self.is_staged = not self.is_marketplace
@@ -296,7 +378,9 @@ class App:
             if commit and self.installed_hash != commit:
                 on_progress(f"Checking out {self.config.name} at {commit[:8]}...")
                 self.checkout_commit(commit)
-            dependencies = self._install_dependencies(on_progress) if install_dependencies else []
+            dependencies = (
+                self._install_dependencies(on_progress, skip_assets) if install_dependencies else []
+            )
             if self.is_staged:
                 self.validate()
             self.promote()
@@ -309,8 +393,11 @@ class App:
         try:
             self._install_into_environment()
             self._register()
-            on_progress(f"\nSetting up assets for {self.config.name}...")
-            self._build_assets_via_env_manager()
+            if not skip_assets:
+                on_progress(f"\nSetting up assets for {self.config.name}...")
+                self._build_assets_via_env_manager()
+            else:
+                on_progress(f"\nSkipping assets for {self.config.name}...")
         except Exception:
             self._roll_back_install(delete_clone=existing_clone is None, on_progress=on_progress)
             raise
@@ -354,10 +441,12 @@ class App:
         if delete_clone:
             shutil.rmtree(self.path, ignore_errors=True)
 
-    def _install_dependencies(self, on_progress: Callable[[str], None]) -> list["App"]:
+    def _install_dependencies(
+        self, on_progress: Callable[[str], None], skip_assets: bool = False
+    ) -> list["App"]:
         from pilot.core.app.dependency_installer import AppDependencyInstaller
 
-        return AppDependencyInstaller(self.bench, self).install(on_progress)
+        return AppDependencyInstaller(self.bench, self).install(on_progress, skip_assets=skip_assets)
 
     def validate(self) -> None:
         from pilot.core.app.validator import Validator
@@ -376,7 +465,7 @@ class App:
 
     def record_branch(self) -> None:
         """Persist this app's tracked branch to bench.toml so it survives a
-        detached HEAD after a later commit pin (see BenchInventory._configured_branch)."""
+        detached HEAD after a later commit pin (see BenchInventory.get_configured_app)."""
         if not self.config.branch or self.is_commit_hash(self.config.branch):
             return
         from pilot.config import BenchConfig

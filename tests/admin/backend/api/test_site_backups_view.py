@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 from pilot.config import BenchConfig
 
@@ -32,7 +33,7 @@ def _make_site(bench_root: Path, name: str, **config) -> None:
 
 
 def _make_backup_file(bench_root: Path, site: str, timestamp: str, suffix: str) -> Path:
-    backups_dir = bench_root / "sites" / site / "private" / "backups"
+    backups_dir = bench_root / "sites" / site / "backups"
     backups_dir.mkdir(parents=True, exist_ok=True)
     path = backups_dir / f"{timestamp}-{site}-{suffix}"
     path.write_text("data")
@@ -83,6 +84,18 @@ def test_list_backups_includes_local_files(tmp_path: Path) -> None:
     assert body[0]["files"][0]["kind"] == "database"
 
 
+def test_list_backups_dates_local_files_by_mtime_not_filename(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    path = _make_backup_file(bench_root, "site.localhost", "20240101_000000", "database.sql.gz")
+    os.utime(path, (1704048000, 1704048000))
+    client = _client(bench_root)
+
+    response = client.get("/api/v1/sites/site.localhost/backups")
+
+    assert response.get_json()[0]["created_at"] == "2023-12-31T18:40:00+00:00"
+
+
 def test_get_backup_returns_the_matching_set(tmp_path: Path) -> None:
     bench_root = tmp_path / "benches" / "current"
     _make_site(bench_root, "site.localhost")
@@ -93,6 +106,34 @@ def test_get_backup_returns_the_matching_set(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.get_json()["timestamp"] == "20240101_000000"
+
+
+def test_delete_backup_queues_task_with_the_set_files(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    _make_backup_file(bench_root, "site.localhost", "20240101_000000", "database.sql.gz")
+    _make_backup_file(bench_root, "site.localhost", "20240101_000000", "site_config_backup.json")
+    client = _client(bench_root)
+
+    response = _request(client, "delete", "/api/v1/sites/site.localhost/backups/20240101_000000")
+
+    body = response.get_json()
+    assert response.status_code == 202
+    assert body["command"] == "delete-backup"
+    assert sorted(body["args"]["filenames"]) == [
+        "20240101_000000-site.localhost-database.sql.gz",
+        "20240101_000000-site.localhost-site_config_backup.json",
+    ]
+
+
+def test_delete_backup_404s_for_an_unknown_timestamp(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    client = _client(bench_root)
+
+    response = _request(client, "delete", "/api/v1/sites/site.localhost/backups/20240101_000000")
+
+    assert response.status_code == 404
 
 
 def test_get_backup_404s_for_an_unknown_timestamp(tmp_path: Path) -> None:
@@ -251,3 +292,36 @@ def test_backup_schedule_delete_returns_no_content(tmp_path: Path) -> None:
     assert response.status_code == 204
     assert response.data == b""
     remove_schedule.assert_called_once_with("site.localhost")
+
+
+def test_backup_schedule_reports_missing_cron(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    client = _client(bench_root)
+
+    with patch("shutil.which", return_value=None):
+        response = client.put("/api/v1/sites/site.localhost/backup-schedule", json={"schedule": "0 2 * * *"})
+
+    assert response.status_code == 503
+    error = response.get_json()["error"]
+    assert error["code"] == "cron_unavailable"
+    assert "Install cron" in error["message"]
+
+
+def test_list_backups_reports_the_size_of_an_uploaded_file(tmp_path: Path) -> None:
+    """The local copy is gone after upload, so the size comes from the bucket."""
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    client = _client(bench_root)
+    offsite = Mock()
+    offsite.list_backups.return_value = {"20240101_000000": {"database": "20240101_000000-database.sql.gz"}}
+    offsite.get_file_sizes.return_value = {"20240101_000000-database.sql.gz": 2048}
+
+    with (
+        patch("pilot.config.s3.S3Config.is_configured", new_callable=PropertyMock, return_value=True),
+        patch("pilot.integrations.s3.backups.OffsiteBackup.from_config", return_value=offsite),
+    ):
+        response = client.get("/api/v1/sites/site.localhost/backups")
+
+    assert response.get_json()[0]["files"][0]["size_bytes"] == 2048
+    offsite.get_file_sizes.assert_called_once_with("site.localhost", "20240101_000000")

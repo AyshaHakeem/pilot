@@ -1,30 +1,28 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { Button, Dialog, Dropdown, type DropdownItem, ErrorMessage, TextInput } from 'frappe-ui'
 
-import { ListView, ListRowItem } from 'frappe-ui/experimental'
-
-import {
-  Button,
-  Dialog,
-  Dropdown,
-  ErrorMessage,
-  TextInput,
-} from 'frappe-ui'
+import Table from '@/components/common/Table.vue'
 
 import { sitesApi } from '@/api/sites'
 import { useSite } from '@/composables/sites/useSite'
+import { errorMessage } from '@/utils/error'
 
-const props = defineProps({ siteName: { type: String, required: true } })
+interface Props {
+  siteName: string
+}
+
+const props = defineProps<Props>()
 
 const { site, reload } = useSite(props.siteName)
 
 const columns = [
-  { label: 'Key', key: 'key', align: 'left', width: 2 },
-  { label: 'Value', key: 'value', align: 'left', width: 3 },
-  { label: '', key: 'actions', align: 'right', width: '3rem' },
+  { label: 'Key', key: 'key', class: 'w-2/5' },
+  { label: 'Value', key: 'value' },
+  { label: '', key: 'actions', class: 'w-12' },
 ]
 
-const isPassword = (key) => /password|secret|token|key/i.test(key)
+const isPassword = (key: string) => /password|secret|token|key/i.test(key)
 
 const rows = computed(() => {
   const config = site.value?.site_config || {}
@@ -37,7 +35,7 @@ const rows = computed(() => {
   return entries
 })
 
-const menuOptions = (row) => {
+const menuOptions = (row: { key: string }): DropdownItem[] => {
   return [
     { label: 'Edit', icon: 'lucide-pencil', onClick: () => openDialog(row.key) },
     {
@@ -62,11 +60,11 @@ const dialogError = ref('')
 const refreshing = ref(false)
 const isNew = computed(() => showAddDialog.value)
 
-const openDialog = (key = null) => {
+const openDialog = (key: string | null = null) => {
   dialogError.value = ''
   entryKey.value = key || ''
   if (key !== null) {
-    const val = site.value.site_config[key]
+    const val = site.value?.site_config[key]
     entryValue.value = typeof val === 'string' ? val : JSON.stringify(val)
     showEditDialog.value = true
   } else {
@@ -75,7 +73,7 @@ const openDialog = (key = null) => {
   }
 }
 
-const parseValue = (raw) => {
+const parseValue = (raw: string) => {
   try {
     return JSON.parse(raw)
   } catch {
@@ -89,7 +87,7 @@ const save = async () => {
     dialogError.value = 'Key is required.'
     return
   }
-  if (isNew.value && key in (site.value.site_config || {})) {
+  if (isNew.value && key in (site.value?.site_config || {})) {
     dialogError.value = 'Key already exists.'
     return
   }
@@ -101,7 +99,7 @@ const save = async () => {
     showAddDialog.value = false
     showEditDialog.value = false
   } catch (e) {
-    dialogError.value = e.message || 'Failed to save.'
+    dialogError.value = errorMessage(e, 'Failed to save.')
   } finally {
     saving.value = false
   }
@@ -120,7 +118,7 @@ const confirmDelete = async () => {
     await reload()
     showDelete.value = false
   } catch (e) {
-    deleteError.value = e.message || 'Failed to remove.'
+    deleteError.value = errorMessage(e, 'Failed to remove.')
   } finally {
     deleting.value = false
   }
@@ -137,7 +135,7 @@ const refresh = async () => {
 </script>
 
 <template>
-  <div class="space-y-4 mt-5">
+  <div class="space-y-4">
     <div class="flex sm:flex-row flex-col sm:justify-between sm:items-center gap-3">
       <p class="text-ink-gray-5 text-sm">
         Keys passed to this site's <code class="font-mono text-ink-gray-7">site_config.json</code>.
@@ -145,7 +143,6 @@ const refresh = async () => {
 
       <div class="flex items-center gap-2 shrink-0">
         <Button
-          size="sm"
           variant="ghost"
           :loading="refreshing"
           icon="lucide-refresh-cw"
@@ -153,7 +150,7 @@ const refresh = async () => {
           tooltip="Refresh"
           @click="refresh"
         />
-        <Button size="sm" @click="openDialog()">
+        <Button @click="openDialog()">
           <template #prefix><span class="size-4 lucide-plus" /></template>
           Add config
         </Button>
@@ -168,71 +165,50 @@ const refresh = async () => {
       No config keys.
     </div>
 
-    <ListView
-      v-else
-      :columns="columns"
-      :rows="rows"
-      row-key="name"
-      :options="{ selectable: false, showTooltip: false }"
-    >
-      <template #cell="{ column, row, item }">
-        <div v-if="column.key === 'actions'" class="flex justify-end">
-          <Dropdown v-if="!row.readonly" :options="menuOptions(row)">
-            <template #default="{ open }">
-              <Button
-                variant="ghost"
-                size="sm"
-                :active="open"
-                icon="lucide-ellipsis"
-                label="Config actions"
-                tooltip="Actions"
-              />
-            </template>
-          </Dropdown>
-        </div>
-
-        <ListRowItem v-else :column="column" :row="row" :item="item" :align="column.align" />
+    <Table v-else :columns="columns" :rows="rows" height="max-h-96">
+      <template #actions="{ row }">
+        <Dropdown v-if="!row.readonly" :options="menuOptions(row)">
+          <template #default="{ open }">
+            <Button
+              variant="ghost"
+              :active="open"
+              icon="lucide-ellipsis"
+              label="Config actions"
+              tooltip="Actions"
+            />
+          </template>
+        </Dropdown>
       </template>
-    </ListView>
+    </Table>
   </div>
 
-  <!-- Add dialog -->
   <Dialog v-model="showAddDialog" title="Add config" size="sm">
     <div class="space-y-3">
-      <div class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Key</p>
-        <TextInput v-model="entryKey" placeholder="config_key" class="w-full" />
-      </div>
-
-      <div class="space-y-1.5">
-        <p class="font-medium text-ink-gray-7 text-sm">Value</p>
-        <TextInput v-model="entryValue" placeholder="value" class="w-full" />
-      </div>
-
+      <TextInput label="Key" v-model="entryKey" placeholder="config_key" class="w-full" />
+      <TextInput label="Value" v-model="entryValue" placeholder="value" class="w-full" />
       <ErrorMessage v-if="dialogError" :message="dialogError" />
     </div>
 
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showAddDialog = false">Cancel</Button>
-      <Button variant="solid" :loading="saving" @click="save">Save</Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showAddDialog = false">Cancel</Button>
+        <Button variant="solid" :loading="saving" @click="save">Save</Button>
+      </div>
+    </template>
   </Dialog>
 
-  <!-- Edit dialog -->
   <Dialog v-model="showEditDialog" :title="`Edit ${entryKey}`" size="sm">
-    <div class="space-y-1.5">
-      <p class="font-medium text-ink-gray-7 text-sm">Value</p>
-      <TextInput v-model="entryValue" placeholder="value" class="w-full" />
-    </div>
+    <TextInput label="Value" v-model="entryValue" placeholder="value" class="w-full" />
 
     <ErrorMessage v-if="dialogError" :message="dialogError" class="mt-2" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showEditDialog = false">Cancel</Button>
-      <Button variant="solid" :loading="saving" @click="save">Save</Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showEditDialog = false">Cancel</Button>
+        <Button variant="solid" :loading="saving" @click="save">Save</Button>
+      </div>
+    </template>
   </Dialog>
 
-  <!-- Delete dialog -->
   <Dialog v-model="showDelete" title="Remove config" size="sm">
     <p class="text-ink-gray-7 text-sm">
       Remove <code class="text-ink-gray-9">{{ deleteKey }}</code> from
@@ -240,11 +216,13 @@ const refresh = async () => {
     </p>
 
     <ErrorMessage v-if="deleteError" :message="deleteError" class="mt-2" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showDelete = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="deleting" @click="confirmDelete"
-        >Remove</Button
-      >
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showDelete = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="deleting" @click="confirmDelete"
+          >Remove</Button
+        >
+      </div>
+    </template>
   </Dialog>
 </template>

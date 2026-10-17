@@ -1,14 +1,18 @@
 <script setup lang="ts">
+import { Button, Dialog, ErrorMessage, TextInput } from 'frappe-ui'
 import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Button, Dialog, ErrorMessage, TextInput } from 'frappe-ui'
-
-import { useSite } from '@/composables/sites/useSite'
 import { apiErrorMessage } from '@/api/client'
 import { sitesApi } from '@/api/sites'
+import { useSite } from '@/composables/sites/useSite'
+import { errorMessage } from '@/utils/error'
 import { openTaskDetailPage } from '@/utils/taskRoute'
 
-const props = defineProps({ siteName: { type: String, required: true } })
+interface Props {
+  siteName: string
+}
+
+const props = defineProps<Props>()
 const router = useRouter()
 
 const { site, nginxEnabled } = useSite(props.siteName)
@@ -20,7 +24,17 @@ const showSslEmail = ref(false)
 const sslEmail = ref('')
 const sslEmailError = ref('')
 
-const enableSsl = async (email) => {
+// The backend asks for a contact address by answering with `needs_email` in the error detail.
+const needsEmail = (payload: unknown): boolean => {
+  if (typeof payload !== 'object' || payload === null || !('error' in payload)) return false
+  const detail = payload.error
+  if (typeof detail !== 'object' || detail === null || !('details' in detail)) return false
+  const details = detail.details
+  if (typeof details !== 'object' || details === null || !('needs_email' in details)) return false
+  return Boolean(details.needs_email)
+}
+
+const enableSsl = async (email = '') => {
   error.value = ''
   sslEmailError.value = ''
   sslLoading.value = true
@@ -29,15 +43,15 @@ const enableSsl = async (email) => {
     if (data.task_id) {
       showSslEmail.value = false
       openTaskDetailPage(router, data.task_id)
-    } else if (data.error?.details?.needs_email) {
+    } else if (needsEmail(data)) {
       showSslEmail.value = true
       if (email) sslEmailError.value = apiErrorMessage(data, 'Could not enable SSL.')
     } else {
       error.value = apiErrorMessage(data, 'Could not enable SSL.')
     }
   } catch (e) {
-    if (showSslEmail.value) sslEmailError.value = e.message
-    else error.value = e.message
+    if (showSslEmail.value) sslEmailError.value = errorMessage(e, 'Could not enable SSL.')
+    else error.value = errorMessage(e, 'Could not enable SSL.')
   } finally {
     sslLoading.value = false
   }
@@ -53,9 +67,25 @@ const clearCache = async () => {
     if (data.task_id) openTaskDetailPage(router, data.task_id)
     else error.value = apiErrorMessage(data, 'Failed to clear cache.')
   } catch (e) {
-    error.value = e.message || 'Failed to clear cache.'
+    error.value = errorMessage(e, 'Failed to clear cache.')
   } finally {
     clearingCache.value = false
+  }
+}
+
+const buildingAssets = ref(false)
+
+const buildAssets = async () => {
+  error.value = ''
+  buildingAssets.value = true
+  try {
+    const data = await sitesApi.buildAssets(props.siteName)
+    if (data.task_id) openTaskDetailPage(router, data.task_id)
+    else error.value = apiErrorMessage(data, 'Failed to build assets.')
+  } catch (e) {
+    error.value = errorMessage(e, 'Failed to build assets.')
+  } finally {
+    buildingAssets.value = false
   }
 }
 
@@ -69,7 +99,7 @@ const refreshStorage = async () => {
     if (data.task_id) openTaskDetailPage(router, data.task_id)
     else error.value = apiErrorMessage(data, 'Failed to refresh storage usage.')
   } catch (e) {
-    error.value = e.message || 'Failed to refresh storage usage.'
+    error.value = errorMessage(e, 'Failed to refresh storage usage.')
   } finally {
     refreshingStorage.value = false
   }
@@ -81,7 +111,7 @@ const Actions = [
     key: 'enable_ssl',
     label: 'Enable SSL',
     description: "Issue a Let's Encrypt certificate and serve this site over HTTPS.",
-    condition: () => nginxEnabled.value && !site.value?.ssl,
+    condition: () => nginxEnabled.value && !site.value?.tls,
     loading: () => sslLoading.value,
     onClick: () => enableSsl(),
   },
@@ -93,6 +123,15 @@ const Actions = [
     condition: () => true,
     loading: () => clearingCache.value,
     onClick: () => clearCache(),
+  },
+  {
+    key: 'build_assets',
+    label: 'Build assets',
+    buttonLabel: 'Build',
+    description: "Rebuild JS and CSS for this site's apps.",
+    condition: () => true,
+    loading: () => buildingAssets.value,
+    onClick: () => buildAssets(),
   },
   {
     key: 'refresh_storage',
@@ -109,29 +148,21 @@ const rows = computed(() => Actions.filter((row) => row.condition()))
 </script>
 
 <template>
-  <div v-if="rows.length">
-    <p class="font-semibold text-ink-gray-8 text-base">Actions</p>
-    <div class="mt-1">
-      <div
-        v-for="row in rows"
-        :key="row.key"
-        class="flex justify-between items-start gap-x-2.5 py-4 border-b last:border-b-0 border-outline-alpha-gray-1"
-      >
-        <div class="flex flex-col gap-1">
-          <p class="font-medium text-ink-gray-8 text-base">{{ row.label }}</p>
-          <p class="text-ink-gray-6 text-p-sm">{{ row.description }}</p>
-        </div>
-
-        <Button
-          size="sm"
-          variant="subtle"
-          class="ml-4 shrink-0"
-          :loading="row.loading()"
-          @click="row.onClick"
-        >
-          {{ row.buttonLabel || row.label }}
-        </Button>
+  <div v-if="rows.length" class="mt-3">
+    <h2 class="mb-3 text-base-semibold text-ink-gray-8">Actions</h2>
+    <div
+      v-for="row in rows"
+      :key="row.key"
+      class="flex justify-between items-start gap-x-2.5 py-4 border-b last:border-b-0 border-outline-alpha-gray-1"
+    >
+      <div class="flex flex-col gap-1">
+        <p class="font-medium text-ink-gray-8">{{ row.label }}</p>
+        <p class="text-ink-gray-6 text-p-sm">{{ row.description }}</p>
       </div>
+
+      <Button class="ml-4 shrink-0" :loading="row.loading()" @click="row.onClick">
+        {{ row.buttonLabel || row.label }}
+      </Button>
     </div>
 
     <ErrorMessage v-if="error" :message="error" class="mt-2" />
@@ -139,7 +170,7 @@ const rows = computed(() => Actions.filter((row) => row.condition()))
 
   <!-- Let's Encrypt email dialog -->
   <Dialog v-model="showSslEmail" title="Enable SSL" size="md">
-    <p class="text-ink-gray-7 text-sm">
+    <p class="text-ink-gray-7 text-p-sm">
       A Let's Encrypt email is required to issue and renew certificates.
     </p>
 
@@ -156,16 +187,18 @@ const rows = computed(() => Actions.filter((row) => row.condition()))
     </TextInput>
 
     <ErrorMessage v-if="sslEmailError" :message="sslEmailError" class="mt-2" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="outline" @click="showSslEmail = false">Cancel</Button>
-      <Button
-        variant="solid"
-        :loading="sslLoading"
-        :disabled="!sslEmail"
-        @click="enableSsl(sslEmail)"
-      >
-        Enable SSL
-      </Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="outline" @click="showSslEmail = false">Cancel</Button>
+        <Button
+          variant="solid"
+          :loading="sslLoading"
+          :disabled="!sslEmail"
+          @click="enableSsl(sslEmail)"
+        >
+          Enable SSL
+        </Button>
+      </div>
+    </template>
   </Dialog>
 </template>

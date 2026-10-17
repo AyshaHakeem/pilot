@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+import shutil
 from typing import TYPE_CHECKING
 
 from pilot.core.app.revisions import RevisionPin
@@ -7,10 +9,24 @@ from pilot.exceptions import BenchError, CommandError
 from pilot.utils import run_command
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pilot.core.app import App
     from pilot.internal.git import GitRepo
 
 _FETCH_TIMEOUT_SECONDS = 30
+# Changes `frappe migrate` syncs into the database, as Frappe Cloud decides a migrate deploy.
+_MIGRATE_PATHS = tuple(
+    re.compile(pattern)
+    for pattern in (
+        r"\w+/patches\.txt",
+        r"\w+/hooks\.py",
+        r"\w+/fixtures/",
+        r"\w+/\w+/custom/",
+        r"frappe/geo/languages\.json",
+        r"\w+/\w+/\w+/(.+)/\1\.json",
+    )
+)
 
 
 class AppRepository:
@@ -47,15 +63,28 @@ class AppRepository:
         return pin is not None and not self.is_on_revision(pin)
 
     def update_target(self) -> RevisionPin | None:
-        """The fixed revision this app would update to, or None when there is none. (forward only)"""
-        entry = self.marketplace_entry
-        if entry:
-            release = self.forward_release(entry)
-            return RevisionPin.from_marketplace_release(release) if release else None
+        """The fixed revision this app would update to, or None (forward only). A marketplace
+        app follows the registry's releases, or its branch tip with `follow_branch` or no release."""
+        entry = None if self.app.config.follow_branch else self.marketplace_entry
+        release = self.newest_release(entry) if entry else None
+        if release is not None:
+            is_newer = self._is_ahead_of_installed(release["commit"], release.get("version", ""))
+            return RevisionPin.from_marketplace_release(release) if is_newer else None
         if not self.app.config.branch:
             return None
         tip = self.repo.remote_branch_sha(self.app.config.branch)
         return RevisionPin(kind="commit", ref=tip) if tip else None
+
+    def has_migrate_changes(self, pin: RevisionPin) -> bool:
+        """Whether moving to `pin` changes anything migrate syncs. True when the diff is unknown."""
+        repo = self.repo
+        if not repo.has_commit(pin.ref):
+            self._sync_remote_url()
+            repo.fetch(pin.ref, timeout=_FETCH_TIMEOUT_SECONDS)
+        files = repo.get_changed_files(self.installed_hash, pin.ref)
+        if files is None:
+            return True
+        return any(pattern.match(path) for pattern in _MIGRATE_PATHS for path in files)
 
     @property
     def marketplace_entry(self) -> dict | None:
@@ -69,26 +98,23 @@ class AppRepository:
             return None
         return entry
 
-    def forward_release(self, marketplace_entry: dict) -> dict | None:
-        """The newest release advertised for this app's branch, when git says it
-        is ahead of the checked-out commit. Releases arrive newest-first."""
+    def newest_release(self, marketplace_entry: dict) -> dict | None:
+        """The newest release the registry advertises for this app's branch."""
         from pilot.integrations.marketplace import Marketplace
 
-        newest = next(
+        return next(
             (
-                r
-                for r in Marketplace.releases(marketplace_entry["name"])
-                if r.get("branch") == self.app.config.branch
+                release
+                for release in Marketplace.releases(marketplace_entry["name"])
+                if release.get("branch") == self.app.config.branch and release.get("commit")
             ),
             None,
         )
-        if newest is None or not newest.get("commit"):
-            return None
-        return newest if self._is_ahead_of_installed(newest["commit"]) else None
 
-    def _is_ahead_of_installed(self, commit: str) -> bool:
-        """Whether `commit` is a step forward from HEAD, asking git rather than
-        comparing version labels."""
+    def _is_ahead_of_installed(self, commit: str, version: str) -> bool:
+        """Whether `commit` descends from HEAD. A stale registry can advertise an older
+        release, so only proven descent counts. When a shallow clone holds both commits
+        without the history between them, a strictly newer version decides."""
         installed = self.installed_hash
         if installed == commit:
             return False
@@ -97,8 +123,21 @@ class AppRepository:
         repo = self.repo
         if not repo.has_commit(commit):
             self._sync_remote_url()
+            # Fetching a descendant also brings the history that links it to HEAD.
             repo.fetch(commit, timeout=_FETCH_TIMEOUT_SECONDS)
-        return not repo.is_ancestor(commit, installed)
+        if repo.is_ancestor(installed, commit):
+            return True
+        if not repo.has_commit(commit) or repo.is_ancestor(commit, installed):
+            return False
+        return self._is_newer_than_installed(version)
+
+    def _is_newer_than_installed(self, version: str) -> bool:
+        from pilot._vendor.packaging.version import InvalidVersion, Version
+
+        try:
+            return Version(version) > Version(self.app.installed_version)
+        except InvalidVersion:
+            return False
 
     @property
     def remote_url(self) -> str:
@@ -152,6 +191,14 @@ class AppRepository:
         return bool(re.fullmatch(r"[0-9a-f]{7,40}", ref))
 
     def clone_rev(self, commit: str) -> None:
+        # Git fetches a commit on its own only by its full SHA; a short one is found in the full history.
+        if len(commit) == 40 and self.depth_flags and not self.app.path.exists():
+            try:
+                self.fetch_commit(commit)
+                return
+            except CommandError:
+                shutil.rmtree(self.app.path, ignore_errors=True)
+
         run_command(
             ["git", "clone", self.remote_url, str(self.app.path)],
             env=self.git_env,
@@ -160,12 +207,28 @@ class AppRepository:
         try:
             run_command(["git", "-C", str(self.app.path), "checkout", commit])
         except CommandError as exc:
+            shutil.rmtree(self.app.path, ignore_errors=True)
             raise BenchError(f"Commit '{commit}' not found in {self.app.config.repo}.") from exc
 
-    def clone(self) -> None:
-        target = self.app.config.branch or self.get_default_branch()
-        if self.is_commit_hash(target):
-            self.clone_rev(target)
+    def fetch_commit(self, commit: str) -> None:
+        """Clone only `commit`, without its history, which a large app like erpnext cannot afford."""
+        path = str(self.app.path)
+        run_command(["git", "init", "--quiet", path])
+        run_command(["git", "-C", path, "remote", "add", "origin", self.remote_url])
+        run_command(
+            ["git", "-C", path, "fetch", *self.depth_flags, "origin", commit],
+            env=self.git_env,
+            stream_output=True,
+        )
+        run_command(["git", "-C", path, "checkout", "--quiet", "FETCH_HEAD"])
+
+    def clone(self, on_progress: Callable[[str], None] = lambda message: None) -> None:
+        branch = self.app.config.branch or self.get_default_branch()
+        if self.is_commit_hash(branch):
+            on_progress(
+                f"{self.app.config.name} is checked out at a commit with no branch; pass --branch with --commit."
+            )
+            self.clone_rev(branch)
         else:
             run_command(
                 [
@@ -173,14 +236,14 @@ class AppRepository:
                     "clone",
                     self.remote_url,
                     "--branch",
-                    target,
+                    branch,
                     *self.depth_flags,
                     str(self.app.path),
                 ],
                 env=self.git_env,
                 stream_output=True,
             )
-            self.app.config.branch = target
+            self.app.config.branch = branch
 
     @property
     def is_shallow(self) -> bool:
@@ -252,7 +315,10 @@ class AppRepository:
 
         repo = self.repo
         self._sync_remote_url()
-        repo.fetch("+refs/heads/*:refs/remotes/origin/*")
+        # A named refspec creates origin/<branch> even in a single-branch clone.
+        refspec = f"+refs/heads/{branch}:refs/remotes/origin/{branch}"
+        if not repo.fetch(*self.depth_flags, refspec, timeout=_FETCH_TIMEOUT_SECONDS * 10):
+            raise BenchError(f"Could not fetch branch '{branch}' of '{self.app.config.name}'.")
         repo.abort_merge_rebase()
         stashed = repo.stash_all()
         if not repo.checkout_new_branch(branch, f"origin/{branch}"):
@@ -265,7 +331,10 @@ class AppRepository:
         if pin.kind == "tag":
             self._sync_remote_url()
             self.repo.prune_stale_temp_packs()
-            run_command(["git", "-C", str(self.app.path), "fetch", *self.depth_flags, "origin", pin.ref])
+            run_command(
+                ["git", "-C", str(self.app.path), "fetch", *self.depth_flags, "origin", pin.ref],
+                env=self.git_env,
+            )
             self._checkout_pinned_ref("FETCH_HEAD")
         else:
             self.checkout_pinned_commit(pin.ref)
@@ -275,7 +344,10 @@ class AppRepository:
         self._sync_remote_url()
         self.repo.prune_stale_temp_packs()
         try:
-            run_command(["git", "-C", str(self.app.path), "fetch", *self.depth_flags, "origin", sha])
+            run_command(
+                ["git", "-C", str(self.app.path), "fetch", *self.depth_flags, "origin", sha],
+                env=self.git_env,
+            )
             self._checkout_pinned_ref("FETCH_HEAD")
             return
         except CommandError:
@@ -290,7 +362,8 @@ class AppRepository:
                 *unshallow_flag,
                 "origin",
                 self.app.config.branch,
-            ]
+            ],
+            env=self.git_env,
         )
         self._checkout_pinned_ref(sha)
 

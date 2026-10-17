@@ -1,23 +1,28 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
 import { Button, Dialog, ErrorMessage, Spinner, toast } from 'frappe-ui'
-
-import SettingsRow from '@/components/settings/SettingsRow.vue'
-
+import { computed, onMounted, ref } from 'vue'
 import { cliUpdatesApi } from '@/api/settings'
 import { tasksApi } from '@/api/tasks'
+import CopyBtn from '@/components/common/CopyBtn.vue'
+import SettingsRow from '@/components/settings/SettingsRow.vue'
+import type { TaskPayload } from '@/types/tasks'
 import { isTaskActive } from '@/utils/taskFormat'
+
+const DEV_COMMANDS = 'git pull\npilot admin build\npilot admin upgrade'
 
 const POLL_INTERVAL_MS = 1500
 
 const loading = ref(true)
-const status = ref({ current_version: '', is_dev: true })
-const latestVersion = ref(null)
+const status = ref<{ current_version: string; is_dev: boolean; restarts_admin?: boolean }>({
+  current_version: '',
+  is_dev: true,
+})
+const latestVersion = ref<string | null>(null)
 const checking = ref(false)
 const updating = ref(false)
 const log = ref('')
-const versionError = ref(null)
-const dialogError = ref(null)
+const versionError = ref<string | null>(null)
+const dialogError = ref<string | null>(null)
 const dialogOpen = ref(false)
 
 const isDev = computed(() => status.value.is_dev || !status.value.current_version)
@@ -49,9 +54,11 @@ const check = async () => {
   versionError.value = null
   try {
     const result = await cliUpdatesApi.check()
+    const latest = 'latest_version' in result ? result.latest_version : null
+
     status.value = { ...status.value, ...result }
-    latestVersion.value = result.latest_version
-    if (result.latest_version && result.latest_version !== status.value.current_version) {
+    latestVersion.value = latest
+    if (latest && latest !== status.value.current_version) {
       dialogOpen.value = true
     } else {
       toast.info(`${status.value.current_version} (latest)`, {
@@ -81,14 +88,14 @@ const update = async () => {
   }
 }
 
-const pollTask = async (taskId) => {
+const pollTask = async (taskId: string) => {
   // The admin service restarts mid-update, so detail requests fail transiently.
   // Give it a bounded window to come back before declaring the update lost.
   const MAX_CONSECUTIVE_FAILURES = 40 // ~60s at POLL_INTERVAL_MS
   let failures = 0
   while (true) {
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
-    let task
+    let task: TaskPayload
     try {
       task = await tasksApi.detail(taskId)
       failures = 0
@@ -107,10 +114,13 @@ const pollTask = async (taskId) => {
       dialogError.value = 'Update did not complete successfully.'
       return
     }
+    const restartsAdmin = status.value.restarts_admin !== false
     status.value = await cliUpdatesApi.status().catch(() => status.value)
     latestVersion.value = null
     dialogOpen.value = false
-    toast.success('Updated successfully')
+    toast.success('Updated successfully', {
+      description: restartsAdmin ? undefined : 'Stop pilot start and run it again to use the new version.',
+    })
     return
   }
 }
@@ -118,7 +128,7 @@ const pollTask = async (taskId) => {
 
 <template>
   <SettingsRow label="Pilot Version" :description="loading ? '' : versionLabel">
-    <Button size="sm" variant="subtle" :loading="checking" @click="check">Update</Button>
+    <Button :loading="checking" @click="check">Update</Button>
   </SettingsRow>
 
   <ErrorMessage v-if="versionError" :message="versionError" />
@@ -129,14 +139,21 @@ const pollTask = async (taskId) => {
         This is a development install. Update it from a terminal:
       </p>
 
-      <pre class="p-3 bg-surface-gray-2 rounded-4 overflow-x-auto text-ink-gray-8 text-sm">git pull
-pilot admin build
-pilot admin upgrade</pre>
+      <div class="relative">
+        <pre
+          class="bg-surface-gray-2 p-3 pr-10 rounded-4 overflow-x-auto font-mono text-ink-gray-8 text-sm leading-relaxed"
+        >{{ DEV_COMMANDS }}</pre>
+
+        <CopyBtn
+          :text="DEV_COMMANDS"
+          class="top-2 right-2 absolute text-ink-gray-5 hover:text-ink-gray-8 transition-colors"
+        />
+      </div>
       <p class="text-ink-gray-5 text-p-sm">The last step restarts the admin service.</p>
     </div>
 
     <div v-else-if="updating" class="flex flex-col gap-3">
-      <p class="text-ink-gray-7 text-base">Updating to {{ latestVersion }}…</p>
+      <p class="text-ink-gray-7">Updating to {{ latestVersion }}…</p>
       <div v-if="!log" class="flex justify-center items-center py-8">
         <Spinner size="lg" class="text-ink-gray-4" />
       </div>
@@ -154,7 +171,12 @@ pilot admin upgrade</pre>
       </p>
 
       <p class="text-ink-gray-5 text-p-sm">
-        Pilot updates itself and restarts the admin service. Your benches keep running.
+        <template v-if="status.restarts_admin !== false">
+          Pilot updates itself and restarts the admin service. Your benches keep running.
+        </template>
+        <template v-else>
+          Pilot updates itself. Then stop <code>pilot start</code> and run it again to use the new version.
+        </template>
       </p>
     </div>
 

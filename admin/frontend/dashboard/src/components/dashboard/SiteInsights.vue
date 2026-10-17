@@ -1,19 +1,42 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { AxisChart, ErrorMessage, Skeleton } from 'frappe-ui'
+import { ErrorMessage, Skeleton } from 'frappe-ui'
+import type { BarChartProps, TimeGrain } from 'frappe-ui/charts'
+import { AreaChart, BarChart } from 'frappe-ui/charts'
 
 import ChartCard from '@/components/common/ChartCard.vue'
 import SiteUptime from '@/components/dashboard/SiteUptime.vue'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { sitesApi } from '@/api/sites'
+import type { SiteAnalytics, Timeline } from '@/types/siteMonitoring'
+import { errorMessage } from '@/utils/error'
+import { withDateTime } from '@/utils/time'
 
-const props = defineProps({
-  siteName: { type: String, required: true },
-  window: { type: String, default: '24h' },
+interface Props {
+  siteName: string
+  window?: string
+}
+
+type TimelineKey =
+  | 'requests_over_time'
+  | 'top_ips'
+  | 'background_jobs_over_time'
+  | 'top_paths'
+  | 'slowest_requests'
+  | 'avg_request_duration'
+  | 'top_jobs'
+  | 'avg_job_duration'
+  | 'frequent_slow_queries'
+  | 'slowest_queries'
+  | 'slowest_jobs'
+  | 'slowest_reports'
+
+const props = withDefaults(defineProps<Props>(), {
+  window: '24h',
 })
 
-const TIME_GRAIN = {
+const TIME_GRAIN: Record<string, TimeGrain> = {
   '30m': 'minute',
   '1h': 'minute',
   '6h': 'hour',
@@ -24,76 +47,34 @@ const TIME_GRAIN = {
 
 const loading = ref(true)
 const error = ref('')
-const data = ref(null)
+const data = ref<SiteAnalytics | null>(null)
 
 const GRID = { show: true, lineStyle: { type: 'dashed', color: 'var(--outline-gray-2)' } }
 const PALETTE = ['#10b981', '#ef4444', '#2490ef', '#f59e0b', '#8b5cf6']
 
-const numberFormat = new Intl.NumberFormat()
-const dateFormat = {
-  month: 'long',
-  day: 'numeric',
-  year: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-}
-
-const HTML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
-// Series names come from logged request paths/job methods/IPs - attacker-controlled
-// data that ends up here as an HTML string, so it must be escaped before interpolation.
-const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => HTML_ESCAPES[c])
-
-// Custom tooltip: lets the label wrap without breaking the number, and reuses
-// ECharts' own marker HTML so the dot color always matches the bar/legend.
-const tooltipFormatter = (paramsInput) => {
-  const params = (Array.isArray(paramsInput) ? paramsInput : [paramsInput]).filter(
-    (p) => p.value?.[1],
-  )
-  if (!params.length) return ''
-  const rows = params
-    .slice()
-    .sort((a, b) => b.value[1] - a.value[1])
-    .map(
-      (p) => `
-      <div class="flex items-start gap-2 py-0.5" style="display:flex;white-space:normal;">
-        ${p.marker}
-        <span class="flex-1 min-w-0" style="flex:1 1 auto;min-width:0;overflow-wrap:break-word;white-space:normal;">${escapeHtml(p.seriesName)}</span>
-        <span class="font-bold shrink-0" style="flex:0 0 auto;white-space:nowrap;">${numberFormat.format(p.value[1])}</span>
-      </div>
-    `,
-    )
-    .join('')
-  const date = new Date(params[0].value[0]).toLocaleString(undefined, dateFormat)
-  return `<div style="max-width:420px;white-space:normal;"><div class="mb-1">${date}</div>${rows}</div>`
-}
-
 const axisMax = computed(() => data.value?.now ?? Date.now())
 const axisMin = computed(() => axisMax.value - (data.value?.window_seconds ?? 0) * 1000)
 
-// series.name must match the data key holding that category's value.
-const timelineConfig = (timeline, valueLabel, chartType = 'bar') => {
+const timelineConfig = (timeline: Timeline | undefined, valueLabel: string): BarChartProps => {
   const categories = timeline?.categories ?? []
   return {
-    data: timeline?.points ?? [],
+    data: withDateTime(timeline?.points ?? []),
+    x: 'time',
+    y: categories,
     stacked: true,
     xAxis: {
-      key: 'time',
       type: 'time',
       timeGrain: TIME_GRAIN[props.window] ?? 'hour',
       echartOptions: { min: axisMin.value, max: axisMax.value, splitLine: GRID },
     },
-    yAxis: { yMin: 0, echartOptions: { name: valueLabel, splitLine: GRID } },
-    series: categories.map((name, i) => ({
-      name,
-      type: chartType,
-      color: PALETTE[i % PALETTE.length],
-      ...(chartType === 'bar' && { echartOptions: { itemStyle: { borderRadius: 0 } } }),
-    })),
-    echartOptions: { tooltip: { formatter: tooltipFormatter } },
+    yAxis: { min: 0, title: valueLabel, echartOptions: { splitLine: GRID } },
+    seriesConfig: Object.fromEntries(
+      categories.map((name, i) => [name, { label: name, color: PALETTE[i % PALETTE.length] }]),
+    ),
   }
 }
 
-const CHARTS = [
+const CHARTS: [TimelineKey, string, string, string?][] = [
   ['requests_over_time', 'Requests', 'Requests', 'line'],
   ['top_ips', 'Requests by IP', 'Requests'],
   ['background_jobs_over_time', 'Background jobs', 'Runs', 'line'],
@@ -112,8 +93,10 @@ const charts = computed(() =>
   CHARTS.map(([key, title, valueLabel, chartType]) => ({
     key,
     title,
-    config: timelineConfig(data.value?.[key], valueLabel, chartType),
-  })).filter((chart) => chart.key !== 'slowest_reports' || chart.config.series.length),
+    line: chartType === 'line',
+    empty: !data.value?.[key]?.categories.length || !data.value?.[key]?.points.length,
+    config: timelineConfig(data.value?.[key], valueLabel),
+  })).filter((chart) => chart.key !== 'slowest_reports' || chart.config.y.length),
 )
 
 // Rapid window switches can resolve out of order; only the most recently
@@ -127,11 +110,15 @@ const load = async () => {
   try {
     const result = await sitesApi.monitoring.get(props.siteName, props.window)
     if (generation !== loadGeneration) return
-    if (result.error) throw new Error(apiErrorMessage(result, 'Could not load monitoring data.'))
+    if (hasApiError(result)) {
+      throw new Error(apiErrorMessage(result, 'Could not load monitoring data.'))
+    }
+
     data.value = result
-  } catch (e) {
+  } catch (caught) {
     if (generation !== loadGeneration) return
-    error.value = e.message || 'Could not load monitoring data.'
+
+    error.value = errorMessage(caught, 'Could not load monitoring data.')
   } finally {
     if (generation === loadGeneration) loading.value = false
   }
@@ -142,11 +129,11 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="gap-4 grid grid-cols-1 sm:grid-cols-2">
+  <div class="gap-4 grid md:grid-cols-2">
     <SiteUptime :site-name="siteName" :window="window" />
 
     <template v-if="loading">
-      <Skeleton v-for="i in 12" :key="i" class="rounded-6 h-[340px]" />
+      <Skeleton v-for="i in 12" :key="i" class="rounded-4 h-[340px]" />
     </template>
 
     <ErrorMessage v-else-if="error" :message="error" class="sm:col-span-2" />
@@ -154,19 +141,32 @@ onMounted(load)
     <template v-else>
       <ChartCard v-for="chart in charts" :key="chart.key" :title="chart.title">
         <div
-          v-if="!chart.config.series.length"
+          v-if="chart.empty"
           class="flex flex-col flex-1 justify-center items-center gap-1 min-h-[300px] text-center"
         >
           <span class="size-6 text-ink-gray-3 lucide-chart-bar" />
-          <p class="font-medium text-ink-gray-7 text-xs">No usage yet</p>
-          <p class="text-ink-gray-5 text-xs">Data will appear here once activity is tracked</p>
+          <p class="text-sm-medium text-ink-gray-7">No usage yet</p>
+          <p class="text-p-xs text-ink-gray-5">Data will appear here once activity is tracked</p>
         </div>
 
-        <AxisChart
+        <component
+          :is="chart.line ? AreaChart : BarChart"
           v-else
-          :config="chart.config"
-          class="w-full min-w-0 h-full min-h-[300px] px-2 sm:px-4 pb-2"
-        />
+          v-bind="chart.config"
+          class="min-h-[300px]"
+        >
+          <template #tooltip="{ label, items }">
+            <p class="mb-2 text-ink-gray-5 text-p-sm">{{ label }}</p>
+
+            <div v-for="item in items" :key="item.name" class="flex items-start gap-2 text-p-sm">
+              <span class="mt-1.5 rounded-1 size-2 shrink-0" :style="{ background: item.color }" />
+              <span class="flex-1 min-w-0 text-ink-gray-6 break-words">{{ item.label }}</span>
+              <span class="font-semibold text-ink-gray-8 tabular-nums shrink-0">
+                {{ item.formattedValue }}
+              </span>
+            </div>
+          </template>
+        </component>
       </ChartCard>
     </template>
   </div>

@@ -75,16 +75,20 @@ def test_remove_schedule_deletes_marker_and_entry() -> None:
     assert write_call.args[0] == ["crontab", "-r"]
 
 
-def test_cron_module_command_pins_pythonpath_to_the_source_root() -> None:
+def test_cron_module_command_pins_pythonpath_to_the_source_root(tmp_path: Path) -> None:
     """Cron starts in the home directory, where the source tree shadows the `pilot` package."""
     from pilot.managers.cron import cron_module_command
     from pilot.utils import cli_root
 
-    command = cron_module_command(
-        "pilot.tasks.backup_site", ["/benches/b1", "site.localhost"], Path("/tmp/b.log")
-    )
+    admin_python = tmp_path / "bin" / "python"
+    admin_python.parent.mkdir()
+    admin_python.touch()
+    with patch("pilot.managers.environment.AdminEnvManager.python", new=admin_python):
+        command = cron_module_command(
+            "pilot.tasks.backup_site", ["/benches/b1", "site.localhost"], Path("/tmp/b.log")
+        )
 
-    assert command.startswith(f"PYTHONPATH={cli_root()} ")
+    assert command.startswith(f"PYTHONPATH={cli_root()} {admin_python} ")
     assert " -m pilot.tasks.backup_site /benches/b1 site.localhost " in command
     assert command.endswith(">> /tmp/b.log 2>&1")
 
@@ -109,3 +113,59 @@ def test_get_schedule_reads_the_expression_ahead_of_the_environment_prefix() -> 
     with patch("subprocess.run") as mock_run:
         mock_run.return_value = _crontab_result(f"{marker}\n{entry}\n")
         assert manager.get_schedule("job1") == "30 14 * * *"
+
+
+def test_missing_crontab_binary_names_the_package_to_install() -> None:
+    import pytest
+
+    from pilot.exceptions import CronError
+
+    with patch("shutil.which", return_value=None), pytest.raises(CronError, match="Install cron"):
+        make_manager().get_schedule("job1")
+
+
+def test_unreadable_crontab_is_not_treated_as_empty() -> None:
+    """Writing after a failed read would wipe the user's other cron entries."""
+    import pytest
+
+    from pilot.exceptions import CronError
+
+    failed = _crontab_result("", returncode=1)
+    failed.stderr = "crontab: cannot connect to the cron daemon"
+    with (
+        patch("shutil.which", return_value="/usr/bin/crontab"),
+        patch("subprocess.run", return_value=failed) as run,
+        pytest.raises(CronError, match="Could not read the crontab"),
+    ):
+        make_manager().set_schedule("job1", "0 3 * * *", "run-it")
+
+    assert run.call_count == 1
+
+
+def test_no_crontab_yet_reads_as_empty() -> None:
+    empty = _crontab_result("", returncode=1)
+    empty.stderr = "no crontab for frappe"
+    with patch("shutil.which", return_value="/usr/bin/crontab"), patch("subprocess.run", return_value=empty):
+        assert make_manager().get_schedule("job1") is None
+
+
+def test_remove_schedule_leaves_the_crontab_alone_without_the_entry() -> None:
+    manager = make_manager()
+
+    with patch("subprocess.run") as mock_run:
+        mock_run.return_value = _crontab_result("0 */6 * * * someone-elses-job\n\n# their comment\n")
+        manager.remove_schedule("job1")
+
+    assert [call.args[0] for call in mock_run.call_args_list] == [["crontab", "-l"]]
+
+
+def test_move_schedule_rekeys_the_entry_and_keeps_its_schedule() -> None:
+    manager = make_manager()
+    existing = f"0 */6 * * * someone-elses-job\n{manager._marker('old')}\n0 3 * * * run-old\n"
+
+    with patch("shutil.which", return_value="/usr/bin/crontab"), patch("subprocess.run") as mock_run:
+        mock_run.return_value = _crontab_result(existing)
+        manager.move_schedule("old", "new", "run-new")
+
+    written = mock_run.call_args_list[-1].kwargs["input"].splitlines()
+    assert written == ["0 */6 * * * someone-elses-job", manager._marker("new"), "0 3 * * * run-new"]

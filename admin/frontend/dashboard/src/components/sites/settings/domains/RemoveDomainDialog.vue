@@ -4,10 +4,15 @@ import { Button, Dialog, ErrorMessage } from 'frappe-ui'
 
 import { apiErrorMessage } from '@/api/client'
 import { sitesApi } from '@/api/sites'
+import { errorMessage } from '@/utils/error'
 
-const props = defineProps({
-  siteName: { type: String, required: true },
-  domain: { type: String, default: '' },
+interface Props {
+  siteName: string
+  domain?: string
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  domain: '',
 })
 const emit = defineEmits(['removed'])
 
@@ -32,7 +37,7 @@ const confirmRemove = async () => {
     show.value = false
     emit('removed')
   } catch (e) {
-    error.value = e.message || 'Failed to remove domain.'
+    error.value = errorMessage(e, 'Failed to remove domain.')
   } finally {
     removing.value = false
   }
@@ -47,11 +52,13 @@ const confirmRemove = async () => {
     </p>
 
     <ErrorMessage v-if="error" :message="error" class="mt-2" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="outline" @click="show = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="removing" @click="confirmRemove"
-        >Remove</Button
-      >
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="outline" @click="show = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="removing" @click="confirmRemove"
+          >Remove</Button
+        >
+      </div>
+    </template>
   </Dialog>
 </template>

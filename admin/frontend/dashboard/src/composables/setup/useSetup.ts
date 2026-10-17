@@ -1,22 +1,36 @@
-import { ref, computed, watch, onMounted } from 'vue'
+import { computed, onMounted, ref, useTemplateRef, watch } from 'vue'
 
-import { useSetupHandoff } from '@/composables/setup/useSetupHandoff'
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
+import { gitApi } from '@/api/git'
 import { setupApi } from '@/api/setup'
-import { generateRandomPassword } from '@/utils/randomPassword'
+import { useSetupHandoff } from '@/composables/setup/useSetupHandoff'
+import { branchComboboxOptions } from '@/utils/branchComboboxOptions'
+
+interface TerminalHandle {
+  scrollToBottom: () => void
+}
+
+// Excludes quote/shell-special characters and visually ambiguous ones (0/O, 1/l/I)
+// since this ends up in bench.toml, SQL statements, and shell commands.
+const charset = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789'
+
+const generateRandomPassword = (length = 32) => {
+  const bytes = crypto.getRandomValues(new Uint8Array(length))
+  return Array.from(bytes, (byte) => charset[byte % charset.length]).join('')
+}
 
 // Static dropdown options
 const DB_TYPE_OPTIONS = [
   { label: 'MariaDB', value: 'mariadb' },
   { label: 'PostgreSQL', value: 'postgres' },
 ]
-const STEP_TITLES = {
+const STEP_TITLES: Record<string, string> = {
   database: 'Database',
   customize: 'Customize your bench',
   running: 'Setting up your bench',
   done: 'Setup complete',
 }
-const STEP_SUBTITLES = {
+const STEP_SUBTITLES: Record<string, string> = {
   database: 'Choose and configure your database',
 }
 
@@ -30,13 +44,13 @@ export const useSetup = () => {
   const benchName = ref('')
   const isLinux = ref(true)
   const isProductionHandoff = ref(false)
-  const availableBranches = ref([])
+  const availableBranches = ref<string[]>([])
   const mariadbPasswordConfigured = ref(false)
   const postgresPasswordConfigured = ref(false)
   const mariadbLocalAvailable = ref(false)
   const postgresLocalAvailable = ref(false)
 
-  const terminal = ref(null)
+  const terminal = useTemplateRef<TerminalHandle>('terminal')
   const setupTaskId = ref('')
   const streamUrl = ref('')
   const streamStatus = ref('Starting…')
@@ -48,6 +62,8 @@ export const useSetup = () => {
   const dbPassword = ref('')
   const appRepo = ref('https://github.com/frappe/frappe')
   const appBranch = ref('develop')
+  const validatingFramework = ref(false)
+  const resolvedFramework = ref<{ repo: string; branch: string } | null>(null)
 
   const localAvailable = computed(() =>
     dbType.value === 'postgres' ? postgresLocalAvailable.value : mariadbLocalAvailable.value,
@@ -79,11 +95,16 @@ export const useSetup = () => {
   const dbPortPlaceholder = computed(() => (dbType.value === 'mariadb' ? '3306' : '5432'))
   const resolvedDbUser = computed(() => dbUser.value || rootUserPlaceholder.value)
 
-  const branchOptions = computed(() => {
-    const selected = appBranch.value
-    const isKnown = availableBranches.value.includes(selected)
-    const options = availableBranches.value.map((branch) => ({ label: branch, value: branch }))
-    return selected && !isKnown ? [{ label: selected, value: selected }, ...options] : options
+  const branchOptions = computed(() =>
+    branchComboboxOptions(availableBranches.value, appBranch.value, (typed: string) => {
+      appBranch.value = typed
+    }),
+  )
+  const frameworkIsValid = computed(() => {
+    const resolved = resolvedFramework.value
+    return Boolean(
+      resolved?.repo === appRepo.value.trim() && resolved?.branch === appBranch.value.trim(),
+    )
   })
 
   // Steps
@@ -158,19 +179,19 @@ export const useSetup = () => {
   }
 
   // Stream
-  const startStream = (taskId) => {
+  const startStream = (taskId: string) => {
     setupTaskId.value = taskId
     streamStatus.value = 'Starting…'
     streamUrl.value = setupApi.streamUrl(taskId)
     currentStep.value = 'running'
   }
 
-  const updateStreamStatus = (line) => {
+  const updateStreamStatus = (line: string) => {
     const match = line.match(/^\[\d+\/\d+\]\s*(.+?)\.*\s*$/)
     if (match) streamStatus.value = match[1]
   }
 
-  const onStreamDone = (success) => {
+  const onStreamDone = (success: boolean) => {
     if (!success) {
       failInstall('Setup failed. Open the details to see what went wrong, then try again.')
       return
@@ -180,7 +201,7 @@ export const useSetup = () => {
     shutdownWizardAndReload()
   }
 
-  const failInstall = (message) => {
+  const failInstall = (message: string) => {
     errorMessage.value = message
     showStreamDetails.value = true
   }
@@ -191,6 +212,53 @@ export const useSetup = () => {
   }
 
   // Validation
+  let frameworkRequest = 0
+
+  const validateFramework = async (repo: string, branch: string) => {
+    const request = ++frameworkRequest
+    validatingFramework.value = true
+    resolvedFramework.value = null
+    errorMessage.value = ''
+    try {
+      const result = await gitApi.resolve(repo, branch)
+      if (
+        request !== frameworkRequest ||
+        repo !== appRepo.value.trim() ||
+        branch !== appBranch.value.trim()
+      )
+        return false
+      if (!result.name) {
+        errorMessage.value = apiErrorMessage(result, 'Could not validate the Frappe branch.')
+        return false
+      }
+      if (result.name !== 'frappe') {
+        errorMessage.value = 'The repository does not contain the Frappe app.'
+        return false
+      }
+      resolvedFramework.value = { repo, branch }
+      return true
+    } catch (error) {
+      if (request === frameworkRequest) {
+        errorMessage.value =
+          (error instanceof Error && error.message) || 'Could not validate the Frappe branch.'
+      }
+      return false
+    } finally {
+      if (request === frameworkRequest) validatingFramework.value = false
+    }
+  }
+
+  watch([currentStep, appRepo, appBranch], ([step, repo, branch]) => {
+    frameworkRequest += 1
+    validatingFramework.value = false
+    resolvedFramework.value = null
+    if (step !== 'customize') return
+    errorMessage.value = ''
+    const selectedRepo = repo.trim()
+    const selectedBranch = branch.trim()
+    if (selectedRepo && selectedBranch) validateFramework(selectedRepo, selectedBranch)
+  })
+
   const validateDatabaseStep = async () => {
     if (dbMode.value !== 'external') return null
     const databaseName = dbType.value === 'postgres' ? 'PostgreSQL' : 'MariaDB'
@@ -208,7 +276,7 @@ export const useSetup = () => {
         host: dbHost.value,
         port: Number(dbPort.value) || Number(dbPortPlaceholder.value),
       })
-      if (result.error) {
+      if (hasApiError(result)) {
         return apiErrorMessage(result, `Could not validate the ${databaseName} configuration.`)
       }
       if (result.state === 'invalid') return `Incorrect ${databaseName} credentials.`
@@ -216,7 +284,10 @@ export const useSetup = () => {
         return `Could not validate the ${databaseName} configuration.`
       }
     } catch (error) {
-      return error.message || `Could not validate the ${databaseName} configuration.`
+      return (
+        (error instanceof Error && error.message) ||
+        `Could not validate the ${databaseName} configuration.`
+      )
     } finally {
       isSubmitting.value = false
     }
@@ -225,7 +296,9 @@ export const useSetup = () => {
 
   // Navigation
   const goToNextStep = async () => {
-    const validators = { database: validateDatabaseStep }
+    const validators: Record<string, () => Promise<string | null>> = {
+      database: validateDatabaseStep,
+    }
     const message = await validators[currentStep.value]?.()
     if (message) {
       errorMessage.value = message
@@ -243,14 +316,14 @@ export const useSetup = () => {
   const backToConfiguration = () => {
     errorMessage.value = ''
     showStreamDetails.value = false
-    currentStep.value = stepSequence.value.at(-1)
+    currentStep.value = stepSequence.value[stepSequence.value.length - 1]
   }
 
   const buildPayload = () => {
     const base = {
       db_type: dbType.value,
-      app_repo: appRepo.value,
-      app_branch: appBranch.value,
+      app_repo: appRepo.value.trim(),
+      app_branch: appBranch.value.trim(),
     }
     if (dbMode.value === 'existing_local') {
       return { ...base, db_mode: 'existing_local' }
@@ -285,19 +358,26 @@ export const useSetup = () => {
 
   const saveConfig = async () => {
     const result = await setupApi.save(buildPayload())
-    if (result.error) throw new Error(apiErrorMessage(result, 'Failed to save configuration.'))
+    if (hasApiError(result))
+      throw new Error(apiErrorMessage(result, 'Failed to save configuration.'))
   }
 
   const startSetup = async () => {
+    const repo = appRepo.value.trim()
+    const branch = appBranch.value.trim()
     isSubmitting.value = true
+    errorMessage.value = ''
     try {
+      if (!repo) throw new Error('Frappe repository is required.')
+      if (!branch) throw new Error('Frappe branch is required.')
+      if (!(await validateFramework(repo, branch))) return
       await saveConfig()
       const result = await setupApi.start()
-      if (result.error) throw new Error(apiErrorMessage(result, 'Failed to start setup.'))
+      if (hasApiError(result)) throw new Error(apiErrorMessage(result, 'Failed to start setup.'))
       if (!result.task_id) throw new Error('Setup did not return a task to follow.')
       startStream(result.task_id)
     } catch (error) {
-      errorMessage.value = error.message
+      errorMessage.value = error instanceof Error ? error.message : String(error)
     } finally {
       isSubmitting.value = false
     }
@@ -347,6 +427,8 @@ export const useSetup = () => {
     rootUserPlaceholder,
     dbTypeOptions: DB_TYPE_OPTIONS,
     branchOptions,
+    validatingFramework,
+    frameworkIsValid,
     stepSequence,
     stepNumber,
     isConfiguring,

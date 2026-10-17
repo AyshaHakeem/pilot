@@ -5,8 +5,9 @@ import { Alert, Button, ErrorMessage, Select, Spinner, TextInput, toast } from '
 import EmptyState from '@/components/common/EmptyState.vue'
 import SettingsSwitch from '@/components/settings/SettingsSwitch.vue'
 
-import { apiErrorMessage } from '@/api/client'
 import { settingsApi } from '@/api/settings'
+import type { FirewallRuleSettings } from '@/types/settings'
+import { errorMessage } from '@/utils/error'
 
 const ACTION_OPTIONS = [
   { label: 'Block', value: 'deny' },
@@ -21,7 +22,7 @@ const error = ref('')
 const enabled = ref(false)
 const production = ref(true)
 const defaultPolicy = ref('allow')
-const rules = ref([])
+const rules = ref<FirewallRuleSettings[]>([])
 const myIp = ref('')
 
 const lockoutRisk = computed(() => enabled.value && defaultPolicy.value === 'deny')
@@ -34,12 +35,12 @@ const addRule = () => {
   })
 }
 
-const removeRule = (index) => {
+const removeRule = (index: number) => {
   rules.value.splice(index, 1)
 }
 
 // A wrong fill shows at its own row; empty or invalid IPs just hold the button.
-const ipError = (rule) => {
+const ipError = (rule: FirewallRuleSettings) => {
   const ip = rule.ip.trim()
   if (!ip || IP_PATTERN.test(ip)) return ''
   return `'${rule.ip}' is not a valid IP or CIDR.`
@@ -75,14 +76,10 @@ const save = async () => {
         description: (r.description || '').trim(),
       })),
     }
-    const result = await settingsApi.update({ firewall: payload })
-    if (result.error) {
-      error.value = apiErrorMessage(result, 'Failed to save.')
-      return
-    }
+    await settingsApi.update({ firewall: payload })
     toast.success('Firewall updated')
   } catch (e) {
-    error.value = e.message || 'Failed to save.'
+    error.value = errorMessage(e, 'Failed to save.')
   } finally {
     saving.value = false
   }
@@ -106,7 +103,7 @@ onMounted(async () => {
       myIp.value = ''
     }
   } catch (e) {
-    error.value = e.message || 'Could not load settings.'
+    error.value = errorMessage(e, 'Could not load settings.')
   } finally {
     loading.value = false
   }
@@ -119,7 +116,13 @@ onMounted(async () => {
   </div>
 
   <div v-else class="space-y-6">
-    <Alert v-if="!production" title="Not enforced yet" theme="amber" :dismissible="false">
+    <Alert
+      v-if="!production"
+      class="border border-outline-gray-2"
+      title="Not enforced yet"
+      theme="amber"
+      :dismissible="false"
+    >
       <template #description>
         <span class="text-ink-gray-6 text-p-sm"
           >These rules take effect only in production (they're applied by nginx). This bench isn't
@@ -133,17 +136,23 @@ onMounted(async () => {
       label="Enable firewall"
       description="Restrict who can reach Pilot and deployed sites; off means open."
       :model-value="enabled"
-      @update:model-value="(v) => (enabled = v)"
+      @update:model-value="(v: boolean) => (enabled = v)"
     />
 
     <SettingsSwitch
       label="Block by default"
       description="Only allowed IPs below can reach the server; off allows all except blocked ones."
       :model-value="defaultPolicy === 'deny'"
-      @update:model-value="(v) => (defaultPolicy = v ? 'deny' : 'allow')"
+      @update:model-value="(v: boolean) => (defaultPolicy = v ? 'deny' : 'allow')"
     />
 
-    <Alert v-if="lockoutRisk" title="Heads up" theme="amber" :dismissible="false">
+    <Alert
+      v-if="lockoutRisk"
+      class="border border-outline-gray-2"
+      title="Heads up"
+      theme="amber"
+      :dismissible="false"
+    >
       <template #description>
         <span class="text-ink-gray-6 text-p-sm"
           >Everyone is blocked by default. Add an <b>Allow</b> rule for your own IP<template
@@ -157,8 +166,8 @@ onMounted(async () => {
 
     <div class="space-y-2">
       <div class="flex justify-between items-center">
-        <p class="font-medium text-ink-gray-8 text-base leading-normal">Rules</p>
-        <Button variant="subtle" icon-left="lucide-plus" @click="addRule">Add rule</Button>
+        <p class="font-medium text-ink-gray-8 leading-normal">Rules</p>
+        <Button icon-left="lucide-plus" @click="addRule">Add rule</Button>
       </div>
 
       <EmptyState
@@ -177,22 +186,21 @@ onMounted(async () => {
         <div v-for="(rule, index) in rules" :key="index">
           <div class="flex items-end gap-2">
             <div class="space-y-1.5 w-28 shrink-0">
-              <p v-if="index === 0" class="font-medium text-ink-gray-7 text-base">Action</p>
+              <p v-if="index === 0" class="font-medium text-ink-gray-7">Action</p>
               <Select v-model="rule.action" :options="ACTION_OPTIONS" class="w-full" />
             </div>
 
             <div class="flex-1 space-y-1.5">
-              <p v-if="index === 0" class="font-medium text-ink-gray-7 text-base">IP / CIDR</p>
+              <p v-if="index === 0" class="font-medium text-ink-gray-7">IP / CIDR</p>
               <TextInput v-model="rule.ip" placeholder="203.0.113.4 or 10.0.0.0/8" class="w-full" />
             </div>
 
             <div class="flex-1 space-y-1.5">
-              <p v-if="index === 0" class="font-medium text-ink-gray-7 text-base">Note</p>
+              <p v-if="index === 0" class="font-medium text-ink-gray-7">Note</p>
               <TextInput v-model="rule.description" placeholder="optional" class="w-full" />
             </div>
 
             <Button
-              variant="subtle"
               icon="lucide-x"
               label="Remove rule"
               tooltip="Remove rule"
@@ -200,7 +208,6 @@ onMounted(async () => {
             />
           </div>
 
-          <!-- Under the row it belongs to, not pooled at the bottom of the page. -->
           <p v-if="ipError(rule)" class="mt-1.5 text-ink-red-5 text-p-sm">{{ ipError(rule) }}</p>
         </div>
       </div>

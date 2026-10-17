@@ -28,7 +28,19 @@ def test_delete_site_returns_accepted_task_resource(tmp_path: Path) -> None:
     assert response.status_code == 202
     assert response.headers["Location"] == f"/api/v1/tasks/{body['task_id']}"
     assert body["command"] == "drop-site"
-    assert body["args"] == {"site": "s.localhost"}
+    assert body["args"] == {"site": "s.localhost", "no_backup": False}
+
+
+def test_delete_site_can_skip_the_backup(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    _write_site(bench_root, "s.localhost")
+
+    with patch("pilot.internal.tasks.runner.task_workers.wake", return_value=False):
+        response = client.delete("/api/v1/sites/s.localhost?no_backup=1")
+
+    assert response.status_code == 202
+    assert response.get_json()["args"] == {"site": "s.localhost", "no_backup": True}
 
 
 def test_delete_site_returns_not_found_without_starting_task(tmp_path: Path) -> None:
@@ -105,3 +117,18 @@ def test_site_creation_rejects_symlinked_sites_root(tmp_path: Path) -> None:
 
     assert create.status_code == 422
     queue.assert_not_called()
+
+
+def test_list_sites_labels_each_site_by_its_primary_domain(tmp_path: Path) -> None:
+    bench_root = tmp_path / "benches" / "current"
+    client = _client(bench_root)
+    _write_site(bench_root, "plain.localhost")
+    _write_site(bench_root, "custom.localhost")
+    config = {"installed_apps": [], "domains": ["erp.example.com"], "host_name": "https://erp.example.com"}
+    (bench_root / "sites" / "custom.localhost" / "site_config.json").write_text(json.dumps(config))
+
+    response = client.get("/api/v1/sites")
+
+    labels = {site["name"]: site["primary_domain"] for site in response.get_json()}
+    assert response.status_code == 200
+    assert labels == {"plain.localhost": "plain.localhost", "custom.localhost": "erp.example.com"}

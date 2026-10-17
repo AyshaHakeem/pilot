@@ -170,6 +170,28 @@ def test_main_forwards_explicit_frappe_command(monkeypatch: pytest.MonkeyPatch) 
     assert calls == [("demo", ["--site", "site.localhost", "migrate", "--verbose"], True)]
 
 
+@pytest.mark.parametrize("flag", ["--help", "-h"])
+def test_frappe_help_explains_passthrough_without_a_bench(monkeypatch, capsys, flag):
+    monkeypatch.setattr(sys, "argv", ["pilot", "frappe", flag])
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main()
+
+    assert exit_info.value.code == 0
+    help_text = " ".join(capsys.readouterr().out.split())
+    assert "pilot -b NAME frappe --site SITE migrate" in help_text
+    assert "without a '--' separator" in help_text
+
+
+def test_frappe_subcommand_help_is_forwarded(monkeypatch):
+    calls = []
+    monkeypatch.setattr(dispatch, "run_frappe", lambda context, args: calls.append(args))
+    monkeypatch.setattr(sys, "argv", ["pilot", "frappe", "--site", "test.local", "migrate", "--help"])
+
+    cli.main()
+
+    assert calls == [["--site", "test.local", "migrate", "--help"]]
+
+
 def test_main_dispatches_all_benches_without_selecting_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -184,3 +206,33 @@ def test_main_dispatches_all_benches_without_selecting_one(
     cli.main()
 
     assert dispatched == [("restart", "all")]
+
+
+def test_main_keeps_pilot_flags_out_of_the_frappe_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        dispatch, "run_frappe", lambda context, args: calls.append((context.assume_yes, args))
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["pilot", "-b", "demo", "-y", "--site", "s.localhost", "reinstall", "--yes"]
+    )
+
+    cli.main()
+
+    assert calls == [(True, ["--site", "s.localhost", "reinstall", "--yes"])]
+
+
+def test_version_is_pilots_own(capsys: pytest.CaptureFixture[str]) -> None:
+    import pilot
+
+    assert not dispatch.is_frappe_passthrough(["--version"])
+    with pytest.raises(SystemExit):
+        registry.build_parser().parse_args(["--version"])
+
+    assert capsys.readouterr().out.strip() == f"pilot {pilot.__version__}"
+
+
+def test_every_command_group_is_discovered() -> None:
+    names = {(command.group, command.name) for command in registry._discover()}
+
+    assert ("remove", "logs") in names

@@ -108,6 +108,14 @@ def test_site_tasks_reject_empty_admin_password(tmp_path: Path, password) -> Non
         TaskRunner(tmp_path).run("new-site", {"name": "site.localhost", "admin_password": password})
 
 
+@pytest.mark.parametrize("blank", ["name", "description", "publisher", "email"])
+def test_new_app_rejects_blank_required_args(tmp_path: Path, blank: str) -> None:
+    args = {"name": "people", "description": "Hi", "publisher": "Frappe", "email": "t@f.io"}
+    args[blank] = "  "
+    with pytest.raises(ValueError, match="must not be empty"):
+        TaskRunner(tmp_path).run("new-app", args)
+
+
 def test_command_argv_get_app(tmp_path: Path) -> None:
     argv = task_argv(tmp_path, "get-app", {"name": "erpnext", "repo": "https://github.com/frappe/erpnext"})
     assert argv[0] == sys.executable
@@ -215,16 +223,22 @@ def test_command_argv_switch_branch_requires_name_and_branch(tmp_path: Path) -> 
         TaskRunner(tmp_path).run("switch-branch", {"name": "gameplan"})
 
 
-def _make_task_dir(tasks_root: Path, task_id: str, status: str = "success") -> Path:
+def _make_task_dir(
+    tasks_root: Path,
+    task_id: str,
+    status: str = "success",
+    command: str = "build",
+    started_at: str = "2026-05-21T14:30:22+00:00",
+) -> Path:
     """Helper: create a minimal on-disk task directory."""
     task_dir = tasks_root / task_id
     task_dir.mkdir(parents=True)
     meta = {
         "task_id": task_id,
-        "command": "build",
+        "command": command,
         "args": {},
         "command_argv": ["/usr/bin/bench", "frappe", "build"],
-        "started_at": "2026-05-21T14:30:22+00:00",
+        "started_at": started_at,
         "finished_at": "2026-05-21T14:30:35+00:00",
         "exit_code": 0,
     }
@@ -291,6 +305,20 @@ def test_stream_output_yields_structured_events(tmp_path: Path) -> None:
             "failure": None,
         },
     ]
+
+
+def test_a_quiet_stream_sends_a_heartbeat(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A heartbeat write is how a stream finds out its client went away."""
+    task_id = "20260521-143022-aabbcc"
+    _make_task_dir(tmp_path / "tasks", task_id, status="running")
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(task_reader_module.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(task_reader_module.time, "sleep", lambda seconds: None)
+
+    stream = TaskReader(tmp_path).stream_output(task_id)
+
+    assert next(stream)["type"] == "status"
+    assert next(stream) is None
 
 
 def test_stream_waits_across_queued_running_and_success(
@@ -464,6 +492,42 @@ def test_reader_ignores_invalid_task_dirs(tmp_path: Path) -> None:
     assert [task.task_id for task in tasks] == [task_id]
 
 
+def test_reader_excludes_unlisted_commands_before_the_limit_cut(tmp_path: Path) -> None:
+    _make_task_dir(
+        tmp_path / "tasks",
+        "20260521-143022-aabbcc",
+        started_at="2026-05-21T14:30:22+00:00",
+    )
+    for suffix, started_at in (
+        ("ddeeff", "2026-05-21T15:00:00+00:00"),
+        ("eeff00", "2026-05-21T15:06:00+00:00"),
+    ):
+        _make_task_dir(
+            tmp_path / "tasks",
+            f"20260521-150000-{suffix}",
+            command="fetch-all-app-updates",
+            started_at=started_at,
+        )
+
+    tasks = TaskReader(tmp_path).list_tasks(limit=1)
+
+    assert [task.command for task in tasks] == ["build"]
+
+
+def test_reader_includes_unlisted_commands_on_request(tmp_path: Path) -> None:
+    _make_task_dir(tmp_path / "tasks", "20260521-143022-aabbcc")
+    _make_task_dir(
+        tmp_path / "tasks",
+        "20260521-150000-ddeeff",
+        command="fetch-all-app-updates",
+        started_at="2026-05-21T15:00:00+00:00",
+    )
+
+    tasks = TaskReader(tmp_path).list_tasks(include_unlisted=True)
+
+    assert sorted(task.command for task in tasks) == ["build", "fetch-all-app-updates"]
+
+
 def test_reader_returns_only_allowlisted_failure_message(tmp_path: Path) -> None:
     task_id = "20260521-143022-aabbcc"
     task_dir = _make_task_dir(tmp_path / "tasks", task_id, status="failed")
@@ -588,3 +652,16 @@ def test_task_retention_limit(tmp_path: Path) -> None:
         and (entry / "status").read_text().strip() in {"success", "failed", "killed"}
     ]
     assert len(remaining_completed) == TASK_RETENTION_LIMIT
+
+
+def test_a_running_task_stream_ends_when_the_worker_drains(tmp_path: Path) -> None:
+    """Otherwise an open dashboard holds every Admin restart for the full graceful timeout."""
+    task_id = "20260521-143022-aabbcc"
+    task_dir = _make_task_dir(tmp_path / "tasks", task_id, status="running")
+    (task_dir / "output.log").write_text("alpha\n")
+
+    with patch("os.kill", return_value=None):
+        events = list(TaskReader(tmp_path).stream_output(task_id, should_stop=lambda: True))
+
+    assert {"type": "line", "line": "alpha"} in events
+    assert all(event["type"] != "done" for event in events)

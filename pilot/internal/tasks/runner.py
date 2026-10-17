@@ -16,6 +16,7 @@ from pilot.internal.tasks.payload import TaskPayloadBuilder
 from pilot.internal.tasks.process import TaskProcess
 from pilot.internal.tasks.store import TaskStore
 from pilot.internal.tasks.worker import task_workers
+from pilot.managers.task.control import TaskWorkerControl
 from pilot.tasks import Task
 from pilot.tasks.callbacks import TaskCallback as TaskCallback
 from pilot.tasks.callbacks import TaskCallbacks
@@ -109,7 +110,7 @@ class TaskRunner:
 
     def _run_post_submission_housekeeping(self) -> None:
         for operation in (
-            lambda: task_workers.wake(self._bench_root),
+            TaskWorkerControl(self._bench_root).wake,
             lambda: self._store.purge_terminal(TASK_RETENTION_LIMIT),
         ):
             try:
@@ -180,6 +181,13 @@ def is_command_cancellable_while_running(command: str) -> bool:
     jobs, _ = task_registry()
     task_class = jobs.get(command)
     return task_class.is_cancellable_while_running if task_class else True
+
+
+def is_command_listed(command: str) -> bool:
+    """Whether the command's task class shows up in listings. Unknown commands stay listed."""
+    jobs, _ = task_registry()
+    task_class = jobs.get(command)
+    return task_class.is_listed if task_class else True
 
 
 def discover_tasks() -> list[type[Task]]:

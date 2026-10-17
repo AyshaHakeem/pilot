@@ -99,10 +99,24 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'admin/frontend/dashboard/package-lock.json') }}
 
       - name: Install Playwright browser
         run: playwright install --with-deps chromium
+
+      - name: Install dashboard Playwright browser
+        working-directory: admin/frontend/dashboard
+        run: npx playwright install chromium
+
+      - name: Test Cloud Settings embed
+        if: matrix.db_type == 'mariadb'
+        run: |
+          npm ci --prefix admin/frontend/cloud-sdk
+          npm ci --prefix admin/frontend/in-app-embed
+          npm --prefix admin/frontend/cloud-sdk test
+          npm --prefix admin/frontend/cloud-sdk run build
+          cd admin/frontend/dashboard
+          npx playwright test --config cloud-settings.config.ts
 
       - name: Run e2e tests
         working-directory: tests/e2e
@@ -115,11 +129,14 @@ jobs:
           # CI validates this branch's frontend, so build the admin UI from source.
           E2E_BUILD_ADMIN: "1"
           E2E_DB_TYPE: ${{ matrix.db_type }}
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Upload Playwright traces
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v4
         with:
           name: e2e-traces-${{ matrix.variant }}
-          path: tests/e2e/test-results
+          path: |
+            tests/e2e/test-results
+            admin/frontend/dashboard/test-results
           retention-days: 7

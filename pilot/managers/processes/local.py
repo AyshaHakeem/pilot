@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pilot.exceptions import BenchError, CommandError
+from pilot.exceptions import BenchError
 from pilot.managers.environment import AdminEnvManager
 from pilot.managers.gunicorn import GunicornManager
 from pilot.managers.processes.definitions import (
@@ -20,7 +20,7 @@ from pilot.managers.processes.definitions import (
     ProcessDefinitionBuilder,
     hook_wrapped_argv,
 )
-from pilot.utils import cli_root, run_command
+from pilot.utils import cli_root
 
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
@@ -196,6 +196,9 @@ class ProcessManager:
     def restart_admin(self) -> None:
         pass
 
+    def wake_admin(self) -> None:
+        """Start an Admin that stopped on idle. Only a socket-activated Admin stops."""
+
     def is_admin_running(self) -> bool:
         return _tcp_port_open(self.bench.config.admin.port)
 
@@ -234,14 +237,8 @@ class ProcessManager:
     def _clear_frappe_cache(self) -> None:
         """Drop the cached app/module map and asset manifest, so restarted
         processes read apps.txt instead of importing a removed app."""
-        if not self.bench.sites():
-            return
-        with contextlib.suppress(BenchError, CommandError, OSError):
-            run_command(
-                [*self.bench.frappe_call, "frappe", "--site", "all", "clear-cache"],
-                cwd=self.bench.sites_path,
-                timeout=120,
-            )
+        with contextlib.suppress(BenchError, OSError):
+            self.bench.clear_cache()
 
     def _apply_reload_request(self, defs_by_name: dict[str, ProcessDefinition]) -> None:
         """Restart the processes a queued reload asked for, leaving admin alone."""
@@ -271,6 +268,7 @@ class ProcessManager:
     def _spawn(self, pd: ProcessDefinition) -> None:
         proc = subprocess.Popen(
             hook_wrapped_argv(pd),
+            stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             preexec_fn=os.setsid,

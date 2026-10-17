@@ -1,6 +1,6 @@
 <script setup lang="ts">
+import { Avatar, type AvatarProps } from 'frappe-ui'
 import { computed } from 'vue'
-import { Avatar } from 'frappe-ui'
 
 import {
   FRAPPE_LOGO_URL,
@@ -9,11 +9,17 @@ import {
   useAppRegistry,
 } from '@/composables/apps/useAppRegistry'
 
-const props = defineProps({
-  name: { type: String, required: true },
-  label: { type: String, default: '' },
-  logo: { type: String, default: '' },
-  size: { type: String, default: '2xl' },
+interface Props {
+  name: string
+  label?: string
+  logo?: string
+  size?: AvatarProps['size']
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  label: '',
+  logo: '',
+  size: '2xl',
 })
 
 const { logoMap } = useAppRegistry()

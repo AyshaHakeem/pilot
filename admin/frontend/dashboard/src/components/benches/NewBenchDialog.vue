@@ -1,14 +1,18 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { Button, Dialog, ErrorMessage, FormControl, LoadingIndicator, Select } from 'frappe-ui'
+import { computed, ref, watch } from 'vue'
+import { Button, Dialog, ErrorMessage, LoadingIndicator, Select, TextInput } from 'frappe-ui'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { authApi } from '@/api/auth'
 import { benchesApi } from '@/api/benches'
 
-const PM_LABELS = { systemd: 'Systemd', supervisor: 'Supervisor' }
+const PM_LABELS: Record<string, string> = { systemd: 'Systemd', supervisor: 'Supervisor' }
 
-const props = defineProps({ modelValue: Boolean })
+interface Props {
+  modelValue?: boolean
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits(['update:modelValue'])
 
 const show = computed({
@@ -22,7 +26,7 @@ const nativeProcessManager = ref('systemd')
 const processManager = ref('systemd')
 const adminDomain = ref('')
 const adminPrefix = ref('')
-const wildcardDomains = ref([])
+const wildcardDomains = ref<string[]>([])
 const selectedSuffix = ref('')
 const error = ref('')
 const creating = ref(false)
@@ -31,7 +35,7 @@ const status = ref('')
 const provisioning = ref(false)
 const wizardUrl = ref('')
 const elapsed = ref(0)
-let elapsedTimer = null
+let elapsedTimer: ReturnType<typeof setInterval> | null = null
 
 const elapsedLabel = computed(() => {
   const m = Math.floor(elapsed.value / 60)
@@ -60,7 +64,7 @@ const stopElapsed = () => {
 // with `pilot start`) most likely has no systemd/supervisor configured, so
 // auto-provisioning a managed bench from the UI would silently fail or confuse.
 // In that case we point the user at the CLI instead.
-const isProduction = ref(null)
+const isProduction = ref<boolean | null>(null)
 
 // Native manager is recommended; supervisor is the cross-platform alternative.
 const processManagerOptions = computed(() => [
@@ -122,7 +126,7 @@ watch(show, (open) => {
   loadWildcardDomains()
 })
 
-const startProvisioning = (url) => {
+const startProvisioning = (url: string) => {
   provisioning.value = true
   wizardUrl.value = url
   elapsed.value = 0
@@ -144,14 +148,15 @@ const MAX_WAIT_SECONDS = 120
 // cache: 'no-store' (plus a nonce) keeps the browser from reusing a stale answer.
 // Returns true if the A record is published (and points here when we know our IP),
 // false if it resolves but not yet, null if the lookup itself couldn't run.
-const dnsResolved = async (domain, expectedIp) => {
+const dnsResolved = async (domain: string, expectedIp: string) => {
   try {
     const url = `https://dns.google/resolve?name=${domain}&type=A&_=${elapsed.value}`
     const response = await fetch(url, {
       headers: { accept: 'application/dns-json' },
       cache: 'no-store',
     })
-    const aRecords = ((await response.json()).Answer || []).filter((a) => a.type === 1)
+    const body: { Answer?: { type: number; data: string }[] } = await response.json()
+    const aRecords = (body.Answer || []).filter((a) => a.type === 1)
     if (!aRecords.length) return false
     return expectedIp ? aRecords.some((a) => a.data === expectedIp) : true
   } catch {
@@ -164,7 +169,7 @@ const dnsResolved = async (domain, expectedIp) => {
 // domain has propagated, and a minimum wait elapses. The dev/port flow has no
 // domain, so it skips DoH and the wait. DoH being unreachable (null) doesn't
 // block, and a cached negative stops blocking after MAX_WAIT_SECONDS.
-const pollReady = async (params, domain = '', serverIp = '') => {
+const pollReady = async (params: Record<string, unknown>, domain = '', serverIp = '') => {
   if (!provisioning.value) return
   let serverReady = false
   try {
@@ -205,7 +210,7 @@ const createBench = async () => {
       process_manager: processManager.value,
       admin_domain: domain,
     })
-    if (data.error) {
+    if (hasApiError(data)) {
       error.value = apiErrorMessage(data, 'Could not create bench.')
       creating.value = false
       return
@@ -236,7 +241,6 @@ const createBench = async () => {
   <Dialog
     v-model="show"
     :title="provisioning ? 'Setting Up Bench' : 'New Bench'"
-    size="lg"
     :showCloseButton="true"
   >
     <div class="flex flex-col gap-5">
@@ -244,7 +248,7 @@ const createBench = async () => {
       <div v-if="provisioning" class="flex flex-col items-center gap-5 py-8 text-center">
         <LoadingIndicator class="w-10 h-10 text-ink-gray-5" />
         <div class="flex flex-col gap-2">
-          <p class="font-semibold text-ink-gray-9 text-lg">This may take a few minutes</p>
+          <p class="text-lg-semibold">This may take a few minutes</p>
           <p class="max-w-xs text-ink-gray-6 text-sm">Opens automatically when ready.</p>
         </div>
 
@@ -254,10 +258,9 @@ const createBench = async () => {
           Elapsed {{ elapsedLabel }}
         </span>
 
-        <Button variant="subtle" @click="openWizardInNewTab">Open setup now</Button>
+        <Button @click="openWizardInNewTab">Open setup now</Button>
       </div>
 
-      <!-- Loading -->
       <div
         v-else-if="isProduction === null"
         class="flex flex-col justify-center items-center gap-3 py-16"
@@ -268,9 +271,9 @@ const createBench = async () => {
       <!-- Dev bench: guide to the CLI rather than auto-provisioning a
            managed bench the host probably can't run. -->
       <div v-else-if="isProduction === false" class="flex flex-col gap-3">
-        <p class="text-ink-gray-7 text-sm">
-          This bench is running in development mode, so new benches can be created from the
-          command line :
+        <p class="text-ink-gray-7 text-p-sm">
+          This bench is running in development mode, so new benches can be created from the command
+          line :
         </p>
 
         <pre
@@ -281,9 +284,8 @@ const createBench = async () => {
       <!-- Production bench: a process manager is configured, so we create the
            bench and route its domain to the setup wizard. -->
       <template v-else-if="isProduction === true">
-        <FormControl
+        <TextInput
           label="Bench name"
-          type="text"
           v-model="name"
           placeholder="my-bench"
           @input="error = ''"
@@ -302,7 +304,7 @@ const createBench = async () => {
                 : 'border-outline-gray-2 hover:bg-surface-alpha-gray-1'"
               @click="processManager = opt.value"
             >
-              <span class="block font-medium text-ink-gray-9 text-sm">{{ opt.label }}</span>
+              <span class="block font-medium text-sm">{{ opt.label }}</span>
               <span class="block text-ink-gray-5 text-xs">{{ opt.hint }}</span>
             </button>
           </div>
@@ -310,9 +312,8 @@ const createBench = async () => {
 
         <div>
           <template v-if="wildcardDomains.length === 0">
-            <FormControl
+            <TextInput
               label="Admin domain"
-              type="text"
               v-model="adminDomain"
               placeholder="my-admin.example.com"
               @input="error = ''"
@@ -327,9 +328,8 @@ const createBench = async () => {
           <div v-else>
             <span class="block mb-1.5 text-ink-gray-5 text-xs">Admin domain</span>
             <div class="flex items-stretch gap-2">
-              <FormControl
+              <TextInput
                 class="flex-1 min-w-0"
-                type="text"
                 v-model="adminPrefix"
                 placeholder="my-admin"
                 @input="error = ''"
@@ -349,7 +349,7 @@ const createBench = async () => {
             </div>
           </div>
 
-          <p class="mt-1.5 text-ink-gray-5 text-xs">
+          <p class="mt-1.5 text-ink-gray-5 text-p-xs">
             The web address you'll use to open this bench.
           </p>
         </div>

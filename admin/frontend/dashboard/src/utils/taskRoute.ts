@@ -1,16 +1,9 @@
-export const taskDetailRoute = (taskId) => {
+import type { Router } from 'vue-router'
+
+export const taskDetailRoute = (taskId: string) => {
   return { name: 'TaskDetail', params: { taskId } }
 }
 
-export const openTaskDetailPage = (router, taskId) => {
+export const openTaskDetailPage = (router: Router, taskId: string) => {
   router.push(taskDetailRoute(taskId))
-}
-
-export const siteDetailRoute = (siteName, tab = 'apps') => {
-  return { name: 'SiteDetail', params: { name: siteName, tab } }
-}
-
-export const openSitePage = (router, siteName, app = '') => {
-  const route = siteDetailRoute(siteName)
-  router.push(app ? { ...route, query: { app, action: 'install-app' } } : route)
 }

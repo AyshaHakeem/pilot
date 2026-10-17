@@ -53,7 +53,7 @@ def _drop_failed_site(bench_root: Path, site_name: str, site_path: Path) -> bool
 
         bench = Bench(bench_root)
         with noninteractive_privileges():
-            bench.site(site_name).drop()
+            bench.site(site_name).drop(no_backup=True)
         return True
     except Exception as exc:
         logging.debug("Site drop callback failed for %s: %s", site_name, exc)
@@ -73,18 +73,24 @@ def _disable_site_ssl(meta: dict, args: dict) -> None:
 
 def _cleanup_site_restore(meta: dict, args: dict) -> None:
     bench_root = Path(meta["bench_root"]).resolve()
+    if meta.get("task_id"):
+        for work_dir in (bench_root / "tmp" / "restores").glob(f"{meta['task_id']}-*"):
+            shutil.rmtree(work_dir, ignore_errors=True)
+    if args.get("upload_dir"):
+        _remove_restore_upload(bench_root, Path(args["upload_dir"]))
+    if args.get("remove_site"):
+        _remove_failed_site(meta, {"site": args["site"]})
+
+
+def _remove_restore_upload(bench_root: Path, upload_dir: Path) -> None:
     expected_upload_root = bench_root / "tmp" / "uploads"
     upload_root = expected_upload_root.resolve()
     if upload_root != expected_upload_root:
         raise ValueError("Restore upload root must stay within the bench.")
-    upload_dir = Path(args["upload_dir"])
     resolved_upload_dir = upload_dir.resolve(strict=False)
     if resolved_upload_dir.parent != upload_root or upload_dir.is_symlink():
         raise ValueError("Restore upload path must stay within the bench.")
-
     shutil.rmtree(upload_dir, ignore_errors=True)
-    if args.get("remove_site"):
-        _remove_failed_site(meta, {"site": args["site"]})
 
 
 def _reload_workers(meta: dict, args: dict) -> None:
@@ -93,11 +99,19 @@ def _reload_workers(meta: dict, args: dict) -> None:
     Bench(Path(meta["bench_root"])).reload_workers(web_only=args.get("web_only", False))
 
 
+def _fail_migration_step(meta: dict, args: dict) -> None:
+    from pilot.core.bench import Bench
+
+    operation = Bench(Path(meta["bench_root"])).migrations.get(args["operation_id"])
+    operation.fail_stopped_step(meta["task_id"], args["phase"], args.get("site"))
+
+
 _OPERATIONS: dict[str, CallbackOperation] = {
     "cleanup-site-restore": _cleanup_site_restore,
     "remove-failed-site": _remove_failed_site,
     "disable-site-ssl": _disable_site_ssl,
     "reload-workers": _reload_workers,
+    "fail-migration-step": _fail_migration_step,
 }
 
 

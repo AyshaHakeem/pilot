@@ -10,8 +10,9 @@ from pilot.config import BenchConfig
 from pilot.exceptions import BenchError
 
 if TYPE_CHECKING:
-    from pilot.config import S3Config
+    from pilot.config import S3Config, SiteConfig
     from pilot.core.app import App, NewAppOptions, RevisionPin
+    from pilot.core.bench.hostname_aliases import HostnameAliases
     from pilot.core.bench.migration.store import MigrationStore
     from pilot.core.database import Database
     from pilot.core.notification import NotificationStore
@@ -102,6 +103,12 @@ class Bench:
         return NotificationStore(self.logs_path)
 
     @cached_property
+    def hostname_aliases(self) -> "HostnameAliases":
+        from pilot.core.bench.hostname_aliases import HostnameAliases
+
+        return HostnameAliases(self)
+
+    @cached_property
     def site_storage(self) -> "SiteStorageCollector":
         from pilot.core.site.storage import SiteStorageCollector
 
@@ -133,6 +140,16 @@ class Bench:
         return self.path / "config"
 
     @property
+    def uploads_path(self) -> Path:
+        """Where uploaded backups wait for the restore that removes them."""
+        return self.path / "tmp" / "uploads"
+
+    @property
+    def restores_path(self) -> Path:
+        """Where a restore keeps the backup files it downloads, in a directory named after its task."""
+        return self.path / "tmp" / "restores"
+
+    @property
     def pids_path(self) -> Path:
         return self.path / "pids"
 
@@ -141,24 +158,25 @@ class Bench:
         return self.env_path / "bin" / "python"
 
     @property
+    def is_initialized(self) -> bool:
+        return self.python.exists()
+
+    @property
     def frappe_call(self) -> list[str]:
         """Command prefix to invoke frappe's bench helper via the venv Python."""
         return [str(self.python), "-m", "frappe.utils.bench_helper"]
 
     @property
     def has_app_disabling(self) -> bool:
-        """Whether this bench's Frappe can disable an app instead of uninstalling it.
-        Bench-wide, since every site here runs the same Frappe - asked of the first
-        site that answers."""
+        """Whether this bench's Frappe can disable apps instead of uninstalling."""
         from pilot.core.site.config import has_app_disabling
 
         return any(has_app_disabling(self.path, site.config.name) for site in self.sites())
 
-    @property
-    def db_root_args(self) -> list[str]:
+    def get_db_root_args(self, db_type: str) -> list[str]:
         from pilot.core.bench.config_files import BenchConfigFiles
 
-        return BenchConfigFiles(self).db_root_args
+        return BenchConfigFiles(self).get_db_root_args(db_type)
 
     @property
     def postgres_root_password(self) -> str:
@@ -290,14 +308,34 @@ class Bench:
 
     @property
     def is_lite_mode(self) -> bool:
-        """The one owner of which process set applies. A frappe without the runner
-        keeps the ordinary set, however bench.toml reads."""
+        """Whether lite mode is enabled and supported by Frappe."""
         return self.config.lite_mode.enabled and self.supports_lite_mode
 
     @property
     def realtime_port(self) -> int:
         """Where realtime answers. Lite serves it from the web process."""
         return self.config.http_port if self.is_lite_mode else self.config.socketio_port
+
+    @property
+    def realtime_socket(self) -> Path | None:
+        """The Unix socket production realtime listens on, or None where it uses its TCP port."""
+        socket = self.realtime_socket_path
+        node_utils = self.apps_path / "frappe" / "node_utils.js"
+        if socket is None or not node_utils.exists() or "FRAPPE_SOCKETIO_UDS" not in node_utils.read_text():
+            return None
+        return socket
+
+    @property
+    def realtime_socket_path(self) -> Path | None:
+        """Where production realtime listens when Frappe supports a Unix socket. None for lite
+        mode, the Python backend and supervisor."""
+        if self.is_lite_mode or self.config.socketio_backend != "node":
+            return None
+        if self.config.production.process_manager != "systemd":
+            return None
+        socket = self.config_path / "socketio.sock"
+        # The kernel caps a Unix socket path at 108 bytes.
+        return socket if len(bytes(socket)) < 108 else None
 
     def enforce_lite_mode_rules(self) -> bool:
         """Reconcile bench.toml with what lite mode can actually do here."""
@@ -318,8 +356,7 @@ class Bench:
         return True
 
     def audit_action(self, category: str, fields: dict) -> None:
-        """Record a bench-level audit entry, enriched with any registered context (e.g. the
-        request IP and actor). Best-effort: a logging failure never fails the caller."""
+        """Record a best-effort bench-level audit entry."""
         from pilot.core.bench.audit_log import AuditLog, audit_context
 
         try:
@@ -377,22 +414,119 @@ class Bench:
 
         BenchProduction(self).setup_nginx(on_progress)
 
+    def resolve_site_name(self, host: str) -> str | None:
+        """Return the directory name of the site that answers to this host."""
+        from pilot.internal.site_paths import site_exists
+
+        if site_exists(self.path, host):
+            return host
+        return self.site_claiming(host)
+
+    def site_claiming(self, host: str, ignoring: str = "") -> str | None:
+        """Return the site claiming host, excluding one optional site."""
+        from pilot.utils import normalize_host
+
+        target = normalize_host(host)
+        if not target:
+            return None
+        skip = normalize_host(ignoring) if ignoring else ""
+        for site in self.sites():
+            if skip and normalize_host(site.config.name) == skip:
+                continue
+            # A pinned lineage also claims its hostname across the host.
+            claimed = {normalize_host(domain) for domain in site.config.all_domains}
+            if site.config.cert_name:
+                claimed.add(normalize_host(site.config.cert_name))
+            if target in claimed:
+                return site.config.name
+        return None
+
+    def certificate_name(self, site: "SiteConfig") -> str:
+        """Return the certbot lineage this site may use."""
+        from pilot.utils import host_owner, normalize_host
+
+        pinned = site.certificate_name
+        if pinned == site.name:
+            return pinned
+        if normalize_host(pinned) == normalize_host(self.config.admin.domain):
+            return site.name
+        if self.site_claiming(pinned, ignoring=site.name) or host_owner(self.path, pinned):
+            return site.name
+        return pinned
+
+    def clear_cache(self) -> None:
+        """Drop Frappe's cached config and assets for every site in this bench."""
+        from pilot.utils import run_command
+
+        if not self.sites():
+            return
+
+        run_command(
+            [*self.frappe_call, "frappe", "--site", "all", "clear-cache"],
+            cwd=self.sites_path,
+            timeout=120,
+        )
+
+    @property
+    def admin_internal_endpoint(self) -> str:
+        """The loopback admin URL a site stores as `pilot_endpoint`."""
+        from pilot.utils import admin_url
+
+        if not self.config.production.enabled:
+            return admin_url(self.config)
+        return f"http://127.0.0.1:{self.config.admin.internal_port}"
+
+    @property
+    def admin_endpoint(self) -> str:
+        """The public admin URL that a browser on a site reaches."""
+        from pilot.core.adapters.domain_provider import DomainRouteProvider
+        from pilot.utils import admin_url, matches_wildcard
+
+        admin = self.config.admin
+        url = admin_url(self.config)
+        if admin.route or not self.config.production.enabled or not admin.domain:
+            return url
+        patterns = DomainRouteProvider.wildcard_domains()
+        return f"https://{admin.domain}" if matches_wildcard(admin.domain, patterns) else url
+
+    def change_admin_domain(
+        self,
+        domain: str,
+        tls: bool | None = None,
+        on_progress: Callable[[str], None] = lambda message: None,
+    ) -> None:
+        from pilot.core.bench.admin_domain import AdminDomainChange
+
+        AdminDomainChange(self, domain, tls).run(on_progress)
+
+    def setup_central(
+        self,
+        admin_pattern: str = "",
+        site_pattern: str = "",
+        redirect: bool = False,
+        rebootstrap: bool = False,
+        on_progress: Callable[[str], None] = lambda message: None,
+    ) -> None:
+        from pilot.core.bench.central import CentralSetup
+
+        CentralSetup(self, admin_pattern, site_pattern, redirect, rebootstrap).run(on_progress)
+
     def setup_letsencrypt(self) -> None:
         from pilot.core.bench.production import BenchProduction
 
         BenchProduction(self).setup_letsencrypt()
 
     def issue_setup_link(self) -> str:
-        """A short-lived ?sid= token that signs a browser in to this bench's Admin,
-        so the setup wizard is reachable before anyone knows the password."""
+        """Issue a short-lived setup-wizard sign-in token."""
         from admin.backend.internal.session import Session
 
         return Session(self).issue_setup_link_token()
 
-    def initialize(self, on_progress: Callable[[str], None] = lambda message: None) -> None:
+    def initialize(self, commit: str = "", on_progress: Callable[[str], None] = lambda message: None) -> None:
+        """Set up the bench from bench.toml; `commit` pins the framework app."""
         from pilot.core.bench.initializer import BenchInitializer
 
-        BenchInitializer(self).run(on_progress)
+        BenchInitializer(self, commit).run(on_progress)
 
     def setup_production(
         self,

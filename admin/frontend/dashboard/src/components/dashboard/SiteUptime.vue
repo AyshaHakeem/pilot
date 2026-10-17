@@ -2,18 +2,26 @@
 import { onMounted, ref, watch } from 'vue'
 import { ErrorMessage, Skeleton } from 'frappe-ui'
 
-import { apiErrorMessage } from '@/api/client'
-import { sitesApi } from '@/api/sites'
+import ChartCard from '@/components/common/ChartCard.vue'
 
-const props = defineProps({
-  siteName: { type: String, required: true },
-  window: { type: String, default: '1h' },
+import { apiErrorMessage, hasApiError } from '@/api/client'
+import { sitesApi } from '@/api/sites'
+import type { SiteUptime } from '@/types/siteMonitoring'
+import { errorMessage } from '@/utils/error'
+
+interface Props {
+  siteName: string
+  window?: string
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  window: '1h',
 })
 
 const loading = ref(true)
 const error = ref('')
-const data = ref(null)
-const hovered = ref(null)
+const data = ref<SiteUptime | null>(null)
+const hovered = ref<number | null>(null)
 
 const GREEN = '#10b981'
 const AMBER = '#f59e0b'
@@ -21,18 +29,18 @@ const RED = '#ef4444'
 
 // Null percent (no checks in this bucket) is handled by the caller via the
 // bg-surface-gray-3 class instead - this only covers definite percentages.
-const barColor = (percent) => {
+const barColor = (percent: number) => {
   if (percent >= 100) return GREEN
   if (percent > 0) return AMBER
   return RED
 }
 
 // Percentages carry the bar palette; everything around them stays body text.
-const percentTextStyle = (percent) => {
+const percentTextStyle = (percent: number | null) => {
   return percent === null || percent === undefined ? {} : { color: barColor(percent) }
 }
 
-const formatPercent = (percent) => {
+const formatPercent = (percent: number | null) => {
   return percent === null || percent === undefined ? 'No data' : `${percent.toFixed(2)}%`
 }
 
@@ -49,11 +57,11 @@ const TIME_FORMAT = new Intl.DateTimeFormat('en-US', {
   hour12: true,
 })
 
-const formatTimeOnly = (date) => {
+const formatTimeOnly = (date: Date) => {
   return TIME_FORMAT.format(date).toLowerCase()
 }
 
-const formatFullTime = (ms) => {
+const formatFullTime = (ms: number) => {
   const date = new Date(ms)
   return `${DATE_FORMAT.format(date)} ${date.getFullYear()}, ${formatTimeOnly(date)}`
 }
@@ -63,10 +71,10 @@ const load = async () => {
   error.value = ''
   try {
     const result = await sitesApi.uptime.get(props.siteName, props.window)
-    if (result.error) throw new Error(apiErrorMessage(result, 'Could not load uptime data.'))
+    if (hasApiError(result)) throw new Error(apiErrorMessage(result, 'Could not load uptime data.'))
     data.value = result
-  } catch (e) {
-    error.value = e.message || 'Could not load uptime data.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Could not load uptime data.')
   } finally {
     loading.value = false
   }
@@ -77,20 +85,16 @@ onMounted(load)
 </script>
 
 <template>
-  <Skeleton v-if="loading" class="rounded-6 h-full min-h-[340px]" />
-  <div v-else class="flex flex-col bg-surface-white border rounded-6 border-outline-gray-2 h-full">
-    <div class="flex items-center px-4 py-3 border-b border-outline-gray-2">
-      <h3 class="font-medium text-ink-gray-8 text-base">Uptime</h3>
-    </div>
-
-    <ErrorMessage v-if="error" :message="error" class="m-4" />
+  <Skeleton v-if="loading" class="rounded-4 h-full min-h-[340px]" />
+  <ChartCard v-else title="Uptime">
+    <ErrorMessage v-if="error" :message="error" class="my-4" />
     <div
       v-else-if="data && !data.production_enabled"
       class="flex flex-col flex-1 justify-center items-center gap-1 py-10 text-center"
     >
       <span class="size-6 text-ink-gray-3 lucide-server-off" />
-      <p class="font-medium text-ink-gray-7 text-sm">Uptime monitoring is production-only</p>
-      <p class="max-w-xs text-ink-gray-5 text-xs">
+      <p class="text-sm-medium text-ink-gray-7">Uptime monitoring is production-only</p>
+      <p class="max-w-xs text-ink-gray-5 text-p-xs">
         This bench isn't in production, so its sites are never pinged. Deploy to production to start
         tracking uptime.
       </p>
@@ -101,10 +105,10 @@ onMounted(load)
       class="flex flex-col flex-1 justify-center items-center gap-1 py-10 text-center"
     >
       <span class="size-6 text-ink-gray-3 lucide-activity" />
-      <p class="text-ink-gray-5 text-xs">No uptime data yet</p>
+      <p class="text-sm-medium text-ink-gray-7">No uptime data yet</p>
     </div>
 
-    <div v-else class="flex flex-col flex-1 justify-center gap-2 px-4 py-6">
+    <div v-else class="flex flex-col flex-1 justify-center gap-2 py-6">
       <div class="flex justify-between items-center gap-2 text-ink-gray-5 text-sm">
         <div v-if="hovered !== null" class="min-w-0 truncate">
           <span class="font-bold" :style="percentTextStyle(data.buckets[hovered].percent)">
@@ -115,8 +119,7 @@ onMounted(load)
           <span>{{ formatFullTime(data.buckets[hovered].time) }}</span>
         </div>
 
-        <div v-else />
-        <div class="flex items-center gap-1 shrink-0">
+        <div class="flex items-center gap-1 ml-auto shrink-0">
           <span>{{ formatPercent(data.overall_percent) }}</span>
           <span class="text-base leading-none">·</span>
           <span>Overall Uptime</span>
@@ -127,8 +130,6 @@ onMounted(load)
         </div>
       </div>
 
-      <!-- mouseleave sits on the strip, not the bars: per-bar leave events fire
-           while crossing the gap between two bars and flicker the readout. -->
       <div class="flex items-end gap-[3px] h-16" @mouseleave="hovered = null">
         <div
           v-for="(bucket, i) in data.buckets"
@@ -145,5 +146,5 @@ onMounted(load)
         <span>{{ formatFullTime(data.buckets[data.buckets.length - 1].time) }}</span>
       </div>
     </div>
-  </div>
+  </ChartCard>
 </template>

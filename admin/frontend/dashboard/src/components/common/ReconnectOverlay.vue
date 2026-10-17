@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { LoadingIndicator } from 'frappe-ui'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { apiUrl } from '@/api/client'
 
-const props = defineProps({ paused: { type: Boolean, default: false } })
+interface Props {
+  paused?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  paused: false,
+})
 
 const down = ref(false)
-let timer = null
+let timer: ReturnType<typeof setTimeout> | undefined
 let stopped = false
 
-const pingOk = async (url) => {
+const pingOk = async (url: string) => {
   try {
     const response = await fetch(url, { cache: 'no-store' })
     return response.status === 200
@@ -26,9 +32,12 @@ const tick = async () => {
     timer = setTimeout(tick, 3000)
     return
   }
-  if (!down.value) {
-    down.value = !(await pingOk(apiUrl('health', window.location.origin)))
+  const reachable = await pingOk(apiUrl('health', window.location.origin))
+  if (!down.value || reachable) {
+    // Same address back: keep the page and any upload in progress.
+    down.value = !reachable
   } else {
+    // Reload only when the other scheme answers (TLS turned on or off).
     const port = window.location.port ? `:${window.location.port}` : ''
     const authority = `${window.location.hostname}${port}`
     const [httpsOk, httpOk] = await Promise.all([

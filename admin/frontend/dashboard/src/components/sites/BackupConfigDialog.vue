@@ -1,13 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Button, Checkbox, Dialog, ErrorMessage, FormControl, Select } from 'frappe-ui'
+import { Button, Checkbox, Dialog, ErrorMessage, Select, TextInput } from 'frappe-ui'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { sitesApi } from '@/api/sites'
-import { formatHour } from '@/utils/backup'
-import { cronToPicks, picksToCron } from '@/utils/cron'
+import { formatTime } from '@/utils/backup'
+import { cronToPicks, type Frequency, picksToCron } from '@/utils/cron'
+import type { BackupConfig } from '@/types/siteBackups'
+import { errorMessage } from '@/utils/error'
 
-const props = defineProps({ siteName: { type: String, required: true } })
+interface Props {
+  siteName: string
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits(['saved'])
 
 const FREQ_OPTIONS = [
@@ -30,14 +36,14 @@ const weekdayOptions = [
 ].map((label, value) => ({ label, value }))
 // Cap at 28 so the chosen day exists in every month.
 const monthDayOptions = Array.from({ length: 28 }, (_, i) => ({ label: `${i + 1}`, value: i + 1 }))
-const hourOptions = Array.from({ length: 24 }, (_, h) => ({ label: formatHour(h), value: h }))
+const hourOptions = Array.from({ length: 24 }, (_, h) => ({ label: formatTime(h), value: h }))
 
 const show = ref(false)
 const isEnabled = ref(false)
 const saving = ref(false)
 const error = ref('')
 
-const frequency = ref('daily')
+const frequency = ref<Frequency>('daily')
 const weekday = ref(0)
 const monthDay = ref(1)
 const hour = ref(2)
@@ -74,7 +80,7 @@ const hourPick = computed({
   },
 })
 
-const applySchedule = (schedule) => {
+const applySchedule = (schedule: string | null) => {
   if (!schedule) return
   const picks = cronToPicks(schedule)
   frequency.value = picks.frequency
@@ -84,7 +90,7 @@ const applySchedule = (schedule) => {
   minute.value = picks.minute
 }
 
-const applyRetention = (retention) => {
+const applyRetention = (retention: BackupConfig | null) => {
   if (!retention) return
   scheme.value = retention.scheme || 'gfs'
   keepLast.value = retention.keep_last ?? 7
@@ -103,7 +109,7 @@ const open = async () => {
     applySchedule(data.schedule)
     applyRetention(data.retention)
   } catch (e) {
-    error.value = e.message || 'Could not load backup settings.'
+    error.value = errorMessage(e, 'Could not load backup settings.')
   }
 }
 
@@ -117,7 +123,7 @@ const save = async () => {
         schedule: cron.value,
         retention: retentionPayload(),
       })
-      if (result.error) {
+      if (hasApiError(result)) {
         error.value = apiErrorMessage(result, 'Could not save.')
         return
       }
@@ -131,7 +137,7 @@ const save = async () => {
     show.value = false
     emit('saved')
   } catch (e) {
-    error.value = e.message || 'Could not save.'
+    error.value = errorMessage(e, 'Could not save.')
   } finally {
     saving.value = false
   }
@@ -152,14 +158,17 @@ defineExpose({ open })
 </script>
 
 <template>
-  <Dialog v-model="show" title="Configure automated backups" size="lg">
+  <Dialog v-model="show" title="Configure automated backups">
     <div class="space-y-5">
       <Checkbox v-model="isEnabled" label="Enable automated backups" />
 
-      <template v-if="isEnabled">
+      <fieldset
+        :disabled="!isEnabled"
+        class="space-y-5 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+      >
         <div
-          class="gap-4 grid grid-cols-1"
-          :class="frequency === 'daily' ? 'sm:grid-cols-2' : 'sm:grid-cols-3'"
+          class="gap-4 grid"
+          :class="frequency === 'daily' ? 'md:grid-cols-2' : 'md:grid-cols-3'"
         >
           <Select label="Frequency" v-model="frequency" :options="FREQ_OPTIONS" />
           <Select
@@ -183,7 +192,7 @@ defineExpose({ open })
             <p class="text-ink-gray-5 text-p-sm">{{ schemeHint }}</p>
           </div>
 
-          <FormControl
+          <TextInput
             v-if="scheme === 'fifo'"
             label="Backups to keep"
             type="number"
@@ -191,20 +200,22 @@ defineExpose({ open })
             v-model.number="keepLast"
           />
           <div v-else class="gap-4 grid grid-cols-2 sm:grid-cols-4">
-            <FormControl label="Daily" type="number" min="0" v-model.number="keepDaily" />
-            <FormControl label="Weekly" type="number" min="0" v-model.number="keepWeekly" />
-            <FormControl label="Monthly" type="number" min="0" v-model.number="keepMonthly" />
-            <FormControl label="Yearly" type="number" min="0" v-model.number="keepYearly" />
+            <TextInput label="Daily" type="number" min="0" v-model.number="keepDaily" />
+            <TextInput label="Weekly" type="number" min="0" v-model.number="keepWeekly" />
+            <TextInput label="Monthly" type="number" min="0" v-model.number="keepMonthly" />
+            <TextInput label="Yearly" type="number" min="0" v-model.number="keepYearly" />
           </div>
         </div>
-      </template>
+      </fieldset>
 
       <ErrorMessage v-if="error" :message="error" />
     </div>
 
-    <div class="flex justify-end gap-2 mt-6">
-      <Button variant="ghost" @click="show = false">Cancel</Button>
-      <Button variant="solid" :loading="saving" @click="save">Save</Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="show = false">Cancel</Button>
+        <Button variant="solid" :loading="saving" @click="save">Save</Button>
+      </div>
+    </template>
   </Dialog>
 </template>

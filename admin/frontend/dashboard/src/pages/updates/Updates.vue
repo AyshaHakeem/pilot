@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { Button, ErrorMessage, TabButtons } from 'frappe-ui'
+import { Badge, Button, ErrorMessage, TabButtons, Tooltip } from 'frappe-ui'
 
 import EmptyState from '@/components/common/EmptyState.vue'
-import ListRowSkeleton from '@/components/common/ListRowSkeleton.vue'
-import StatusListView from '@/components/common/StatusListView.vue'
+import ListSkeleton from '@/components/common/ListSkeleton.vue'
 import StickyToolbar from '@/components/common/StickyToolbar.vue'
+import Table from '@/components/common/Table.vue'
 
-import { useIsMobile } from '@/composables/common/useIsMobile'
 import { updatesApi } from '@/api/updates'
-
+import { useIsMobile } from '@/composables/common/useIsMobile'
+import { errorMessage } from '@/utils/error'
+import { fmtDateTime, fmtDuration } from '@/utils/taskFormat'
+import { relativeTime } from '@/utils/time'
 import {
   matchesUpdateFilter,
   opTitle,
@@ -21,13 +23,14 @@ import {
   stateTone,
   UPDATE_FILTERS,
 } from '@/utils/updateFormat'
-import { fmtDuration, relativeTime } from '@/utils/taskFormat'
+import type { StateTone } from '@/utils/updateFormat'
+import type { MigrationSummary } from '@/types/migrations'
 
 const route = useRoute()
 const router = useRouter()
 const isMobile = useIsMobile()
 
-const operations = ref([])
+const operations = ref<MigrationSummary[]>([])
 const loading = ref(false)
 const error = ref('')
 
@@ -47,31 +50,26 @@ const visibleOperations = computed(() =>
   operations.value.filter((op) => matchesUpdateFilter(op, statusFilter.value)),
 )
 
-const onFilterChange = (value) => {
+const onFilterChange = (value: string | number) => {
   const query = { ...route.query }
   if (value === 'all') delete query.status
-  else query.status = value
+  else query.status = String(value)
   router.replace({ name: 'Updates', query })
 }
 
-const badge = (op) => {
+const badge = (op: MigrationSummary): { label: string; theme: StateTone } => {
   if (op.pending_action) return { label: pendingActionLabel(op.pending_action), theme: 'amber' }
-  const tone = stateTone(op.state)
-  return { label: stateLabel(op.state), theme: tone === 'orange' ? 'amber' : tone }
+  return { label: stateLabel(op.state), theme: stateTone(op.state) }
 }
 
-// Numeric widths are fr units (ListView convention) so the columns stretch to
-// fill the row instead of leaving dead space.
 const columns = [
-  { label: 'Update', key: 'title', align: 'left', width: 2 },
-  { label: 'Site', key: 'site', align: 'left', width: 2, getTooltip: (row) => row.siteNames },
-  { label: 'Status', key: 'badge', align: 'left', width: 1.5 },
-  { label: 'Duration', key: 'duration', align: 'left', width: 1 },
-  { label: 'Last run', key: 'timing', align: 'right', width: 2 },
+  { label: 'Update', key: 'title', class: 'w-1/3' },
+  { label: 'Site', key: 'site' },
+  { label: 'Status', key: 'badge' },
+  { label: 'Duration', key: 'duration' },
+  { label: 'Last run', key: 'timing' },
 ]
 
-// ListRowItem reads row[column.key], so the operation is flattened to the four
-// strings the columns render.
 const rows = computed(() =>
   visibleOperations.value.map((op) => ({
     id: op.id,
@@ -81,15 +79,19 @@ const rows = computed(() =>
     badge: badge(op),
     duration: duration(op),
     timing: relativeTime(op.started_at || op.created_at),
+    timingAt: fmtDateTime(op.started_at || op.created_at),
   })),
 )
 
-const getRowRoute = (row) => ({ name: 'UpdateDetail', params: { operationId: row.id } })
+const getRowRoute = (row: { id: string }) => ({
+  name: 'UpdateDetail',
+  params: { operationId: row.id },
+})
 
-const duration = (op) => {
-  if (!op.finished_at || !op.started_at) return ''
-  return fmtDuration((new Date(op.finished_at) - new Date(op.started_at)) / 1000)
-}
+const duration = (op: MigrationSummary) =>
+  op.finished_at && op.started_at
+    ? fmtDuration((new Date(op.finished_at).getTime() - new Date(op.started_at).getTime()) / 1000)
+    : ''
 
 const load = async () => {
   loading.value = true
@@ -102,8 +104,8 @@ const load = async () => {
     const past = history.data || []
     // Pin the active/unresolved operation at the top (it is also in history).
     operations.value = current ? [current, ...past.filter((op) => op.id !== current.id)] : past
-  } catch (e) {
-    error.value = e?.message || 'Could not load updates.'
+  } catch (caught) {
+    error.value = errorMessage(caught, 'Could not load updates.')
   } finally {
     loading.value = false
   }
@@ -113,13 +115,9 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="mx-auto max-w-3xl">
-    <!-- The tabs need a phone's full content width, so Refresh only joins them
-         once there is room to spare. -->
+  <div class="px-3 md:px-4">
     <Teleport v-if="isMobile" defer to="#header-actions">
       <Button
-        variant="subtle"
-        size="sm"
         :loading="loading"
         icon="lucide-refresh-cw"
         label="Refresh"
@@ -128,8 +126,6 @@ onMounted(load)
       />
     </Teleport>
 
-    <!-- A flex item sizes to the strip's natural width and overflows the screen;
-         a block child is held to the content width and fits. -->
     <StickyToolbar :class="isMobile ? '' : 'flex items-center gap-2'">
       <TabButtons
         :size="isMobile ? 'md' : 'sm'"
@@ -140,8 +136,6 @@ onMounted(load)
       <Button
         v-if="!isMobile"
         class="ml-auto"
-        variant="subtle"
-        size="sm"
         :loading="loading"
         icon="lucide-refresh-cw"
         label="Refresh"
@@ -150,25 +144,32 @@ onMounted(load)
       />
     </StickyToolbar>
 
-    <div v-if="loading && !operations.length" class="-mx-3 mt-4">
-      <ListRowSkeleton v-for="index in 6" :key="index" :index="index - 1" />
-    </div>
+    <ListSkeleton v-if="loading" />
 
-    <div v-else-if="error" class="mt-4">
+    <template v-else-if="error">
       <ErrorMessage :message="error" />
-    </div>
+    </template>
 
-    <StatusListView
-      v-else-if="rows.length"
-      class="mt-4"
-      :columns="columns"
-      :rows="rows"
-      :get-row-route="getRowRoute"
-    />
+    <Table v-else-if="rows.length" :columns="columns" :rows="rows">
+      <template #title="{ row }">
+        <router-link :to="getRowRoute(row)">{{ row.title }}</router-link>
+      </template>
+
+      <template #site="{ row }">
+        <span :title="row.siteNames">{{ row.site }}</span>
+      </template>
+
+      <template #timing="{ row }">
+        <Tooltip :text="row.timingAt"><span>{{ row.timing }}</span></Tooltip>
+      </template>
+
+      <template #badge="{ row }">
+        <Badge v-if="row.badge" :label="row.badge.label" :theme="row.badge.theme" />
+      </template>
+    </Table>
 
     <EmptyState
       v-else
-      class="mt-8"
       icon="lucide-git-pull-request-arrow"
       :title="isFiltered ? 'No matching updates' : 'No updates yet'"
       :description="

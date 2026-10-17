@@ -65,6 +65,7 @@ htmlcov/
 admin/frontend/dashboard/node_modules/
 admin/frontend/editor/node_modules/
 admin/frontend/in-app-embed/node_modules/
+admin/frontend/cloud-sdk/node_modules/
 admin/backend/static/dashboard/
 admin/backend/static/editor/
 admin/backend/static/in-app-embed/
@@ -73,6 +74,7 @@ admin/frontend/components.d.ts
 admin/frontend/dashboard/components.d.ts
 admin/frontend/editor/components.d.ts
 admin/frontend/in-app-embed/components.d.ts
+admin/frontend/in-app-embed/src/env.d.ts
 admin/frontend/dashboard/src/types/
 *.timestamp-*
 .env
@@ -82,7 +84,7 @@ admin/frontend/dashboard/src/types/
 .ruff_cache
 .claude
 .opencode
-logs/
+/logs/
 
 registry-cache*
 
@@ -95,3 +97,6 @@ skills-lock.json
 
 # Local planning docs, never commit
 plan_*.md
+
+admin/frontend/dashboard/test-results/
+admin/frontend/dashboard/e2e/.auth/

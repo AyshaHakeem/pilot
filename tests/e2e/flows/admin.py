@@ -3,14 +3,24 @@
 from __future__ import annotations
 
 from harness.tasks import run_task_action, wait_for_task
+from playwright.sync_api import Error as PlaywrightError
 from playwright.sync_api import Page, expect
 
 
 def open_root(page: Page, base_url: str) -> None:
     """`/` redirects to `/sites` in the router, so waiting for load races that redirect and
     Playwright reports the navigation as interrupted. Return once the document commits instead;
-    the callers' own locators wait for whichever page the redirect chain settles on."""
-    page.goto(f"{base_url}/", wait_until="commit")
+    the callers' own locators wait for whichever page the redirect chain settles on.
+
+    The redirect can also beat the commit outright, which Playwright raises rather than
+    reports; that is the navigation succeeding, so only that error is swallowed."""
+    try:
+        page.goto(f"{base_url}/", wait_until="commit")
+    except PlaywrightError as error:
+        # Only the known redirect is benign: anything else interrupting the
+        # navigation is a real failure and must surface here, not as a later timeout.
+        if f'interrupted by another navigation to "{base_url}/sites"' not in str(error):
+            raise
 
 
 def login(page: Page, base_url: str, password: str) -> None:
@@ -43,10 +53,10 @@ def drop_site(page: Page, base_url: str, site_name: str) -> None:
     # Drop lives in the site's Danger section, part of the "settings" tab (there
     # is no standalone "actions" tab anymore).
     _open_site_tab(page, base_url, site_name, "settings")
-    page.get_by_role("button", name="Drop site").click()
+    page.get_by_role("button", name="Drop", exact=True).click()
 
     dialog = page.get_by_role("dialog")
-    dialog.get_by_label(f"Type {site_name} to confirm").fill(site_name)
+    dialog.get_by_label("Type the site name to confirm").fill(site_name)
     task_id = run_task_action(
         page,
         f"/api/v1/sites/{site_name}",

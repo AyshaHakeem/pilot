@@ -4,9 +4,19 @@ import { Spinner } from 'frappe-ui'
 
 import { monitorApi } from '@/api/monitor'
 import { formatBytes } from '@/utils/format'
+import type { SystemInfo } from '@/types/stats'
 
 const loading = ref(true)
-const info = ref({ disk_total: 0, runtime: {} })
+
+const info = ref<SystemInfo>({
+  disk_total: 0,
+  cpu_count: null,
+  memory_total: 0,
+  swap_total: 0,
+  kernel_version: '',
+  os_version: '',
+  runtime: {},
+})
 
 const systemRows = computed(() => {
   const rows = {
@@ -43,8 +53,8 @@ onMounted(async () => {
           :key="label"
           class="flex justify-between items-center py-2.5"
         >
-          <span class="text-ink-gray-7 text-base">{{ label }}</span>
-          <span class="text-ink-gray-9 text-base">{{ value }}</span>
+          <span class="text-ink-gray-7">{{ label }}</span>
+          <span>{{ value }}</span>
         </div>
       </div>
     </div>
@@ -57,8 +67,8 @@ onMounted(async () => {
           :key="label"
           class="flex justify-between items-center py-2.5"
         >
-          <span class="text-ink-gray-7 text-base">{{ label }}</span>
-          <span class="text-ink-gray-9 text-base">{{ value }}</span>
+          <span class="text-ink-gray-7">{{ label }}</span>
+          <span>{{ value }}</span>
         </div>
 
         <p v-if="!Object.keys(info.runtime).length" class="py-2.5 text-ink-gray-5 text-p-sm">

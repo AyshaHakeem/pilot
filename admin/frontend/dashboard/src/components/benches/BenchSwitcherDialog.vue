@@ -1,29 +1,33 @@
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-
-import { ListView } from 'frappe-ui/experimental'
-
+import { computed, ref, watch } from 'vue'
 import {
   Badge,
+  type BadgeProps,
   Button,
   Dialog,
   ErrorMessage,
+  LoadingText,
   Spinner,
 } from 'frappe-ui'
 
-import LucidePlus from '~icons/lucide/plus'
+import LucideExternalLink from '~icons/lucide/external-link'
 import LucidePlay from '~icons/lucide/play'
+import LucideRotateCw from '~icons/lucide/rotate-cw'
 import LucideSquare from '~icons/lucide/square'
 import LucideTrash2 from '~icons/lucide/trash-2'
-import LucideRotateCw from '~icons/lucide/rotate-cw'
-import LucideRefreshCw from '~icons/lucide/refresh-cw'
-import LucideExternalLink from '~icons/lucide/external-link'
 
 import ActionMenu from '@/components/common/ActionMenu.vue'
+import type { ActionMenuOption } from '@/components/common/actionMenu'
+import Table from '@/components/common/Table.vue'
 
 import { useBenches } from '@/composables/benches/useBenches'
+import type { BenchResource } from '@/types/benches'
 
-const props = defineProps({ modelValue: Boolean })
+interface Props {
+  modelValue?: boolean
+}
+
+const props = defineProps<Props>()
 const emit = defineEmits(['update:modelValue', 'new-bench'])
 
 const show = computed({
@@ -43,7 +47,7 @@ const {
 const currentPort = window.location.port
 const currentHost = window.location.hostname
 
-const benchToDrop = ref(null)
+const benchToDrop = ref<BenchResource | null>(null)
 const dropping = ref(false)
 
 const showDropConfirm = computed({
@@ -54,12 +58,12 @@ const showDropConfirm = computed({
 })
 
 const columns = [
-  { label: 'Bench', key: 'name', align: 'left', width: 2 },
-  { label: 'Mode', key: 'mode', align: 'left', width: 1 },
-  { label: 'Manager', key: 'manager', align: 'left', width: 1 },
-  { label: 'Sites', key: 'sites', align: 'left', width: 1 },
-  { label: 'Status', key: 'status', align: 'center', width: 1 },
-  { label: '', key: 'actions', align: 'right', width: '3rem' },
+  { label: 'Bench', key: 'name', class: 'w-1/3' },
+  { label: 'Mode', key: 'mode', class: 'text-ink-gray-6 text-sm' },
+  { label: 'Manager', key: 'manager', class: 'text-ink-gray-6 text-sm' },
+  { label: 'Sites', key: 'sites', class: 'text-ink-gray-6 text-sm' },
+  { label: 'Status', key: 'status', class: 'text-center' },
+  { label: '', key: 'actions', class: 'w-12' },
 ]
 
 const rows = computed(() =>
@@ -73,12 +77,12 @@ const rows = computed(() =>
   })),
 )
 
-const isCurrentBench = (bench) => {
+const isCurrentBench = (bench: BenchResource) => {
   if (bench.domain) return bench.domain === currentHost
   return String(bench.port) === String(currentPort)
 }
 
-const benchUrl = (bench) => {
+const benchUrl = (bench: BenchResource) => {
   // Production benches carry a backend-computed admin_url on the scheme nginx
   // actually serves (http until the cert is in place, so a not-yet-set-up bench
   // opens over http even from this https page); dev benches use their admin port.
@@ -86,11 +90,11 @@ const benchUrl = (bench) => {
   return `${window.location.protocol}//${currentHost}:${bench.port}`
 }
 
-const benchMode = (bench) => {
+const benchMode = (bench: BenchResource) => {
   return bench.production ? 'Production' : 'Development'
 }
 
-const benchManager = (bench) => {
+const benchManager = (bench: BenchResource) => {
   const mgr = bench.process_manager || 'foreground'
   return mgr.charAt(0).toUpperCase() + mgr.slice(1)
 }
@@ -99,41 +103,41 @@ const benchManager = (bench) => {
 // being up is "Running"; if it's down but the admin control plane is still up
 // (socket-activated) the bench is "Admin active" rather than fully "Stopped" —
 // e.g. provisioned but setup not finished. null means we couldn't tell (up).
-const benchState = (bench) => {
+const benchState = (bench: BenchResource) => {
   if (!bench.production) return bench.reachable ? 'running' : 'stopped'
   if (bench.workload_running !== false) return 'running'
   if (bench.admin_running !== false) return 'admin'
   return 'stopped'
 }
 
-const STATUS = {
+const STATUS: Record<string, { label: string; theme: BadgeProps['theme'] }> = {
   running: { label: 'Running', theme: 'green' },
   admin: { label: 'Admin active', theme: 'blue' },
   stopped: { label: 'Stopped', theme: 'gray' },
 }
 
-const statusLabel = (bench) => {
+const statusLabel = (bench: BenchResource) => {
   return STATUS[benchState(bench)].label
 }
 
-const statusTheme = (bench) => {
+const statusTheme = (bench: BenchResource) => {
   return STATUS[benchState(bench)].theme
 }
 
 // Production benches route through nginx, which socket-activates the admin on
 // demand, so they can always be opened. A dev bench is only reachable while up.
-const canOpen = (bench) => {
+const canOpen = (bench: BenchResource) => {
   if (isCurrentBench(bench)) return false
   return bench.production || bench.reachable
 }
 
-const openBench = (bench) => {
+const openBench = (bench: BenchResource) => {
   // Open the bench's admin URL in a new tab so the manage view stays put.
   window.open(benchUrl(bench), '_blank', 'noopener')
 }
 
-const menuOptions = (bench) => {
-  const opts = []
+const menuOptions = (bench: BenchResource) => {
+  const opts: ActionMenuOption[] = []
   if (canOpen(bench))
     opts.push({ label: 'Open', icon: LucideExternalLink, onClick: () => openBench(bench) })
   if (bench.production) {
@@ -171,7 +175,7 @@ const menuOptions = (bench) => {
   return opts
 }
 
-const confirmDrop = (bench) => {
+const confirmDrop = (bench: BenchResource) => {
   controlError.value = ''
   benchToDrop.value = bench
 }
@@ -201,15 +205,15 @@ watch(show, (open) => {
   <Dialog v-model="show" title="Manage Benches" size="3xl" :showCloseButton="true">
     <div class="flex flex-col" @pointerdown.stop>
       <div class="flex justify-end items-center gap-1 mb-4">
-        <Button variant="ghost" size="sm" :loading="loading" @click="loadBenches" title="Refresh">
+        <Button variant="ghost" :loading="loading" @click="loadBenches" title="Refresh">
           <template #icon>
-            <LucideRefreshCw class="w-4 h-4" />
+            <span class="w-4 h-4 lucide-refresh-cw" />
           </template>
         </Button>
 
-        <Button variant="subtle" size="sm" @click="newBench">
+        <Button @click="newBench">
           <template #prefix>
-            <LucidePlus class="w-4 h-4" />
+            <span class="w-4 h-4 lucide-plus" />
           </template>
           New Bench
         </Button>
@@ -217,63 +221,37 @@ watch(show, (open) => {
 
       <ErrorMessage v-if="controlError" :message="controlError" class="mb-2" />
 
-      <div v-if="loading && !benches.length" class="py-10 text-ink-gray-5 text-sm text-center">
-        Loading…
-      </div>
+      <LoadingText v-if="loading && !benches.length" class="justify-center py-10" />
 
-      <div v-else-if="!benches.length" class="py-10 text-ink-gray-4 text-sm text-center">
+      <p v-else-if="!benches.length" class="py-10 text-ink-gray-4 text-sm text-center">
         No benches found.
-      </div>
+      </p>
 
-      <ListView
-        v-else
-        :columns="columns"
-        :rows="rows"
-        row-key="name"
-        :options="{ selectable: false, showTooltip: false, rowHeight: 48 }"
-      >
-        <template #cell="{ column, row, item }">
-          <div
-            v-if="column.key === 'name'"
-            class="flex items-center gap-2 w-full min-w-0 text-left"
-          >
-            <span class="font-medium text-ink-gray-9 text-sm truncate">{{ row.name }}</span>
+      <Table v-else :columns="columns" :rows="rows" height="max-h-96">
+        <template #name="{ row }">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="font-medium text-sm truncate">{{ row.name }}</span>
             <Badge v-if="isCurrentBench(row.bench)" theme="green" size="sm" label="Current" />
           </div>
-
-          <!-- Status badge -->
-          <div v-else-if="column.key === 'status'" class="flex justify-center w-full">
-            <Badge :theme="statusTheme(row.bench)" :label="row.status" />
-          </div>
-
-          <!-- Per-bench actions -->
-          <div v-else-if="column.key === 'actions'" class="flex justify-end w-full">
-            <span
-              v-if="controlLoading === row.name"
-              class="flex justify-center items-center w-7 h-7"
-            >
-              <Spinner size="md" class="text-ink-gray-5" />
-            </span>
-
-            <ActionMenu
-              v-else-if="menuOptions(row.bench).length"
-              :options="menuOptions(row.bench)"
-            />
-          </div>
-
-          <!-- Mode / Manager -->
-          <div v-else class="w-full text-ink-gray-6 text-sm truncate">{{ item }}</div>
         </template>
-      </ListView>
+
+        <template #status="{ row }">
+          <Badge :theme="statusTheme(row.bench)" :label="row.status" />
+        </template>
+
+        <template #actions="{ row }">
+          <Spinner v-if="controlLoading === row.name" size="md" class="text-ink-gray-5" />
+
+          <ActionMenu v-else-if="menuOptions(row.bench).length" :options="menuOptions(row.bench)" />
+        </template>
+      </Table>
     </div>
   </Dialog>
 
   <Dialog v-model="showDropConfirm" title="Drop Bench" size="sm">
     <div class="flex flex-col gap-4" @pointerdown.stop>
       <div class="flex flex-col gap-2 text-ink-gray-7 text-sm leading-relaxed">
-        <p>
-          Permanently delete <strong class="text-ink-gray-9">{{ benchToDrop?.name }}</strong>?
-        </p>
+        <p>Permanently delete <strong class="text-ink-gray-9">{{ benchToDrop?.name }}</strong>?</p>
 
         <p>
           This tears down its production services, nginx config and MariaDB instance, then removes
@@ -282,12 +260,15 @@ watch(show, (open) => {
       </div>
 
       <ErrorMessage v-if="controlError" :message="controlError" />
+    </div>
+
+    <template #actions>
       <div class="flex justify-end gap-2">
         <Button variant="ghost" @click="showDropConfirm = false">Cancel</Button>
         <Button variant="solid" theme="red" :loading="dropping" @click="dropBench"
           >Drop Bench</Button
         >
       </div>
-    </div>
+    </template>
   </Dialog>
 </template>

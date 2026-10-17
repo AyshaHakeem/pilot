@@ -58,8 +58,30 @@ class GitRepo:
     @property
     def has_local_changes(self) -> bool:
         """True if the tree has uncommitted edits or commits not yet on upstream."""
-        if self._text("status", "--porcelain"):
-            return True
+        return bool(self.changed_paths) or self.has_unpushed_commits
+
+    @property
+    def changed_paths(self) -> list[str]:
+        """Modified, staged and untracked paths, relative to the repository root."""
+        result = self._run("status", "--porcelain", "-z")
+        if result.returncode != 0:
+            return []
+        entries = result.stdout.split("\0")
+        paths = []
+        index = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if not entry:
+                continue
+            paths.append(entry[3:])
+            # A rename or copy names its source in the next field.
+            if entry[0] in "RC":
+                index += 1
+        return paths
+
+    @property
+    def has_unpushed_commits(self) -> bool:
         return self._text("rev-list", "--count", "@{u}..HEAD") not in ("", "0")
 
     def count(self, range_: str) -> int:
@@ -77,6 +99,13 @@ class GitRepo:
         """Whether `ancestor` is reachable from `descendant`. False when either
         commit is missing locally, so callers must fetch before trusting it."""
         return self._run("merge-base", "--is-ancestor", ancestor, descendant).returncode == 0
+
+    def get_changed_files(self, old: str, new: str) -> list[str] | None:
+        """Paths that differ between two commits, or None when either is missing locally."""
+        result = self._run("diff", "--name-only", "--no-renames", "-z", old, new)
+        if result.returncode != 0:
+            return None
+        return [path for path in result.stdout.split("\0") if path]
 
     def tracking_sha(self, branch: str) -> str:
         """SHA of the locally-cached remote branch tip (no network)."""
@@ -130,6 +159,10 @@ class GitRepo:
     def checkout_new_branch(self, branch: str, start_point: str) -> bool:
         """Create (or reset) `branch` to start at `start_point` and check it out."""
         return self._run("checkout", "-B", branch, start_point).returncode == 0
+
+    @property
+    def git_dir(self) -> Path:
+        return Path(self._text("rev-parse", "--absolute-git-dir"))
 
     def set_remote_url(self, url: str) -> bool:
         """Point origin at *url*; returns False instead of raising on failure."""

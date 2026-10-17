@@ -1,39 +1,35 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-
-import { ListRowItem, ListView } from 'frappe-ui/experimental'
-
-import {
-  Button,
-  Dialog,
-  ErrorMessage,
-  FormControl,
-  Spinner,
-  toast,
-} from 'frappe-ui'
+import { Button, Dialog, ErrorMessage, Spinner, Textarea, toast } from 'frappe-ui'
 
 import EmptyState from '@/components/common/EmptyState.vue'
+import Table from '@/components/common/Table.vue'
 
 import { sshKeysApi } from '@/api/sshKeys'
 import { apiErrorMessage } from '@/api/client'
+import type { AuthorizedSSHKey } from '@/types/sshKeys'
+import { errorMessage } from '@/utils/error'
 
-// Numeric widths are fr units (ListView convention) so Name/Fingerprint stretch to
-// fill the row instead of leaving dead space; actions stays a fixed icon-sized column.
+interface KeyRow {
+  fingerprint: string
+  label: string
+}
+
 const columns = [
-  { label: 'Name', key: 'label', align: 'left', width: 1 },
-  { label: 'Fingerprint', key: 'fingerprint', align: 'left', width: 2 },
-  { label: '', key: 'actions', align: 'right', width: '3rem' },
+  { label: 'Name', key: 'label', class: 'w-1/3' },
+  { label: 'Fingerprint', key: 'fingerprint' },
+  { label: '', key: 'actions', class: 'w-12' },
 ]
 
 const loading = ref(true)
 const adding = ref(false)
 const error = ref('')
 const loadError = ref('')
-const keys = ref([])
+const keys = ref<AuthorizedSSHKey[]>([])
 const newKey = ref('')
 const showAdd = ref(false)
 const showRemove = ref(false)
-const removing = ref(null)
+const removing = ref<KeyRow | null>(null)
 const removingBusy = ref(false)
 
 const rows = computed(() =>
@@ -47,7 +43,7 @@ const load = async () => {
   try {
     keys.value = (await sshKeysApi.list()).keys || []
   } catch (e) {
-    loadError.value = e.message || 'Could not load SSH keys.'
+    loadError.value = errorMessage(e, 'Could not load SSH keys.')
   } finally {
     loading.value = false
   }
@@ -72,21 +68,24 @@ const add = async () => {
       error.value = apiErrorMessage(result, 'Could not add key.')
     }
   } catch (e) {
-    error.value = e.message || 'Could not add key.'
+    error.value = errorMessage(e, 'Could not add key.')
   } finally {
     adding.value = false
   }
 }
 
-const promptRemove = (row) => {
+const promptRemove = (row: KeyRow) => {
   removing.value = row
   showRemove.value = true
 }
 
 const confirmRemove = async () => {
+  const target = removing.value
+  if (!target) return
+
   removingBusy.value = true
   try {
-    const response = await sshKeysApi.remove(removing.value.fingerprint)
+    const response = await sshKeysApi.remove(target.fingerprint)
     if (response.ok) {
       toast.success('Key removed')
       showRemove.value = false
@@ -95,7 +94,7 @@ const confirmRemove = async () => {
       toast.error(apiErrorMessage(await response.json(), 'Could not remove key.'))
     }
   } catch (e) {
-    toast.error(e.message || 'Could not remove key.')
+    toast.error(errorMessage(e, 'Could not remove key.'))
   } finally {
     removingBusy.value = false
   }
@@ -111,7 +110,7 @@ onMounted(load)
 
   <div v-else class="space-y-6">
     <div class="flex justify-end">
-      <Button variant="subtle" icon-left="lucide-plus" @click="openAdd">Add</Button>
+      <Button icon-left="lucide-plus" @click="openAdd">Add</Button>
     </div>
 
     <div
@@ -128,46 +127,36 @@ onMounted(load)
       title="No SSH keys"
       description="Add a public key to give its holder SSH access to this server."
     />
-    <ListView
-      v-else
-      :columns="columns"
-      :rows="rows"
-      row-key="fingerprint"
-      :options="{ selectable: false, showTooltip: false }"
-    >
-      <template #cell="{ column, row, item }">
-        <div v-if="column.key === 'actions'" class="flex justify-end">
-          <Button
-            variant="ghost"
-            size="sm"
-            theme="red"
-            icon="lucide-trash-2"
-            label="Remove SSH key"
-            tooltip="Remove SSH key"
-            @click="promptRemove(row)"
-          />
-        </div>
-
-        <ListRowItem v-else :column="column" :row="row" :item="item" :align="column.align" />
+    <Table v-else :columns="columns" :rows="rows" height="max-h-96">
+      <template #actions="{ row }">
+        <Button
+          variant="ghost"
+          theme="red"
+          icon="lucide-trash-2"
+          label="Remove SSH key"
+          tooltip="Remove SSH key"
+          @click="promptRemove(row)"
+        />
       </template>
-    </ListView>
+    </Table>
   </div>
 
   <Dialog v-model="showAdd" title="Add SSH key" size="md">
-    <FormControl
-      type="textarea"
+    <Textarea
       label="Public key"
       v-model="newKey"
       :rows="3"
       placeholder="ssh-ed25519 AAAA… user@host"
     />
     <ErrorMessage v-if="error" :message="error" class="mt-2" />
-    <div class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showAdd = false">Cancel</Button>
-      <Button variant="solid" :loading="adding" :disabled="!newKey.trim()" @click="add">
-        Add key
-      </Button>
-    </div>
+    <template #actions>
+      <div class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showAdd = false">Cancel</Button>
+        <Button variant="solid" :loading="adding" :disabled="!newKey.trim()" @click="add">
+          Add key
+        </Button>
+      </div>
+    </template>
   </Dialog>
 
   <Dialog v-model="showRemove" title="Remove SSH key" size="md">
@@ -181,11 +170,13 @@ onMounted(load)
       Whoever holds the matching private key loses SSH access.
     </p>
 
-    <div v-if="!isLastKey" class="flex justify-end gap-2 mt-4">
-      <Button variant="ghost" @click="showRemove = false">Cancel</Button>
-      <Button variant="solid" theme="red" :loading="removingBusy" @click="confirmRemove"
-        >Remove</Button
-      >
-    </div>
+    <template #actions>
+      <div v-if="!isLastKey" class="flex justify-end gap-2">
+        <Button variant="ghost" @click="showRemove = false">Cancel</Button>
+        <Button variant="solid" theme="red" :loading="removingBusy" @click="confirmRemove"
+          >Remove</Button
+        >
+      </div>
+    </template>
   </Dialog>
 </template>

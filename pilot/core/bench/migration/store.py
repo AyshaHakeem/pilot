@@ -21,11 +21,13 @@ class MigrationStore:
         self.root = bench.path / "migrations"
 
     def create_update(self, apps_filter: set[str] | None = None) -> MigrationOperation:
+        """Sites are backed up and migrated only when some app's change needs a migrate."""
         selected = [
             app for app in self.bench.apps() if apps_filter is None or app.config.name in apps_filter
         ]
         apps = [self._revision(app) for app in selected]
-        sites = self._sites_for_apps({app.config.name for app in selected})
+        is_migrating = any(revision.has_migrate_changes for revision in apps)
+        sites = self.sites_for_apps({app.config.name for app in selected}) if is_migrating else []
         return self._create(
             "update",
             apps=apps,
@@ -33,7 +35,7 @@ class MigrationStore:
             sites=sites,
         )
 
-    def _sites_for_apps(self, names: set[str]) -> list[str]:
+    def sites_for_apps(self, names: set[str]) -> list[str]:
         """Sites where at least one of `names` is installed, plus any site whose active-apps lookup came back empty (every real site has 'frappe', so empty means the lookup failed, not that nothing applies)."""
         result = []
         for site in self.bench.sites():
@@ -53,10 +55,21 @@ class MigrationStore:
             repository_url=app.config.repo,
             target_sha=pin.ref if pin else None,
             target_kind=pin.kind if pin else "commit",
+            has_migrate_changes=pin is not None and app.has_migrate_changes(pin),
         )
 
-    def create_site_migrate(self, site: str) -> MigrationOperation:
-        return self._create("site_migrate", apps=[], apps_filter=None, sites=[site])
+    def create_site_migrate(
+        self, *sites: str, with_safeguards: bool = True, switched_app: AppRevision | None = None
+    ) -> MigrationOperation:
+        """Without safeguards no backup is taken first, so the migration cannot be reverted.
+        `switched_app` is an app whose code already changed: a revert returns it to its old revision."""
+        apps = [switched_app] if switched_app else []
+        apps_filter = [switched_app.name] if switched_app else None
+        operation = self._create("site_migrate", apps=apps, apps_filter=apps_filter, sites=list(sites))
+        operation.apps_updated = bool(switched_app)
+        operation.safeguards_disabled = not with_safeguards
+        self.save(operation)
+        return operation
 
     def save(self, operation: MigrationOperation) -> None:
         make_private_directory(self.root, parents=True)

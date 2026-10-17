@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import smtplib
+
 from pilot.config import BenchConfig, FirewallRule, S3Config, WafCondition, WafRule, WorkerGroup
 from pilot.config.alert_limit import RESOURCE_LIMIT_FIELDS
 from pilot.config.llm import LLMConfig
+from pilot.config.mail import MailConfig
+from pilot.core.alerts import check_mail_credentials
 
 
 def _coerce_int(value):
@@ -14,9 +18,10 @@ def _coerce_int(value):
 
 
 class ConfigPatcher:
-    def __init__(self, config: BenchConfig, data: dict) -> None:
+    def __init__(self, config: BenchConfig, data: dict, mail: MailConfig | None = None) -> None:
         self.config = config
         self.data = data
+        self.mail = mail or MailConfig()
 
     def apply(self) -> str | None:
         self._apply_bench()
@@ -29,6 +34,8 @@ class ConfigPatcher:
         if error := self._apply_s3():
             return error
         if error := self._apply_resource_limits():
+            return error
+        if error := self._apply_mail():
             return error
         try:
             self.config.validate()
@@ -82,10 +89,67 @@ class ConfigPatcher:
             limits.webhook_endpoints = self._webhook_endpoints(
                 resource_limits["webhook_endpoints"] or [], limits.webhook_endpoints
             )
+        if "email_recipients" in resource_limits:
+            limits.email_recipients = [
+                address.strip()
+                for address in map(str, resource_limits["email_recipients"] or [])
+                if address.strip()
+            ]
         try:
             limits.validate()
         except ValueError as error:
             return str(error)
+        return None
+
+    def _apply_mail(self) -> str | None:
+        """A blank password keeps the stored one, the same way webhook tokens work.
+        Clearing the server drops it, so a rotated credential has a way out."""
+        mail_data = self.data.get("mail")
+        if not mail_data:
+            return None
+        error = self._patch_mail_fields(mail_data)
+        if error:
+            return error
+        try:
+            self.mail.validate()
+        except ValueError as error:
+            return str(error)
+        return self._check_mail()
+
+    def _patch_mail_fields(self, mail_data: dict) -> str | None:
+        had_password = bool(self.mail.password)
+        previous_server = self.mail.server
+        for name in ("server", "email", "login"):
+            if name in mail_data:
+                setattr(self.mail, name, str(mail_data[name]).strip())
+        if "port" in mail_data:
+            self.mail.port = _coerce_int(mail_data["port"] or 0)
+        if "use_ssl" in mail_data:
+            self.mail.use_ssl = bool(mail_data["use_ssl"])
+        if mail_data.get("password"):
+            self.mail.password = str(mail_data["password"])
+        if not self.mail.server:
+            self.mail.password = ""
+            return None
+        # The stored password belongs to the server it was saved for. Sending it to
+        # a newly named host would disclose it there, and dropping it silently would
+        # save an unauthenticated mailbox, so ask for it again.
+        if had_password and self.mail.server != previous_server and not mail_data.get("password"):
+            self.mail.password = ""
+            return "Enter the password for the new mail server."
+        return None
+
+    def _check_mail(self) -> str | None:
+        """Prove the settings can actually reach the server before they are stored,
+        the way the framework's Email Account opens a session on save."""
+        if not self.mail.server:
+            return None
+        try:
+            check_mail_credentials(self.mail)
+        except smtplib.SMTPAuthenticationError:
+            return "The mail server rejected that login name and password."
+        except (OSError, smtplib.SMTPException) as error:
+            return f"Could not reach the mail server: {error}"
         return None
 
     @staticmethod
@@ -214,6 +278,8 @@ class ConfigPatcher:
             s3_config.provider = str(s3["provider"]).strip()
         if "region" in s3:
             s3_config.region = str(s3["region"]).strip()
+        if "endpoint_url" in s3:
+            s3_config.endpoint_url = str(s3["endpoint_url"]).strip()
 
     @staticmethod
     def _s3_has_any_value(s3_config: S3Config) -> bool:
@@ -223,6 +289,7 @@ class ConfigPatcher:
             or s3_config.bucket
             or s3_config.provider
             or s3_config.region
+            or s3_config.endpoint_url
         )
 
     @staticmethod
@@ -237,6 +304,14 @@ class ConfigPatcher:
 
     @staticmethod
     def _validate_s3_region(s3_config: S3Config) -> str | None:
+        if s3_config.provider == "frappe":
+            return ConfigPatcher._set_frappe_endpoint(s3_config)
+
+        if s3_config.endpoint_url:
+            from pilot.internal.validators import validate_external_url
+
+            return validate_external_url(s3_config.endpoint_url, "s3.endpoint_url")
+
         from pilot.integrations.s3.base import SUPPORTED_REGIONS
 
         if s3_config.provider not in SUPPORTED_REGIONS:
@@ -244,6 +319,22 @@ class ConfigPatcher:
         if s3_config.region not in SUPPORTED_REGIONS[s3_config.provider]:
             return f"s3.region '{s3_config.region}' is not valid for provider '{s3_config.provider}'."
 
+        return None
+
+    @staticmethod
+    def _set_frappe_endpoint(s3_config: S3Config) -> str | None:
+        """Central owns where each region serves storage, so the endpoint is its answer, not the form's."""
+        from pilot.integrations.central import CentralClient, CentralClientError
+
+        try:
+            endpoints = CentralClient().storage_regions()
+        except CentralClientError as error:
+            return f"Could not read Frappe storage regions from Central: {error}"
+
+        if s3_config.region not in endpoints:
+            return f"s3.region '{s3_config.region}' does not serve Frappe object storage."
+
+        s3_config.endpoint_url = endpoints[s3_config.region]
         return None
 
     def _apply_llm(self) -> str | None:

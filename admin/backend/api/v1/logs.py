@@ -1,11 +1,37 @@
 from __future__ import annotations
 
 import json
+from typing import TypedDict
 
 from flask import Blueprint, Response, current_app, jsonify, request, stream_with_context
 
 from admin.backend.api.responses import error_response
+from admin.backend.draining import is_draining
 from admin.backend.providers.logs import LogProvider
+
+
+class LogFile(TypedDict):
+    filename: str
+    size_bytes: int
+    last_modified: str
+    process_name: str
+    line_count: int
+
+
+class LogTail(TypedDict):
+    filename: str
+    lines: list[str]
+    lines_count: int
+    search: str
+
+
+class LogLineEvent(TypedDict):
+    line: str
+
+
+class LogErrorEvent(TypedDict):
+    error: str
+
 
 logs_bp = Blueprint("logs", __name__)
 
@@ -92,7 +118,10 @@ def stream_log(filename: str):
 
     def generate():
         try:
-            for line in provider.follow_file(filename):
+            for line in provider.follow_file(filename, should_stop=is_draining):
+                if line is None:
+                    yield ": heartbeat\n\n"
+                    continue
                 yield f"data: {json.dumps({'line': line})}\n\n"
         except ValueError as error:
             yield f"data: {json.dumps({'error': str(error)})}\n\n"

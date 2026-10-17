@@ -61,28 +61,131 @@ Task-starting endpoints should return:
 
 `GET /git/branches?repo=...` runs local `git ls-remote --heads`, so Git must be available on the Pilot host. It returns all remote branch names and puts the remote default first.
 
+### Git Connection Through Central
+
+On a Central-managed host, `GET /git/connection` also returns `central`: whether Central offers its GitHub App, and the granted repositories of each account. The host stores no GitHub token. It asks Central for a read-only token per repository and caches it in memory until about 10 minutes before expiry.
+
+- `POST /git/connection-attempts` with `{"return_url": ...}` returns the Central `url` where a user picks repositories. Central then sends the browser back to `return_url`.
+- A Central grant replaces a stored personal access token. `PUT /git/connection` answers 409 `github_app_connected` while the grant is active.
+- `DELETE /git/connection` removes the grant on Central, then the local record.
+
 ### Site Apps
 
-`GET /sites/<name>/apps` returns the apps in use on the site, disabled ones excluded, plus `can_disable` for whether this bench's Frappe supports disabling at all.
+`GET /sites/<name>/apps` returns the apps in use on the site, disabled ones excluded, plus `can_disable` for whether this bench's Frappe supports disabling at all. Each app has `is_marketplace` when its repository is the one the registry lists; the registry's links and metadata apply only then, so a fork keeps its own. An app the site lists but the bench does not have, for example after a restore from another bench, has `missing: true`. Uninstalling such an app removes it from the site's installed apps only.
 
 Two app operations answer inline instead of returning a task id, because both are flag flips on data that never left the site:
 
-- `DELETE /sites/<name>/apps/<app>?mode=disable` returns `{"app": ..., "disabled": true}`. Without the parameter the route queues an uninstall as before.
+- `DELETE /sites/<name>/apps/<app>?mode=disable` returns `{"app": ..., "disabled": true}`. Without the parameter the route queues an uninstall. When no site uses the app any more, the uninstall also removes it from the bench; `remove_from_bench=false` keeps it there. The dashboard sends `remove_from_bench=false`.
 - `POST /sites/<name>/apps` for an app the site only has disabled returns `{"app": ..., "enabled": true}`. It falls through to the install queue when a required app has to be installed first.
 
 ### Site Detail And Login
 
-`GET /sites/<name>` includes `url`, the origin the site is served on (scheme, primary host, and port derived from the bench config), which the UI uses for "Open site".
+Every `/sites/<name>/...` route accepts the site's directory name or any hostname the site currently answers to, including custom domains and an old hostname kept through a rename. Pilot resolves the hostname to the directory name after the request is authenticated and before checking its site scope.
+
+`GET /sites/<name>` includes `url` and `tls`. The route policy supplies the public scheme for both values.
+
+`GET /sites` and `GET /sites/<name>` include `primary_domain`: the host of the site's `host_name` when it is one of the site's domains, otherwise the directory name.
+
+`DELETE /sites/<name>` queues `drop-site`. Frappe takes a full backup before the drop; pass `?no_backup=1` to skip it on large sites you do not need to keep.
+
+`GET /sites/<name>/domains` returns one row for each hostname. Each row has `domain`, `is_site`, `is_primary`, `public_scheme`, and `tls`. For a hostname that this host serves directly, `tls` is true only when the certificate covers it. The response also has `certificate_email_required`: true when the site uses TLS, the bench is in production, and no Let's Encrypt email is set. It also has `certificate_pending`: true while a `setup-letsencrypt` task for the bench is queued or running. The Admin shows "Certificate pending" on rows without TLS and reads the list again until it is false.
+
+`POST /sites/<name>/domains` takes `{"domain": "..."}` and an optional `email`. The email is saved as the Let's Encrypt account email before certificates are issued; an invalid one returns `422` with `{"needs_email": true}`. Without any email, the domain is attached and served over HTTP until an email is set.
 
 `POST /sites/<name>/login` returns `{"url": ...}` plus an optional `hint` when the URL's host does not resolve on the server - the UI surfaces it so the user knows to add a hosts entry or use a `*.localhost` name.
+
+The login signs in the user the token names. A token whose `sub` is an email signs that user in, and its optional `name` claim is the user's full name. A user the site does not have yet is created as a System Manager, the way Frappe's setup wizard creates the first user. Any other `sub`, such as `admin`, signs in as Administrator.
+
+### Site To Central
+
+A site calls Central through `GET` or `POST /sites/<name>/central/<method>`. Pilot forwards the call with this host's Pilot credential, so Central knows the server and its team. Pilot removes the reserved `cmd` field from the request body so it cannot override the method in the URL. Pilot forwards only these methods and refuses others with `403`:
+
+| Method | Use |
+|---|---|
+| `central.api.pilot.heartbeat` | Check that the site reaches Central |
+| `central.api.pilot.get_team_identity_token` | Get a 5-minute token that proves the team to an outside service. Send `{"audience": "<service URL>"}`; the answer is `{"token": "..."}`. |
+| `central.billing.api.billing_api.*` | Billing calls from the site's Cloud Settings |
+
+### Renaming And Domains
+
+`POST /sites/<name>/actions/rename` takes `{"new_name": "...", "keep_old_hostname": true}` and queues `rename-site`. The new name is validated the same way a new site's is, and both names are claimed as task resources so nothing can create or drop either while the site is moving between them. `keep_old_hostname` defaults to true and keeps the old hostname on the site, so open tabs and existing links keep working; pass false to release a pooled name a fleet reuses. `make_primary` defaults to false. Pass true to make the new name the site's `host_name`, so the links the site builds use it and its other domains redirect to it. A rename also replaces the site's `pilot_auth_token` with one scoped to the new name. See [Renaming without downtime](commands.md#renaming-without-downtime).
+
+`POST /settings/admin-domain` takes `{"domain": "...", "tls": true|false}` (`tls` optional) and queues `change-admin-domain`, which registers the route with the domain provider, writes `bench.toml`, reissues the certificate when TLS is on, and republishes nginx. The previous hostname is released only once the switch has committed.
+
+Both operations re-point any matching `central.hostname_aliases` entry, so a VM hostname keeps reaching the thing it named. Every route that claims a hostname - creating a site, renaming one, moving the admin - also takes the task resource `host:<hostname>`, so two of them cannot run at once for the same name. That key is host-wide - benches share one nginx and one `/etc/letsencrypt` - so it conflicts with active tasks on every bench of the host, not only its own.
 
 ### Site Storage
 
 `GET /sites/storage` returns every site's `private_bytes`, `public_bytes`, `database_bytes`, and `total_bytes`, plus the `collected_at` of the reading. `database_bytes` is what the schema holds on disk, allocated-but-freed pages included, since nothing else can use that space until the tables are rebuilt.
 
-Measuring means a `du` per site directory and one schema-size query, so the route serves `logs/site-storage.json` instead - written by the `site-storage` systemd timer every six hours (`pilot.core.site.storage`). Reading never measures, however old the report is; the route falls back to measuring only when there is no report at all, which is the first read on a bench whose timer has not run yet.
+Measuring means a `du` per site directory and one schema-size query, so the route serves `logs/site-storage.json` instead - written by the `pilot-storage` systemd timer every six hours (`pilot.core.site.storage`). Reading never measures, however old the report is; the route falls back to measuring only when there is no report at all, which is the first read on a bench whose timer has not run yet.
 
 `POST /sites/<name>/actions/refresh-storage` queues `refresh-storage-usage` to measure again on demand. One report covers every site on the bench, so the task re-measures all of them and concurrent requests fold into one run.
+
+### Backups And Restore
+
+Pilot writes backup runs to `sites/<site>/backups`. Frappe prunes `private/backups` on every backup and every hour, so Pilot keeps its runs out of that directory and its retention policy is the only pruner. `POST /sites/<name>/backups` returns `409` while another task owns the site, such as a restore, rename or drop.
+
+`POST /sites/<name>/actions/restore` queues `restore-site`. The body has `parts`, a list of `database`, `public`, `private`, and `config`, an optional `skip_failing_patches` boolean, and one source:
+
+| Source | Body | Notes |
+|---|---|---|
+| A run of a site on this bench | `source_site`, `backup_timestamp` | A run that only exists offsite is downloaded first. Omit `source_site` to use the target's own run. |
+| A fresh backup of a site on this bench | `source_site` | The source site is backed up first. |
+| The latest backup of a remote Frappe site | `remote_site`, `password`, `backup_timestamp` | Get `backup_timestamp` from `remote-backups`. The restore stops if the remote has a newer backup by then. To restore a newer state, take a backup on the remote site first. |
+| An offsite backup of a Frappe Cloud v1 site | `frappe_cloud_backup` | Connect to Frappe Cloud first. The download links are kept out of the task record. |
+
+A remote source needs a bench session and an `https://` site. The Administrator password is checked before the task is queued and is kept out of the task record.
+
+`POST /sites/<name>/actions/remote-backups` takes `remote_site` and `password` and returns the remote's latest backup as `{"backups": [{"timestamp", "created_at", "parts"}]}`. Frappe exposes only its latest backup, so the list has one entry, or none when the remote has no backup from the last 30 days.
+
+`POST /sites/<name>/actions/restore-upload` takes the same `parts` and `skip_failing_patches` (`"true"`) as multipart form fields, plus the files `database`, `public`, `private`, and `config` (the site config backup). nginx `client_max_body_size` limits the upload size.
+
+A restore puts the site in maintenance mode, restores only the chosen parts, and migrates it. It restores the files before the database. From a remote site or Frappe Cloud, the file archives and a MariaDB database stream into the site as they download, so they need no copy on disk. The site stays in maintenance mode for the download time. `skip_failing_patches` passes `--skip-failing` to the migration. It takes no backup of the site first. A database from another site brings that site's encryption key. The `config` part merges the source site config into this site, except the keys that belong to this site: `db_*`, `redis_*`, `pilot_*`, `atlas_*`, `rds_db`, `maintenance_mode`, `pause_scheduler`, `email_sender_name`, and the keys a site-scoped config change cannot set either, such as `host_name`, `domains`, `route`, `ssl`, `cert_name`, `backup_retention`, `installed_apps`, `cloud_server_url`, and `cloud_settings_embed_url`. A config restored without its database keeps this site's `encryption_key`, so the passwords in this site's database stay readable. If a step fails, the site stays in maintenance mode. Restoring from another site needs a bench session; a site token can only restore its own backups.
+
+#### Chunked uploads
+
+The dashboard sends large backup files in chunks of up to 256 MB, because one request cannot carry them. The routes take a bench session, or a site token for its own site.
+
+| Route | Purpose |
+|---|---|
+| `POST /sites/<name>/uploads` | Takes `{"files": {part: {"filename", "size"}}}`. Returns `upload_id` and `chunk_size`. Refuses files larger than the free disk space. |
+| `PUT /sites/<name>/uploads/<upload_id>/files/<part>?offset=N` | The raw chunk bytes. `offset` must be the bytes received so far; a chunk sent again rewrites from its offset. A gap returns 409. Returns `received`. |
+| `GET /sites/<name>/uploads/<upload_id>` | The `size` and `received` bytes of each file, to resume after an error. |
+| `DELETE /sites/<name>/uploads/<upload_id>` | Cancels the upload and removes its files. |
+
+`POST /sites/<name>/actions/restore` with `upload_id` restores the uploaded files once each one is complete. The restore then owns the files and removes them when it ends. Each new upload removes the uploads that got no chunk for 3 hours. The admin nginx vhost accepts bodies of at least 1024 MB. The chunk route streams to the admin without request buffering and without the WAF, because the WAF cannot inspect raw backup bytes.
+
+#### Frappe Cloud v1
+
+A site on Frappe Cloud v1 is restored after its team approves the access. All routes need a bench session. Frappe Cloud is `[frappe_cloud] url` in `common_config.toml`.
+
+| Route | Purpose |
+|---|---|
+| `POST /sites/<name>/integrations/frappe-cloud` | Takes `remote_site`, any domain of the site. Returns `status`, `remote_site`, `approval_url`, and an 8-character `code`. |
+| `GET /sites/<name>/integrations/frappe-cloud` | The status of the request: `Pending`, `Approved`, `Rejected`, `Revoked`, or `Expired`. |
+| `DELETE /sites/<name>/integrations/frappe-cloud` | Revokes the request and deletes the token. |
+| `GET /sites/<name>/integrations/frappe-cloud/backups?start=0` | Five offsite backups from `start`, newest first, and `running_backup`. |
+| `POST /sites/<name>/integrations/frappe-cloud/backups` | Takes an offsite backup with files. Returns its `name`. |
+| `GET /sites/<name>/integrations/frappe-cloud/backups/<backup>` | The backup `status` and the `job_url` of its job on Frappe Cloud. |
+
+A user of the team opens `approval_url` and enters the code within 10 minutes. Five wrong codes reject the request. The approval gives access for 12 hours. Pilot keeps the token in `config/frappe_cloud/<site>.json` with mode 0600. The restore task revokes the token before it downloads the files. The download links stay valid for 24 hours.
+
+### Site Actions
+
+`POST /sites/<name>/actions/build-assets` queues `build` for the apps the site runs. Assets are shared by every site on the bench that has those apps, so the task also takes the `bench:update` lock and waits for an update or another build.
+
+### App Branches
+
+`POST /apps/<name>/actions/switch-branch` takes `{"branch": "..."}` and queues `switch-branch`. The task validates, reinstalls, and builds the app on the new branch, and returns to the old branch if a step fails. It then backs up and migrates every site that has the app, through one migration operation that takes over the task's locks. If a migration fails, restoring that operation returns the app to its previous branch and restores the site databases.
+
+### Database Performance Report
+
+`GET /database/performance-report` returns the read-only findings behind the analyzer's Query Analysis and Index Analysis panels: `time_consuming_queries`, `full_table_scan_queries`, `unused_indexes`, `redundant_indexes`, and the `performance_schema_enabled` flag.
+
+The first three sections come from MariaDB's Performance Schema, so they are empty and the flag is `false` whenever `performance_schema` is off - the instrumentation is a startup setting, and MariaDB collects nothing until the server restarts with it on. `redundant_indexes` reads `information_schema.STATISTICS` instead and stays populated either way. The UI keys off the flag to explain the empty panels rather than reporting them as an error.
+
+`?site=<name>` narrows every section to that site's schema; without it the report covers every user schema on the server, system schemas excluded. Only MariaDB implements it - other engines raise, and the route answers 422.
 
 ### Setup
 

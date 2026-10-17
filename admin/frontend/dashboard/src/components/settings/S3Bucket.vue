@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Alert, Button, ErrorMessage, FormControl, Select, Spinner, toast } from 'frappe-ui'
+import { Alert, Button, ErrorMessage, Select, Spinner, TextInput, toast } from 'frappe-ui'
 
-import { apiErrorMessage } from '@/api/client'
 import { settingsApi } from '@/api/settings'
+import type { S3ProviderOption } from '@/types/settings'
+import { errorMessage } from '@/utils/error'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -14,8 +15,10 @@ const secretKey = ref('')
 const bucket = ref('')
 const provider = ref('')
 const region = ref('')
+const endpointUrl = ref('')
 const secretKeySet = ref(false)
-const providers = ref([])
+const providers = ref<S3ProviderOption[]>([])
+const loadingRegions = ref(false)
 
 const connected = computed(() => Boolean(accessKey.value && bucket.value && secretKeySet.value))
 const providerLabel = computed(
@@ -31,7 +34,29 @@ const regionOptions = computed(
       ?.regions.map((r) => ({ label: r, value: r })) || [],
 )
 
-watch(provider, () => {
+// Frappe regions come from Central, so they load only when that provider is picked.
+const loadFrappeRegions = async () => {
+  const frappe = providers.value.find((p) => p.value === 'frappe')
+  if (!frappe) return
+
+  loadingRegions.value = true
+  try {
+    frappe.regions = await settingsApi.frappeStorageRegions()
+  } catch (e) {
+    error.value = errorMessage(e, 'Could not read Frappe storage regions from Central.')
+  } finally {
+    loadingRegions.value = false
+  }
+}
+
+// Also on `providers`: a reload after save replaces the list and empties Frappe's regions.
+watch([provider, providers], async ([current], [previous]) => {
+  if (previous && current !== previous) {
+    endpointUrl.value = ''
+  }
+  if (current === 'frappe') {
+    await loadFrappeRegions()
+  }
   if (!regionOptions.value.some((o) => o.value === region.value)) {
     region.value = regionOptions.value[0]?.value || ''
   }
@@ -57,9 +82,10 @@ const load = async () => {
     bucket.value = s3.bucket || ''
     provider.value = s3.provider || providers.value[0]?.value || ''
     region.value = s3.region || ''
+    endpointUrl.value = s3.endpoint_url || ''
     secretKeySet.value = !!s3.secret_key_set
   } catch (e) {
-    error.value = e.message || 'Could not load settings.'
+    error.value = errorMessage(e, 'Could not load settings.')
   } finally {
     loading.value = false
   }
@@ -69,24 +95,21 @@ const save = async () => {
   saving.value = true
   error.value = ''
   try {
-    const result = await settingsApi.update({
+    await settingsApi.update({
       s3: {
         access_key: accessKey.value.trim(),
         secret_key: secretKey.value.trim(),
         bucket: bucket.value.trim(),
         provider: provider.value,
         region: region.value,
+        endpoint_url: endpointUrl.value.trim(),
       },
     })
-    if (!result.error) {
-      secretKey.value = ''
-      toast.success('Object storage settings saved')
-      await load()
-    } else {
-      error.value = apiErrorMessage(result, 'Could not save object storage settings.')
-    }
+    secretKey.value = ''
+    toast.success('Object storage settings saved')
+    await load()
   } catch (e) {
-    error.value = e.message || 'Could not save object storage settings.'
+    error.value = errorMessage(e, 'Could not save object storage settings.')
   } finally {
     saving.value = false
   }
@@ -95,20 +118,17 @@ const save = async () => {
 const disconnect = async () => {
   disconnecting.value = true
   try {
-    const result = await settingsApi.update({ s3: { disconnect: true } })
-    if (!result.error) {
-      accessKey.value = ''
-      secretKey.value = ''
-      bucket.value = ''
-      provider.value = providers.value[0]?.value || ''
-      region.value = ''
-      secretKeySet.value = false
-      toast.success('Object storage disconnected')
-    } else {
-      toast.error(apiErrorMessage(result, 'Could not disconnect object storage.'))
-    }
+    await settingsApi.update({ s3: { disconnect: true } })
+    accessKey.value = ''
+    secretKey.value = ''
+    bucket.value = ''
+    provider.value = providers.value[0]?.value || ''
+    region.value = ''
+    endpointUrl.value = ''
+    secretKeySet.value = false
+    toast.success('Object storage disconnected')
   } catch (e) {
-    toast.error(e.message || 'Could not disconnect object storage.')
+    toast.error(errorMessage(e, 'Could not disconnect object storage.'))
   } finally {
     disconnecting.value = false
   }
@@ -123,7 +143,13 @@ onMounted(load)
   </div>
 
   <div v-else class="space-y-6">
-    <Alert v-if="!connected" theme="blue" title="Why connect object storage?" :dismissible="false">
+    <Alert
+      v-if="!connected"
+      class="border border-outline-gray-2"
+      theme="blue"
+      title="Why connect object storage?"
+      :dismissible="false"
+    >
       <template #description>
         <p class="text-ink-gray-6 text-p-sm">
           Connect S3-compatible object storage to send offsite backups and snapshots.
@@ -136,13 +162,12 @@ onMounted(load)
       class="flex sm:flex-row flex-col sm:justify-between sm:items-center gap-3"
     >
       <div>
-        <p class="font-medium text-ink-gray-8 text-base">Connected to {{ bucket }}</p>
+        <p class="font-medium text-ink-gray-8">Connected to {{ bucket }}</p>
         <p class="text-ink-gray-5 text-p-sm">{{ providerLabel }} · Access key {{ accessKey }}</p>
       </div>
 
       <Button
         class="flex-1 sm:flex-none"
-        variant="subtle"
         theme="red"
         :loading="disconnecting"
         @click="disconnect"
@@ -151,21 +176,32 @@ onMounted(load)
     </div>
 
     <div class="space-y-4">
-      <FormControl label="Bucket" type="text" v-model="bucket" placeholder="storage-bucket" />
+      <TextInput label="Bucket" v-model="bucket" placeholder="storage-bucket" />
+      <TextInput
+        label="Endpoint URL"
+        v-model="endpointUrl"
+        placeholder="Optional for AWS, DigitalOcean, and Hetzner"
+      />
       <div class="flex sm:flex-row flex-col gap-4">
         <Select label="Provider" v-model="provider" :options="providerOptions" class="w-full" />
-        <Select label="Region" v-model="region" :options="regionOptions" class="w-full" />
+        <Select
+          label="Region"
+          v-model="region"
+          :options="regionOptions"
+          :disabled="loadingRegions"
+          :placeholder="loadingRegions ? 'Loading regions…' : undefined"
+          class="w-full"
+        />
       </div>
 
       <div class="flex sm:flex-row flex-col gap-4">
-        <FormControl
+        <TextInput
           label="Access Key"
-          type="text"
           v-model="accessKey"
           placeholder="AKIA…"
           class="w-full"
         />
-        <FormControl
+        <TextInput
           label="Secret Key"
           type="password"
           v-model="secretKey"

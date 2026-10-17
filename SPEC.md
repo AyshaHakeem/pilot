@@ -39,7 +39,7 @@ Assume from this:
 
 - Admin access to one bench is equivalent to shell access as the host user, and to the same access over every other bench in that directory.
 - Two workloads that must not reach each other belong on separate hosts, or under separate host users with their own benches directory.
-- The host user holds passwordless sudo for a fixed set of nginx and certbot commands (installed by `install.sh`) so production deploys and cert renewals need no prompt. These grants, and the bench-writable nginx config that root parses, mean the host user is effectively root-equivalent on the box; treat one bench's compromise as reaching the whole host, not just its own benches.
+- The host user holds passwordless sudo for a fixed set of nginx and certbot commands (installed by `install.sh`) so production deploys and cert renewals need no prompt. sudo-rs (Ubuntu 26.04) rejects wildcards in arguments, so there the certbot, openssl, test and mkdir grants have no argument limits. These grants, and the bench-writable nginx config that root parses, mean the host user is effectively root-equivalent on the box; treat one bench's compromise as reaching the whole host, not just its own benches.
 - Whoever reaches the Admin port before setup finishes owns the bench, so serve the setup wizard only where you accept that.
 
 ## Configuration
@@ -56,13 +56,14 @@ The stable top-level config groups are:
 - `[lite_mode]`
 - `[monitor]`
 - `[gunicorn]`
+- `[build]`
 - `[admin]`
 - `[firewall]`
 - `[waf]`
 - `[s3]`
 - `[llm]`
 
-Settings shared by every bench under one benches directory - `[mariadb]`, `[postgres]`, `[letsencrypt]`, `[central]`, `[datum]`, and `admin.jwks_url`/`jwks_audience` - live in `common_config.toml` instead, merged in by `BenchConfig` alone. See [Configuration](docs/configuration.md#common-config).
+Settings shared by every bench under one benches directory - `[mariadb]`, `[postgres]`, `[letsencrypt]`, `[central]`, `[telemetry]`, and `admin.jwks_url`/`jwks_audience` - live in `common_config.toml` instead, merged in by `BenchConfig` alone. See [Configuration](docs/configuration.md#common-config).
 
 Sites are represented by site directories and bench config records where needed.
 
@@ -76,10 +77,12 @@ Use `@step` for visible progress and `@on_success`, `@on_failure`, or `@on_cance
 
 - [Architecture](docs/architecture.md)
 - [Commands](docs/commands.md)
+- [Development proxies](docs/development-proxies.md)
 - [Configuration](docs/configuration.md)
 - [Tasks](docs/tasks.md)
 - [Migrations](docs/migration.md)
 - [Admin API](docs/admin-api.md)
 - [Admin UI](docs/admin-ui.md)
 - [Production](docs/production.md)
+- [Prebuilt Assets](docs/prebuilt-assets.md)
 - [Domain Provider](docs/domain-provider.md)

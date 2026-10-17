@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { Alert, Button, Combobox, ErrorMessage, FormControl, Spinner, toast } from 'frappe-ui'
+import { Alert, Button, Combobox, ErrorMessage, Spinner, TextInput, Textarea, toast } from 'frappe-ui'
 
-import { apiErrorMessage } from '@/api/client'
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { settingsApi } from '@/api/settings'
+import type { LLMProviderOption } from '@/types/settings'
+import { errorMessage } from '@/utils/error'
 
 const loading = ref(true)
 const saving = ref(false)
@@ -17,8 +19,8 @@ const maxTokens = ref(4096)
 const apiBase = ref('')
 const systemPrompt = ref('')
 const apiKeySet = ref(false)
-const providers = ref([])
-const models = ref([])
+const providers = ref<LLMProviderOption[]>([])
+const models = ref<string[]>([])
 const modelsError = ref('')
 
 const connected = computed(() => Boolean(provider.value && apiKeySet.value))
@@ -62,7 +64,7 @@ const modelsHint = computed(() => {
   return `Enter the ${providerLabel.value} API key above to load models.`
 })
 
-const fetchModels = async (providerValue) => {
+const fetchModels = async (providerValue: string) => {
   models.value = []
   modelsError.value = ''
   if (!providerValue || freeTextModel.value) return
@@ -72,23 +74,23 @@ const fetchModels = async (providerValue) => {
   modelsLoading.value = true
   try {
     const result = await settingsApi.llmModels(providerValue, apiKey.value.trim(), apiBase.value.trim())
-    if (result?.error) modelsError.value = apiErrorMessage(result, 'Could not load models.')
+    if (hasApiError(result)) modelsError.value = apiErrorMessage(result, 'Could not load models.')
     else models.value = result || []
   } catch (e) {
-    modelsError.value = e.message || 'Could not load models.'
+    modelsError.value = errorMessage(e, 'Could not load models.')
   } finally {
     modelsLoading.value = false
   }
 }
 
-const onProviderSelect = (value) => {
-  provider.value = value || ''
+const onProviderSelect = (value: unknown) => {
+  provider.value = typeof value === 'string' ? value : ''
   model.value = ''
   fetchModels(provider.value)
 }
 
 // A key-gated provider can only list models once a key exists, so reload when it settles.
-let apiKeyDebounce = null
+let apiKeyDebounce: ReturnType<typeof setTimeout> | undefined
 watch([apiKey, apiBase], () => {
   if (!modelsNeedApiKey.value || !provider.value) return
   clearTimeout(apiKeyDebounce)
@@ -117,7 +119,7 @@ const save = async () => {
   saving.value = true
   error.value = ''
   try {
-    const result = await settingsApi.update({
+    await settingsApi.update({
       llm: {
         provider: provider.value,
         api_key: apiKey.value.trim(),
@@ -127,15 +129,11 @@ const save = async () => {
         system_prompt: systemPrompt.value,
       },
     })
-    if (!result.error) {
-      apiKey.value = ''
-      toast.success('AI assistant settings saved')
-      await load()
-    } else {
-      error.value = apiErrorMessage(result, 'Could not save AI assistant settings.')
-    }
+    apiKey.value = ''
+    toast.success('AI assistant settings saved')
+    await load()
   } catch (e) {
-    error.value = e.message || 'Could not save AI assistant settings.'
+    error.value = errorMessage(e, 'Could not save AI assistant settings.')
   } finally {
     saving.value = false
   }
@@ -144,23 +142,19 @@ const save = async () => {
 const disconnect = async () => {
   disconnecting.value = true
   try {
-    const result = await settingsApi.update({ llm: { disconnect: true } })
-    if (!result.error) {
-      provider.value = ''
-      model.value = ''
-      apiKey.value = ''
-      maxTokens.value = 4096
-      apiBase.value = ''
-      systemPrompt.value = ''
-      apiKeySet.value = false
-      models.value = []
-      modelsError.value = ''
-      toast.success('AI assistant disconnected')
-    } else {
-      toast.error(apiErrorMessage(result, 'Could not disconnect the AI assistant.'))
-    }
+    await settingsApi.update({ llm: { disconnect: true } })
+    provider.value = ''
+    model.value = ''
+    apiKey.value = ''
+    maxTokens.value = 4096
+    apiBase.value = ''
+    systemPrompt.value = ''
+    apiKeySet.value = false
+    models.value = []
+    modelsError.value = ''
+    toast.success('AI assistant disconnected')
   } catch (e) {
-    toast.error(e.message || 'Could not disconnect the AI assistant.')
+    toast.error(errorMessage(e, 'Could not disconnect the AI assistant.'))
   } finally {
     disconnecting.value = false
   }
@@ -175,7 +169,13 @@ onMounted(load)
   </div>
 
   <div v-else class="space-y-6">
-    <Alert v-if="!connected" theme="blue" title="Why connect an AI assistant?" :dismissible="false">
+    <Alert
+      v-if="!connected"
+      class="border border-outline-gray-2"
+      theme="blue"
+      title="Why connect an AI assistant?"
+      :dismissible="false"
+    >
       <template #description>
         <p class="text-ink-gray-6 text-p-sm">
           Connect any LLM provider supported by litellm to power assistant features, like explaining
@@ -189,7 +189,7 @@ onMounted(load)
       class="flex sm:flex-row flex-col sm:justify-between sm:items-center gap-3"
     >
       <div>
-        <p class="font-medium text-ink-gray-8 text-base">Connected to {{ providerLabel }}</p>
+        <p class="font-medium text-ink-gray-8">Connected to {{ providerLabel }}</p>
         <p class="text-ink-gray-5 text-p-sm">Model {{ model || '—' }} · API key set</p>
       </div>
 
@@ -211,26 +211,24 @@ onMounted(load)
       />
 
       <div v-if="needsApiBase" class="space-y-1.5">
-        <FormControl
+        <TextInput
           label="API Base URL"
-          type="text"
           v-model="apiBase"
           placeholder="http://your-host:8000/v1"
         />
         <p v-if="apiBaseError" class="text-ink-red-5 text-p-sm">{{ apiBaseError }}</p>
       </div>
 
-      <FormControl
+      <TextInput
         label="API Key"
         type="password"
         v-model="apiKey"
         :placeholder="apiKeySet ? '••••••••' : 'Provider API key'"
       />
 
-      <FormControl
+      <TextInput
         v-if="freeTextModel"
         label="Model"
-        type="text"
         v-model="model"
         placeholder="Your served model name"
       />
@@ -241,15 +239,14 @@ onMounted(load)
           :model-value="model"
           :loading="modelsLoading"
           :placeholder="modelPlaceholder"
-          @update:model-value="(value) => (model = value || '')"
+          @update:model-value="(value) => (model = typeof value === 'string' ? value : '')"
         />
         <p v-if="modelsError" class="text-ink-red-5 text-p-sm">{{ modelsError }}</p>
         <p v-else-if="modelsHint" class="text-ink-gray-5 text-p-sm">{{ modelsHint }}</p>
       </div>
 
-      <FormControl
+      <Textarea
         label="System Prompt"
-        type="textarea"
         v-model="systemPrompt"
         :rows="6"
         placeholder="Instructions sent with every request"
@@ -257,23 +254,21 @@ onMounted(load)
 
       <details class="group">
         <summary
-          class="flex items-center gap-1.5 text-ink-gray-6 text-base cursor-pointer select-none"
+          class="flex items-center gap-1.5 text-ink-gray-6 cursor-pointer select-none"
         >
           <span
-            class="size-4 transition-transform group-open:rotate-90 lucide-chevron-right"
-          ></span>
+            class="size-4 transition-transform group-open:rotate-90 lucide-chevron-right" />
           Advanced
         </summary>
 
         <div class="space-y-4 pt-4">
-          <FormControl
+          <TextInput
             v-if="!needsApiBase"
             label="API Base URL"
-            type="text"
             v-model="apiBase"
             placeholder="Leave blank to use the provider default"
           />
-          <FormControl label="Max Tokens" type="number" v-model="maxTokens" placeholder="4096" />
+          <TextInput label="Max Tokens" type="number" v-model="maxTokens" placeholder="4096" />
         </div>
       </details>
 

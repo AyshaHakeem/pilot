@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.config import BenchConfig
+from pilot.config.mail import MailConfig
 from pilot.managers.waf import WafManager
 
 if TYPE_CHECKING:
@@ -53,6 +54,9 @@ class BenchSettings:
 
     def _regenerate_and_restart_if_needed(self, old_restart: dict) -> bool:
         new_restart = restart_trigger_values(self.bench.config)
+        if not self.bench.supports_lite_mode:
+            # Without Frappe's runner the bench runs the classic process set either way.
+            old_restart = {**old_restart, "lite_mode": new_restart["lite_mode"]}
         if not is_restart_needed(old_restart, new_restart):
             return False
         if old_restart.get("lite_mode") != new_restart.get("lite_mode"):
@@ -75,6 +79,10 @@ class BenchSettings:
                 "service_restart_failed",
                 "Settings were saved, but running services could not be restarted.",
             ) from error
+        finally:
+            # A timed-out restart still finishes, so nginx follows the saved config.
+            if self.bench.config.production.enabled:
+                self._apply_nginx()
 
     def _apply_nginx_if_needed(self, old_firewall: dict, old_waf: dict) -> str | None:
         waf_changed = waf_payload(self.bench.config) != old_waf
@@ -89,6 +97,10 @@ class BenchSettings:
                 "ModSecurity is not installed on this host. Redeploy production to "
                 "install the WAF; it stays inactive until then."
             )
+        self._apply_nginx()
+        return warning
+
+    def _apply_nginx(self) -> None:
         try:
             regenerate_nginx(self.bench)
         except Exception as error:
@@ -96,7 +108,6 @@ class BenchSettings:
                 "nginx_apply_failed",
                 "Settings were saved, but nginx could not apply them.",
             ) from error
-        return warning
 
     def _sync_s3_if_needed(self, old_s3_config: dict) -> None:
         if s3_payload(self.bench.config) == old_s3_config:
@@ -182,6 +193,7 @@ def s3_payload(config: BenchConfig) -> dict:
         "bucket": config.s3.bucket,
         "provider": config.s3.provider,
         "region": config.s3.region,
+        "endpoint_url": config.s3.endpoint_url,
     }
 
 
@@ -195,6 +207,17 @@ def llm_payload(config: BenchConfig) -> dict:
     }
 
 
+def mail_payload(mail: MailConfig) -> dict:
+    return {
+        "server": mail.server,
+        "port": mail.port,
+        "email": mail.email,
+        "login": mail.login,
+        "use_ssl": mail.use_ssl,
+        "password_set": bool(mail.password),
+    }
+
+
 def resource_limits_payload(config: BenchConfig) -> dict:
     limits = config.resource_limits
     return {
@@ -202,10 +225,11 @@ def resource_limits_payload(config: BenchConfig) -> dict:
         "memory_usage_limit": limits.memory_usage_limit,
         "disk_space_limit": limits.disk_space_limit,
         "site_uptime": limits.site_uptime,
-        # Tokens stay server-side; the UI only needs to know one is stored.
+        # Secrets stay server-side; the UI only needs to know one is stored.
         "webhook_endpoints": [
             {"url": url, "token_set": bool(token)} for url, token in limits.webhook_endpoints.items()
         ],
+        "email_recipients": limits.email_recipients,
     }
 
 
@@ -240,9 +264,7 @@ def regenerate_configs(bench: "Bench") -> None:
 def regenerate_nginx(bench: "Bench") -> None:
     from pilot.managers.nginx import NginxManager
 
-    manager = NginxManager(bench)
-    manager.generate_config(ssl_ready=True)
-    manager.install_config()
+    NginxManager(bench).publish_config(ssl_ready=True)
 
 
 def restart_running_workload(bench: "Bench") -> bool:
@@ -308,7 +330,7 @@ def _restart_systemd(manager) -> bool:
         [*manager._systemctl(), "restart", *non_admin_units],
         capture_output=True,
         text=True,
-        timeout=60,
+        timeout=120,
         env=env,
         check=True,
     )

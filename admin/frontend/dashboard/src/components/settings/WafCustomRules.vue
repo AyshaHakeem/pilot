@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onUnmounted, ref } from 'vue'
-import { Badge, Button, Dialog, FormControl, Select, Switch, TextInput } from 'frappe-ui'
+import { Badge, Button, Dialog, Select, Switch, TextInput } from 'frappe-ui'
 
 import EmptyState from '@/components/common/EmptyState.vue'
 
@@ -12,16 +12,24 @@ import {
   ruleProblem,
   ruleSummary,
 } from '@/utils/wafRules'
+import type { WafConditionSettings, WafRuleSettings } from '@/types/settings'
 
 // Two-way bound so the child owns list edits without mutating a prop.
-const rules = defineModel({ type: Array, default: () => [] })
-const props = defineProps({
-  fields: { type: Array, default: () => [] },
-  operators: { type: Array, default: () => [] },
-  actions: { type: Array, default: () => [] },
+const rules = defineModel<WafRuleSettings[]>({ default: () => [] })
+
+interface Props {
+  fields?: string[]
+  operators?: string[]
+  actions?: string[]
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  fields: () => [],
+  operators: () => [],
+  actions: () => [],
 })
 
-const PLACEHOLDERS = {
+const PLACEHOLDERS: Record<string, string> = {
   source_ip: '10.0.0.0/8, 203.0.113.4',
   method: 'POST',
   uri_path: '/admin',
@@ -42,31 +50,35 @@ const actionOptions = computed(() =>
   props.actions.map((a) => ({ label: ACTION_LABELS[a] || a, value: a })),
 )
 
-const placeholder = (field) => {
+const placeholder = (field: string) => {
   return PLACEHOLDERS[field] || 'value'
 }
 
 // Identity-based :key. Index keys re-key rows on delete and Vue patches the
 // inputs in place, jumping a focused caret to the wrong row.
-const keys = new WeakMap()
+const keys = new WeakMap<object, string>()
 let nextKey = 0
-const keyOf = (object) => {
-  if (!keys.has(object)) keys.set(object, `k${(nextKey += 1)}`)
-  return keys.get(object)
+const keyOf = (object: object) => {
+  const existing = keys.get(object)
+  if (existing) return existing
+
+  const key = `k${(nextKey += 1)}`
+  keys.set(object, key)
+  return key
 }
 
 // One key, not a set: opening a rule closes the one before it.
 const openKey = ref('')
-const isOpen = (rule) => openKey.value === keyOf(rule)
-const toggleOpen = (rule) => {
+const isOpen = (rule: WafRuleSettings) => openKey.value === keyOf(rule)
+const toggleOpen = (rule: WafRuleSettings) => {
   const key = keyOf(rule)
   openKey.value = openKey.value === key ? '' : key
 }
 
 // Same predicate as the save path, so add and save cannot disagree.
 const flaggedKey = ref('')
-const root = ref(null)
-let flagTimer = null
+const root = ref<HTMLElement | null>(null)
+let flagTimer: ReturnType<typeof setTimeout> | undefined
 
 const flagUnfinished = () => {
   const rule = rules.value.find((candidate) => ruleProblem(candidate))
@@ -87,12 +99,12 @@ onUnmounted(() => clearTimeout(flagTimer))
 
 // Live reorder on dragover; identity keys keep row state through the splice.
 const dragKey = ref('')
-const onDragStart = (rule, event) => {
+const onDragStart = (rule: WafRuleSettings, event: DragEvent) => {
   dragKey.value = keyOf(rule)
   openKey.value = ''
-  event.dataTransfer.effectAllowed = 'move'
+  if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
 }
-const onDragOver = (rule) => {
+const onDragOver = (rule: WafRuleSettings) => {
   if (!dragKey.value || dragKey.value === keyOf(rule)) return
   const from = rules.value.findIndex((r) => keyOf(r) === dragKey.value)
   const to = rules.value.findIndex((r) => keyOf(r) === keyOf(rule))
@@ -104,7 +116,7 @@ const onDragEnd = () => {
   dragKey.value = ''
 }
 
-const newCondition = () => {
+const newCondition = (): WafConditionSettings => {
   return { field: 'uri_path', operator: 'contains', value: '', header_name: '' }
 }
 const addRule = () => {
@@ -120,22 +132,24 @@ const addRule = () => {
   // Key the reactive proxy the template iterates, not the raw local object.
   openKey.value = keyOf(rules.value[rules.value.length - 1])
 }
-const addCondition = (rule) => {
+const addCondition = (rule: WafRuleSettings) => {
   rule.conditions.push(newCondition())
 }
-const removeCondition = (rule, index) => {
+const removeCondition = (rule: WafRuleSettings, index: number) => {
   rule.conditions.splice(index, 1)
 }
 
 const showRemove = ref(false)
-const removingRule = ref(null)
+const removingRule = ref<WafRuleSettings | null>(null)
 const removingLabel = computed(() => removingRule.value?.name || 'this rule')
-const promptRemove = (rule) => {
+const promptRemove = (rule: WafRuleSettings) => {
   removingRule.value = rule
   showRemove.value = true
 }
 const confirmRemove = () => {
-  const index = rules.value.indexOf(removingRule.value)
+  const target = removingRule.value
+  const index = target ? rules.value.indexOf(target) : -1
+
   if (index !== -1) rules.value.splice(index, 1)
   showRemove.value = false
   removingRule.value = null
@@ -146,13 +160,13 @@ const confirmRemove = () => {
   <div class="space-y-3" ref="root">
     <div class="flex justify-between items-start gap-4">
       <div class="min-w-0">
-        <p class="font-medium text-ink-gray-8 text-base">Custom rules</p>
+        <p class="font-medium text-ink-gray-8">Custom rules</p>
         <p class="mt-0.5 max-w-md text-ink-gray-5 text-p-sm">
           Checked before the managed rules, top to bottom.
         </p>
       </div>
 
-      <Button class="shrink-0" variant="subtle" icon-left="lucide-plus" @click="addRule">
+      <Button class="shrink-0" icon-left="lucide-plus" @click="addRule">
         Add rule
       </Button>
     </div>
@@ -184,7 +198,6 @@ const confirmRemove = () => {
         ]"
         @dragover.prevent="onDragOver(rule)"
       >
-        <!-- The whole row toggles; interactive children stop the click. -->
         <div
           class="flex items-center gap-3 px-2.5 h-10 rounded-4 transition-colors cursor-pointer select-none hover:bg-surface-alpha-gray-1"
           @click="toggleOpen(rule)"
@@ -208,7 +221,7 @@ const confirmRemove = () => {
             @click.stop="toggleOpen(rule)"
           >
             <span
-              class="min-w-0 font-medium text-base truncate"
+              class="min-w-0 font-medium truncate"
               :class="rule.enabled ? 'text-ink-gray-8' : 'text-ink-gray-5'"
             >
               {{ rule.name || 'Untitled rule' }}
@@ -218,131 +231,117 @@ const confirmRemove = () => {
               {{ ruleSummary(rule) }}
             </span>
 
-            <!-- What the rule does outranks what it matches on: never truncate it. -->
             <span class="shrink-0 text-ink-gray-6 text-p-sm">→ {{ actionLabel(rule) }}</span>
           </button>
 
           <!-- The nginx renderer silently drops broken rules. -->
           <Badge v-if="ruleProblem(rule)" class="shrink-0" theme="amber">Incomplete</Badge>
-          <!-- A bare Switch has no accessible name (attrs land on the wrapper);
-               `label` gives the <label for> association, sr-only hides it. -->
           <Switch
-            size="sm"
             class="shrink-0 [&_[data-slot='label']]:sr-only [&>div]:!gap-x-0 [&>div]:!py-0"
             label="Rule enabled"
             :model-value="rule.enabled"
             @click.stop
-            @update:model-value="(v) => (rule.enabled = v)"
+            @update:model-value="(v: boolean) => (rule.enabled = v)"
           />
         </div>
 
-        <!-- Indent on the left only: the fields keep the header's right edge.
-             pl clears the drag handle so the fields line up under the rule name. -->
         <div v-if="isOpen(rule)" class="space-y-4 pt-1 pr-2.5 pb-5 pl-[2.375rem]">
-        <FormControl
-          type="text"
-          label="Rule name"
-          v-model="rule.name"
-          placeholder="Block /admin from outside the office"
-        />
+          <TextInput
+            label="Rule name"
+            v-model="rule.name"
+            placeholder="Block /admin from outside the office"
+          />
 
-        <div class="space-y-3">
-          <!-- All/Any only once there is something to combine. gap-1 is about a
-               space at this size, so the row reads as a sentence. -->
-          <div class="flex flex-wrap items-center gap-1 text-ink-gray-7 text-base">
-            <!-- One phrase when there is no Select between the words, or the flex
-                 gap reads as a double space. -->
-            <template v-if="rule.conditions.length > 1">
-              <span>When</span>
-              <Select v-model="rule.match" :options="MATCH_OPTIONS" />
-              <span>of the following match:</span>
-            </template>
+          <div class="space-y-3">
+            <div class="flex flex-wrap items-center gap-1 text-ink-gray-7">
+              <template v-if="rule.conditions.length > 1">
+                <span>When</span>
+                <Select v-model="rule.match" :options="MATCH_OPTIONS" />
+                <span>of the following match:</span>
+              </template>
 
-            <span v-else>When this matches:</span>
-          </div>
-
-          <!-- Anchored here, not to the group, so it clears the label whatever
-               that row's height is - it grows when the All/Any select appears. -->
-          <div class="relative space-y-3">
-            <span
-              aria-hidden="true"
-              class="absolute left-1 -top-2 bottom-0 border-l border-outline-gray-3"
-            />
-
-            <div class="space-y-2 pl-5">
-              <div
-                v-for="(cond, ci) in rule.conditions"
-                :key="keyOf(cond)"
-                class="gap-2 grid grid-cols-1 sm:grid-cols-[10rem_11rem_minmax(0,1fr)_2rem] items-start"
-              >
-                <!-- Stacked inside the field column to keep rows aligned. -->
-                <div class="space-y-1.5 min-w-0">
-                  <Select v-model="cond.field" :options="fieldOptions" class="w-full" />
-                  <TextInput
-                    v-if="cond.field === 'header'"
-                    v-model="cond.header_name"
-                    placeholder="Header name"
-                    class="w-full"
-                  />
-                </div>
-
-                <Select v-model="cond.operator" :options="operatorOptions" class="w-full" />
-                <TextInput
-                  v-model="cond.value"
-                  :placeholder="placeholder(cond.field)"
-                  class="w-full"
-                />
-                <!-- Conditionless rules are dropped silently; the last one cannot go. -->
-                <Button
-                  variant="ghost"
-                  icon="lucide-x"
-                  label="Remove condition"
-                  tooltip="Remove condition"
-                  :disabled="rule.conditions.length === 1"
-                  @click="removeCondition(rule, ci)"
-                />
-              </div>
+              <span v-else>When this matches:</span>
             </div>
 
-            <!-- Indented with the conditions so it reads as one more row of them. -->
-            <div class="pl-5">
-              <Button variant="ghost" icon-left="lucide-plus" @click="addCondition(rule)">
+            <div class="relative space-y-3">
+              <span
+                aria-hidden="true"
+                class="absolute left-1 -top-2 bottom-0 border-l border-outline-gray-3"
+              />
+
+              <div class="space-y-2 pl-5">
+                <div
+                  v-for="(cond, ci) in rule.conditions"
+                  :key="keyOf(cond)"
+                  class="gap-2 grid sm:grid-cols-[10rem_11rem_minmax(0,1fr)_2rem] items-start"
+                >
+                  <div class="space-y-1.5 min-w-0">
+                    <Select v-model="cond.field" :options="fieldOptions" class="w-full" />
+                    <TextInput
+                      v-if="cond.field === 'header'"
+                      v-model="cond.header_name"
+                      placeholder="Header name"
+                      class="w-full"
+                    />
+                  </div>
+
+                  <Select v-model="cond.operator" :options="operatorOptions" class="w-full" />
+                  <TextInput
+                    v-model="cond.value"
+                    :placeholder="placeholder(cond.field)"
+                    class="w-full"
+                  />
+                  <!-- Conditionless rules are dropped silently; the last one cannot go. -->
+                  <Button
+                    variant="ghost"
+                    icon="lucide-x"
+                    label="Remove condition"
+                    tooltip="Remove condition"
+                    :disabled="rule.conditions.length === 1"
+                    @click="removeCondition(rule, ci)"
+                  />
+                </div>
+              </div>
+
+              <Button
+                class="ml-5"
+                variant="ghost"
+                icon-left="lucide-plus"
+                @click="addCondition(rule)"
+              >
                 Add condition
               </Button>
             </div>
           </div>
-        </div>
 
-        <div class="relative space-y-1.5 pl-5">
-          <!-- -top-4 spans the group gap above so the line is unbroken; the
-               extra 0.875rem drops the curve to the middle of this row. -->
-          <span
-            aria-hidden="true"
-            class="absolute left-1 -top-4 h-[1.875rem] w-2.5 border-l border-b rounded-bl-6 border-outline-gray-3"
-          />
-          <div class="flex flex-wrap items-center gap-2 text-ink-gray-7 text-base">
-            <span>Then</span>
-            <Select v-model="rule.action" :options="actionOptions" class="w-48" />
-            <Button
-              class="ml-auto"
-              variant="ghost"
-              theme="red"
-              icon-left="lucide-trash-2"
-              @click="promptRemove(rule)"
+          <div class="relative space-y-1.5 pl-5">
+            <span
+              aria-hidden="true"
+              class="absolute left-1 -top-4 h-[1.875rem] w-2.5 border-l border-b rounded-bl-6 border-outline-gray-3"
+            />
+            <div class="flex flex-wrap items-center gap-2 text-ink-gray-7">
+              <span>Then</span>
+              <Select v-model="rule.action" :options="actionOptions" class="w-48" />
+              <Button
+                class="ml-auto"
+                variant="ghost"
+                theme="red"
+                icon-left="lucide-trash-2"
+                @click="promptRemove(rule)"
+              >
+                Delete rule
+              </Button>
+            </div>
+
+            <p
+              v-if="rule.action === 'skip'"
+              class="flex items-start gap-1.5 text-ink-amber-6 text-p-sm"
             >
-              Delete rule
-            </Button>
+              <span class="shrink-0 mt-0.5 size-3.5 lucide-triangle-alert" />
+              Matching requests bypass the firewall entirely - no managed rules, no inspection.
+            </p>
           </div>
-
-          <p
-            v-if="rule.action === 'skip'"
-            class="flex items-start gap-1.5 text-ink-amber-6 text-p-sm"
-          >
-            <span class="shrink-0 mt-0.5 size-3.5 lucide-triangle-alert" />
-            Matching requests bypass the firewall entirely - no managed rules, no inspection.
-          </p>
-        </div>
-        </div>
+          </div>
       </div>
     </div>
 
@@ -352,10 +351,12 @@ const confirmRemove = () => {
         >? Requests it was matching fall through to the managed ruleset.
       </p>
 
-      <div class="flex justify-end gap-2 mt-4">
-        <Button variant="ghost" @click="showRemove = false">Cancel</Button>
-        <Button variant="solid" theme="red" @click="confirmRemove">Delete</Button>
-      </div>
+      <template #actions>
+        <div class="flex justify-end gap-2">
+          <Button variant="ghost" @click="showRemove = false">Cancel</Button>
+          <Button variant="solid" theme="red" @click="confirmRemove">Delete</Button>
+        </div>
+      </template>
     </Dialog>
   </div>
 </template>

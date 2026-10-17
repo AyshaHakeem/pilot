@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.config import SiteConfig
+from pilot.exceptions import CronError
+from pilot.managers.cron import CronManager
 from pilot.utils import run_command
 
 if TYPE_CHECKING:
@@ -14,7 +16,9 @@ if TYPE_CHECKING:
     from pilot.core.bench import Bench
     from pilot.core.site.backups import SiteBackups
     from pilot.core.site.domains import SiteDomains
+    from pilot.core.site.frappe_cloud import SiteFrappeCloud
     from pilot.core.site.migration_backup import SiteMigrationBackup
+    from pilot.core.site.restore import BackupRun
 
 
 class Site:
@@ -43,10 +47,23 @@ class Site:
         return SiteDomains(self)
 
     @cached_property
+    def frappe_cloud(self) -> "SiteFrappeCloud":
+        from pilot.core.site.frappe_cloud import SiteFrappeCloud
+
+        return SiteFrappeCloud(self)
+
+    @cached_property
     def migration_backup(self) -> "SiteMigrationBackup":
         from pilot.core.site.migration_backup import SiteMigrationBackup
 
         return SiteMigrationBackup(self)
+
+    @property
+    def db_type(self) -> str:
+        """The engine frappe connects this site to, with frappe's own fallback."""
+        from pilot.core.site.config import read_site_config
+
+        return read_site_config(self.path).get("db_type") or "mariadb"
 
     @property
     def maintenance_mode(self) -> bool:
@@ -64,9 +81,7 @@ class Site:
 
     def set_maintenance_mode(self, enabled: bool) -> None:
         value = 1 if enabled else 0
-        self.set_maintenance_settings(
-            {"maintenance_mode": value, "pause_scheduler": value}
-        )
+        self.set_maintenance_settings({"maintenance_mode": value, "pause_scheduler": value})
 
     def set_maintenance_settings(self, settings: dict[str, int]) -> None:
         import json
@@ -82,8 +97,7 @@ class Site:
 
     @contextmanager
     def under_maintenance(self) -> Iterator[None]:
-        """Hold the site in maintenance mode for a schema change, restoring the
-        settings it had before - a site already down stays down afterwards."""
+        """Temporarily enable maintenance mode and restore the prior state."""
         original = self.maintenance_settings
         self.set_maintenance_mode(True)
         try:
@@ -106,6 +120,24 @@ class Site:
         from pilot.core.site.commands import SiteCommands
 
         SiteCommands(self).restore(db_file, public_files, private_files)
+
+    def restore_backup(
+        self,
+        run: BackupRun,
+        parts: list[str],
+        on_progress: Callable[[str], None] = print,
+        skip_failing_patches: bool = False,
+    ) -> None:
+        """Restore `parts` of a backup run in maintenance mode, then migrate."""
+        from pilot.core.site.restore import SiteRestore
+
+        SiteRestore(self).restore(run, parts, on_progress, skip_failing_patches)
+
+    def set_config_values(self, values: dict) -> None:
+        """Write keys into site_config.json under its lock."""
+        from pilot.core.site.config import set_site_config_values
+
+        set_site_config_values(self.bench.sites_path, self.config.name, values)
 
     def reinstall(self, admin_password: str) -> None:
         from pilot.core.site.commands import SiteCommands
@@ -179,39 +211,77 @@ class Site:
 
         SiteCommands(self).clear_cache()
 
+    def enable_scheduler(self) -> None:
+        from pilot.core.site.commands import SiteCommands
+
+        SiteCommands(self).enable_scheduler()
+
+    def build_assets(self) -> None:
+        """Rebuild the assets of the apps this site runs. Assets are shared by every
+        site on the bench that has those apps."""
+        bench_apps = {app.config.name for app in self.bench.apps()}
+        self.bench.rebuild_assets(
+            apps=[name for name in self.active_apps() if name in bench_apps], force=True
+        )
+
     def uninstall_apps(
         self,
         app_names: list[str],
         force: bool = False,
         on_progress: Callable[[str], None] = lambda message: None,
+        remove_from_bench: bool = True,
     ) -> None:
         from pilot.core.site.apps import SiteApps
 
-        SiteApps(self).uninstall_apps(app_names, force, on_progress)
+        SiteApps(self).uninstall_apps(app_names, force, on_progress, remove_from_bench)
 
     def _remove_app_if_not_on_any_site(self, app_name: str, on_progress: Callable[[str], None]) -> None:
         from pilot.core.site.apps import SiteApps
 
         SiteApps(self).remove_app_if_not_on_any_site(app_name, on_progress)
 
-    def drop(self, on_progress: Callable[[str], None] = lambda message: None) -> None:
+    def drop(
+        self,
+        on_progress: Callable[[str], None] = lambda message: None,
+        no_backup: bool = False,
+        force: bool = False,
+        archived_sites_path: str | None = None,
+    ) -> None:
         from pilot.core.site.commands import SiteCommands
         from pilot.managers.nginx import NginxManager
 
         provider_domains = self._provider_domains()
-        cmd = [*self.bench.frappe_call, "frappe", "drop-site", "--force", self.config.name]
+        cmd = [*self.bench.frappe_call, "frappe", "drop-site", self.config.name]
+        if no_backup:
+            cmd.append("--no-backup")
+        # Frappe's --force drops the database even when the backup before it failed.
+        if force or no_backup:
+            cmd.append("--force")
+        if archived_sites_path:
+            cmd += ["--archived-sites-path", archived_sites_path]
         on_progress(f"Dropping site '{self.config.name}'...")
-        with SiteCommands(self).setup_credentials(self.bench.config.db_type) as credentials:
+        with SiteCommands(self).setup_credentials(self.db_type) as credentials:
             run_command(cmd + credentials, cwd=self.bench.sites_path, stream_output=True)
+        # The site directory is archived, so only the cron entry remains.
+        try:
+            CronManager(self.bench.path).remove_schedule(self.config.name)
+        except CronError as error:
+            on_progress(f"Could not remove the site's backup schedule: {error}")
         self._remove_from_bench_toml()
         self._release_domains(provider_domains)
         on_progress(f"\nSite '{self.config.name}' dropped.")
         NginxManager(self.bench).reload_for_site_change()
 
-    def rename_to(self, new_name: str, on_progress: Callable[[str], None] = lambda message: None) -> None:
+    def rename_to(
+        self,
+        new_name: str,
+        on_progress: Callable[[str], None] = lambda message: None,
+        keep_old_hostname: bool = True,
+        make_primary: bool = False,
+    ) -> None:
         from pilot.core.site.rename import SiteRename
 
-        SiteRename(self, new_name).run(on_progress)
+        SiteRename(self, new_name, keep_old_hostname, make_primary).run(on_progress)
 
     def _provider_domains(self) -> list[str]:
         """Capture provider-owned domains before the site config is removed."""
@@ -248,6 +318,11 @@ class Site:
     def set_ssl(self, enabled: bool) -> None:
         set_site_ssl_flag(self.bench.sites_path, self.config.name, enabled)
 
+    def clear_certificate_pin(self) -> None:
+        from pilot.core.site.config import clear_certificate_pin
+
+        clear_certificate_pin(self.bench.sites_path, self.config.name)
+
     def public_config(self) -> dict:
         from pilot.core.site.config import read_public_config
 
@@ -258,10 +333,12 @@ class Site:
 
         return update_public_config(self.path, patch)
 
-    def admin_login_url(self, proxy_tls: bool = False) -> str | None:
+    def admin_login_url(
+        self, proxy_tls: bool = False, user: str = "Administrator", full_name: str = ""
+    ) -> str | None:
         from pilot.core.site.login import SiteLogin
 
-        return SiteLogin(self).admin_url(proxy_tls=proxy_tls)
+        return SiteLogin(self).admin_url(proxy_tls=proxy_tls, user=user, full_name=full_name)
 
     def _build_missing_assets(self) -> None:
         from pilot.core.site.provisioning import SiteProvisioner

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from pilot.config import BenchConfig
+from pilot.core.app import RevisionPin
 from pilot.core.bench import Bench
 from pilot.core.bench.migration.state import get_state
 
@@ -51,6 +52,16 @@ def test_migrations_list_and_current(tmp_path: Path) -> None:
     assert resp_curr.get_json() is None
 
 
+def _app_needing_migrate() -> MagicMock:
+    app = MagicMock()
+    app.config.name = "frappe"
+    app.config.repo = "https://github.com/frappe/frappe.git"
+    app.installed_hash = "1111111"
+    app.update_target.return_value = RevisionPin(kind="commit", ref="2222222")
+    app.has_migrate_changes.return_value = True
+    return app
+
+
 def test_post_updates_creates_operation(tmp_path: Path) -> None:
     bench_root = tmp_path / "benches" / "current"
     (bench_root / "sites" / "site1.localhost").mkdir(parents=True)
@@ -60,6 +71,7 @@ def test_post_updates_creates_operation(tmp_path: Path) -> None:
     with (
         # Never read the machine's real marketplace cache from a test.
         patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
+        patch("pilot.core.bench.Bench.apps", return_value=[_app_needing_migrate()]),
         patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
     ):
         resp = client.post("/api/v1/updates", json={})
@@ -86,6 +98,7 @@ def test_post_updates_rejects_when_one_is_already_unresolved(tmp_path: Path) -> 
 
     with (
         patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
+        patch("pilot.core.bench.Bench.apps", return_value=[_app_needing_migrate()]),
         patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
     ):
         first = client.post("/api/v1/updates", json={})
@@ -97,7 +110,7 @@ def test_post_updates_rejects_when_one_is_already_unresolved(tmp_path: Path) -> 
     assert second.get_json()["error"]["code"] == "migration_conflict"
 
 
-def test_standalone_migrate_returns_operation_and_task_ids(tmp_path: Path) -> None:
+def test_standalone_migrate_runs_in_place_without_a_backup(tmp_path: Path) -> None:
     bench_root = tmp_path / "benches" / "current"
     site_dir = bench_root / "sites" / "site1.localhost"
     site_dir.mkdir(parents=True)
@@ -106,7 +119,8 @@ def test_standalone_migrate_returns_operation_and_task_ids(tmp_path: Path) -> No
 
     with (
         patch("pilot.integrations.marketplace.Marketplace.registry", return_value=[]),
-        patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-99"),
+        patch("pilot.tasks.migration_backup.MigrationBackupTask.queue") as backup,
+        patch("pilot.tasks.migrate.MigrateTask.queue", return_value="task-99"),
     ):
         response = client.post("/api/v1/sites/site1.localhost/actions/migrate", json={})
 
@@ -115,6 +129,8 @@ def test_standalone_migrate_returns_operation_and_task_ids(tmp_path: Path) -> No
     assert data["operation_id"]
     assert data["task_id"] == "task-99"
     assert response.headers["Location"].endswith(f"/migrations/{data['operation_id']}")
+    backup.assert_not_called()
+    assert Bench(bench_root).migrations.get(data["operation_id"]).can_revert is False
 
 
 def test_restore_action_uses_documented_endpoint(tmp_path: Path) -> None:

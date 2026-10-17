@@ -8,8 +8,10 @@ import AppIcon from '@/components/apps/AppIcon.vue'
 import { updatesApi } from '@/api/updates'
 import { useAppRegistry } from '@/composables/apps/useAppRegistry'
 import { useAppUpdates } from '@/composables/apps/useAppUpdates'
+import { errorMessage } from '@/utils/error'
+import { needsMigrate } from '@/utils/updateFormat'
 
-const open = defineModel()
+const open = defineModel<boolean>()
 const router = useRouter()
 
 const { updates, appsWithUpdates, checking } = useAppUpdates()
@@ -25,7 +27,15 @@ const appNames = computed(() => {
   return names
 })
 
-const selected = ref(new Set())
+const selected = ref(new Set<string>())
+
+const updateLabel = computed(() => {
+  const count = selected.value.size
+  if (!count) return 'Update'
+  if (count === appNames.value.length) return 'Update all'
+  return count === 1 ? 'Update 1 app' : `Update ${count} apps`
+})
+const isMigrating = computed(() => needsMigrate(selected.value, updates.value))
 const safeguard = ref(true)
 const updating = ref(false)
 const error = ref('')
@@ -41,14 +51,15 @@ watch(
   { immediate: true },
 )
 
-const toggle = (name) => {
+const toggle = (name: string) => {
   const next = new Set(selected.value)
   next.has(name) ? next.delete(name) : next.add(name)
   selected.value = next
 }
 
 const toggleAll = () => {
-  selected.value = selected.value.size === appNames.value.length ? new Set() : new Set(appNames.value)
+  selected.value =
+    selected.value.size === appNames.value.length ? new Set() : new Set(appNames.value)
 }
 
 const runUpdate = async () => {
@@ -63,7 +74,7 @@ const runUpdate = async () => {
     open.value = false
     router.push({ name: 'UpdateDetail', params: { operationId: res.operation.id } })
   } catch (e) {
-    error.value = e.message || 'Failed to start update.'
+    error.value = errorMessage(e, 'Failed to start update.')
   } finally {
     updating.value = false
   }
@@ -73,9 +84,7 @@ const runUpdate = async () => {
 <template>
   <Dialog v-model="open" title="Updates" size="md">
     <div class="flex flex-col gap-4">
-      <div v-if="checking" class="flex justify-center py-8">
-        <LoadingText />
-      </div>
+      <LoadingText v-if="checking" class="justify-center py-8" />
 
       <p v-else-if="!appNames.length" class="py-6 text-ink-gray-5 text-sm text-center">
         Your bench is up to date.
@@ -85,16 +94,15 @@ const runUpdate = async () => {
         <div class="flex flex-col gap-2">
           <div class="flex items-center justify-between">
             <span class="text-ink-gray-5 text-sm">
-              {{ selected.size }} of {{ appNames.length }} selected
+              {{ selected.size }}
+              of {{ appNames.length }} selected
             </span>
 
-            <Button variant="ghost" size="sm" @click="toggleAll">
+            <Button variant="ghost" @click="toggleAll">
               {{ selected.size === appNames.length ? 'Unselect all' : 'Select all' }}
             </Button>
           </div>
 
-          <!-- The row is the checkbox; the inner Checkbox is inert decoration
-               (tabindex/aria-hidden reach its <input> via attr passthrough). -->
           <div class="flex flex-col gap-3 max-h-80 overflow-y-auto">
             <button
               v-for="name in appNames"
@@ -107,7 +115,7 @@ const runUpdate = async () => {
             >
               <AppIcon :name="name" size="xl" />
               <span class="flex-1 min-w-0">
-                <p class="font-medium text-ink-gray-8 text-base truncate">
+                <p class="font-medium text-ink-gray-8 truncate">
                   {{ titleMap[name] || name }}
                 </p>
 
@@ -131,17 +139,17 @@ const runUpdate = async () => {
           </div>
         </div>
 
-        <div class="flex flex-col gap-2 pt-2">
-          <label class="flex items-center gap-2 cursor-pointer">
-            <Checkbox v-model="safeguard" />
-            <span class="text-ink-gray-7 text-sm">Take backup of sites</span>
-          </label>
-        </div>
+        <label v-if="isMigrating" class="flex items-center gap-2 pt-2 cursor-pointer">
+          <Checkbox v-model="safeguard" />
+          <span class="text-ink-gray-7 text-sm">Take backup of sites</span>
+        </label>
       </template>
 
       <ErrorMessage v-if="error" :message="error" />
+    </div>
 
-      <div class="flex justify-end gap-2 pt-2">
+    <template #actions>
+      <div class="flex justify-end gap-2">
         <Button variant="ghost" @click="open = false">Cancel</Button>
         <Button
           v-if="appNames.length"
@@ -150,14 +158,9 @@ const runUpdate = async () => {
           :disabled="!selected.size"
           @click="runUpdate"
         >
-          {{ selected.size == 0 ? 'Update' : (
-              appNames.length == selected.size ? 'Update all' :
-                (
-                  selected.size == 1 ? 'Update 1 app' : `Update ${selected.size} apps`
-                )
-            ) }}
+          {{ updateLabel }}
         </Button>
       </div>
-    </div>
+    </template>
   </Dialog>
 </template>

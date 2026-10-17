@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 from pathlib import Path
 
 from pilot.utils import run_command
@@ -12,8 +14,42 @@ def systemctl(*args: str) -> list[str]:
 
 def systemctl_env() -> dict:
     env = dict(os.environ)
-    env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    runtime_dir = env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+    # Without the bus address systemd-run starts an uncapped scope and reports success.
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime_dir}/bus")
     return env
+
+
+def can_cap_memory() -> bool:
+    """Whether a build can run in a memory-capped scope. A trial scope catches a host without
+    a user bus."""
+    controllers = Path(f"/sys/fs/cgroup/user.slice/user-{os.getuid()}.slice/cgroup.controllers")
+    try:
+        if not shutil.which("systemd-run") or "memory" not in controllers.read_text().split():
+            return False
+        trial = subprocess.run(
+            memory_capped(["true"], 64, 0), env=systemctl_env(), capture_output=True, timeout=30, check=False
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return trial.returncode == 0
+
+
+def memory_capped(argv: list[str], memory_max_mb: int, swap_max_mb: int) -> list[str]:
+    """Run argv in a transient scope capped at memory_max_mb of RAM and swap_max_mb of
+    swap. Only where `can_cap_memory` holds. Swap lets small hosts finish large builds."""
+    return [
+        "systemd-run",
+        "--user",
+        "--scope",
+        "--quiet",
+        "--collect",
+        "-p",
+        f"MemoryMax={memory_max_mb}M",
+        "-p",
+        f"MemorySwapMax={swap_max_mb}M",
+        *argv,
+    ]
 
 
 def user_unit_dir() -> Path:

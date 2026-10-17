@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Literal, NotRequired, TypedDict
 
 from flask import Blueprint, current_app, jsonify
 
@@ -13,6 +14,35 @@ from pilot.core.bench import Bench
 from pilot.internal.atomic_file import exclusive_file_lock
 from pilot.managers.platform import native_process_manager
 from pilot.managers.task import TaskActivityReader
+
+
+class HealthStatus(TypedDict):
+    status: Literal["ok"]
+
+
+class TaskWorkerActivity(TypedDict):
+    active: bool
+    uncertain: bool
+    status: str
+    desired: str
+
+
+class Bootstrap(TypedDict):
+    """Unauthenticated callers get only `mode`, `enabled` and `name`."""
+
+    mode: Literal["setup", "pending", "admin"]
+    enabled: bool
+    name: str
+    db_type: NotRequired[str]
+    production: NotRequired[bool]
+    native_process_manager: NotRequired[str]
+    allow_bench_management: NotRequired[bool]
+    central: NotRequired[bool]
+    central_url: NotRequired[str]
+    central_audience: NotRequired[str]
+    developer_mode: NotRequired[bool]
+    task_worker: NotRequired[TaskWorkerActivity]
+
 
 core_bp = Blueprint("core", __name__)
 
@@ -40,9 +70,13 @@ def bootstrap():
             503,
         )
 
+    if config.central.is_awaiting_bootstrap:
+        return jsonify({"mode": "pending", "name": config.name, "enabled": True})
+
     initialized = (bench_root / "env" / "bin" / "python").exists()
     if not initialized or not config.admin.password:
         return jsonify(_setup_bootstrap(bench_root))
+
     marker = wizard_marker_path(bench_root)
     if marker.exists():
         with exclusive_file_lock(marker):
@@ -63,6 +97,9 @@ def bootstrap():
                 "production": config.production.enabled,
                 "native_process_manager": native_process_manager(),
                 "allow_bench_management": config.admin.allow_bench_management,
+                "central": config.central.enabled,
+                "central_url": config.admin.central_url if config.central.enabled else "",
+                "central_audience": config.admin.jwks_audience if config.central.enabled else "",
                 "developer_mode": config.allow_developer_mode,
                 "task_worker": TaskActivityReader(bench_root).read().public_dict,
             },

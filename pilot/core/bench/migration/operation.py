@@ -35,6 +35,7 @@ _CHAIN_TASKS = {
     "revert-site": "pilot.tasks.revert_site.RevertSiteTask",
     "restart-services": "pilot.tasks.restart_services.RestartServicesTask",
 }
+_CHAIN_PHASES = ("backing_up", "updating", "migrating")
 
 
 def _now() -> str:
@@ -54,6 +55,8 @@ class AppRevision:
     updated_sha: str | None = None
     target_sha: str | None = None  # ref (commit or tag) captured at create time; None when unresolved
     target_kind: Literal["tag", "commit"] = "commit"  # how to check target_sha out
+    branch: str = ""  # branch to return to on revert, set when a branch switch changed it
+    has_migrate_changes: bool = True
 
     @property
     def compare_url(self) -> str | None:
@@ -121,16 +124,21 @@ class MigrationOperation:
         )
 
     @property
+    def needs_app_update(self) -> bool:
+        return bool(self.apps) and not self.apps_updated
+
+    @property
     def resource_keys(self) -> list[str]:
         """Resources every task of this operation locks: bench update + each site."""
         return ["bench:update", *[f"site:{site.name.lower()}" for site in self.sites]]
 
-    def begin(self) -> str:
-        """Enter the first phase and queue the first chain task. Returns its id."""
+    def begin(self, handoff_from: str | None = None) -> str:
+        """Enter the first phase and queue the first chain task. Returns its id.
+        `handoff_from` is a running task that passes its resources to this chain."""
         try:
             self._prepare_sites()
             self._enter_first_phase()
-            task_id = self.enqueue_next()
+            task_id = self.enqueue_next(handoff_from=handoff_from)
             if task_id is None:
                 raise BenchError(f"Migration {self.id} has no work to do.")
         except Exception:
@@ -186,7 +194,7 @@ class MigrationOperation:
             raise
         self._save()
         if self.next_backup_site() is None:
-            self._transition("updating" if self.apps else "migrating")
+            self._transition("updating" if self.needs_app_update else "migrating")
 
     def update_apps(self, on_step: OnStep = _NO_STEP, on_progress: OnProgress = _NO_PROGRESS) -> None:
         """Update apps to exactly the revisions captured when this operation was created.
@@ -249,6 +257,44 @@ class MigrationOperation:
             self._save()
         if self.next_migrate_site() is None:
             self._complete(on_step)
+
+    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
+        """Pause for the user when a chain task stopped without its failure handling. A no-op
+        once the chain moved on."""
+        if self.chain[-1]["task_id"] != task_id or self.state not in _CHAIN_PHASES:
+            return
+        if self.state != phase or self._is_step_done(phase, site_name):
+            # The step finished, but the task stopped before it queued the next task.
+            phase, site_name = str(self.state), None
+        elif site_name:
+            self._fail_site_step(phase, site_name)
+        self.diagnosis = {
+            "phase": phase,
+            "message": "The task stopped before it finished. Retry it, or revert.",
+            "output_excerpt": "",
+        }
+        self._enter_needs_attention(phase, site_name)
+        if phase == "backing_up":
+            self._restore_maintenance()
+
+    def _fail_site_step(self, phase: str, site_name: str) -> None:
+        site = self.site(site_name)
+        if phase == "backing_up":
+            site.backup_status = "failed"
+        elif phase == "migrating":
+            site.migration_status = "failed"
+            # A revert must restore what the stopped attempt touched too.
+            self._union_touched_tables(site)
+
+    def _is_step_done(self, phase: str, site_name: str | None) -> bool:
+        if phase == "updating":
+            return self.apps_updated
+        if not site_name:
+            return False
+        site = self.site(site_name)
+        if phase == "backing_up":
+            return site.backup_status == "backed_up"
+        return site.migration_status == "success"
 
     def retry(self) -> None:
         """Resume the chain from needs_attention so the failed unit runs again."""
@@ -327,9 +373,14 @@ class MigrationOperation:
     def revert_apps(self, on_step: OnStep = _NO_STEP, on_progress: OnProgress = _NO_PROGRESS) -> None:
         on_step("revert_apps", "Reverting app revisions")
         try:
-            for app in self.apps:
-                on_progress(f"Reverting {app.name} to {app.sha[:8]}...")
-                self.bench.app(app.name).checkout_commit(app.sha)
+            for revision in self.apps:
+                on_progress(f"Reverting {revision.name} to {revision.branch or revision.sha[:8]}...")
+                app = self.bench.app(revision.name)
+                if revision.branch:
+                    app.return_to(revision.branch, revision.sha)
+                    app.record_branch()
+                else:
+                    app.checkout_commit(revision.sha)
             if self.apps:
                 filter_set = set(self.apps_filter) if self.apps_filter else None
                 self.bench._reinstall_apps(filter_set, on_progress)
@@ -403,7 +454,7 @@ class MigrationOperation:
         if not self.safeguards_disabled and self.sites:
             self._transition("backing_up")
         else:
-            self._transition("updating" if self.apps else "migrating")
+            self._transition("updating" if self.needs_app_update else "migrating")
 
     def _enter_needs_attention(self, phase: str, site: str | None) -> None:
         self.return_state = phase

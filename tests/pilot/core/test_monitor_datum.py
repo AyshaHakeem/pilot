@@ -2,11 +2,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from pilot.config.datum import DatumConfig
+from pilot.config.telemetry import TelemetryConfig
 from pilot.core.server import monitoring_datum
 from pilot.core.server.monitoring_datum import MetricShipper
 
-pytest.importorskip("datum_client", reason="metrics extra is optional")
+pytest.importorskip("datum_client", reason="datum is installed in the admin venv only")
 
 WHEN = "2026-08-04T10:00:00+00:00"
 
@@ -67,7 +67,7 @@ DATABASE_RECORD = {
 
 
 def _shipper() -> MetricShipper:
-    return MetricShipper(DatumConfig(endpoint="https://datum.internal", token="secret"))
+    return MetricShipper(TelemetryConfig(endpoint="https://datum.internal", token="secret"))
 
 
 def _samples(shipper: MetricShipper) -> dict[tuple[str, str], float]:
@@ -80,7 +80,7 @@ def _samples(shipper: MetricShipper) -> dict[tuple[str, str], float]:
 
 
 def test_shipping_is_off_until_endpoint_and_token_are_set() -> None:
-    shipper = MetricShipper(DatumConfig(endpoint="https://datum.internal"))
+    shipper = MetricShipper(TelemetryConfig(endpoint="https://datum.internal"))
 
     shipper.add_system(SYSTEM_RECORD)
     shipper.add_application(APPLICATION_RECORD)

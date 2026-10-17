@@ -39,15 +39,18 @@ class BenchProduction:
         manager = cast("ManagedProcessManager", ProcessManager.for_bench(self.bench))
         on_progress("Stopping the running processes")
         manager.stop()
-        on_progress("Rewriting the bench configuration")
-        self.bench.write_common_site_config()
-        regenerate_nginx(self.bench)
-        on_progress("Installing the new process set")
-        manager.write_config()
-        manager.install_config()
-        manager.reload_manager_config()
-        on_progress("Starting the new process set")
-        manager.start_workload()
+        # A failed step must not leave the sites down.
+        try:
+            on_progress("Rewriting the bench configuration")
+            self.bench.write_common_site_config()
+            regenerate_nginx(self.bench)
+            on_progress("Installing the new process set")
+            manager.write_config()
+            manager.install_config()
+            manager.reload_manager_config()
+        finally:
+            on_progress("Starting the new process set")
+            manager.start_workload()
 
     def remove_production(self, on_progress: Callable[[str], None]) -> None:
         production = self.bench.config.production
@@ -65,6 +68,8 @@ class BenchProduction:
 
         name = self.bench.config.name
         self.bench.ensure_no_sites()
+        if not self.bench.config.production.enabled:
+            self._ensure_dev_bench_stopped()
         self.remove_production(on_progress)
         self._release_admin_domain()
 
@@ -74,6 +79,16 @@ class BenchProduction:
         on_progress(f"Deleting {self.bench.path}...")
         shutil.rmtree(self.bench.path, ignore_errors=True)
         on_progress(f"\nBench '{name}' dropped.")
+
+    def _ensure_dev_bench_stopped(self) -> None:
+        """A running `pilot start` (or setup wizard) would outlive its deleted bench."""
+        from pilot.exceptions import BenchError
+        from pilot.managers.processes.local import ProcessManager
+
+        manager = ProcessManager(self.bench)
+        if manager.is_running() or manager.is_admin_running():
+            name = self.bench.config.name
+            raise BenchError(f"Bench '{name}' is running. Stop it with 'pilot -b {name} stop', then retry.")
 
     def setup_nginx(self, on_progress: Callable[[str], None]) -> None:
         from pilot.exceptions import ConfigError
@@ -88,28 +103,27 @@ class BenchProduction:
         nginx_manager.install()
         self._install_waf()
         (self.bench.config_path / "nginx").mkdir(parents=True, exist_ok=True)
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.install_config()
+        nginx_manager.publish_config(ssl_ready=True)
         nginx_manager.setup_sudoers()
+        nginx_manager.enable_at_boot()
         self._report_site_urls(nginx_manager, on_progress)
 
     def setup_letsencrypt(self) -> None:
         from pilot.exceptions import ConfigError
-        from pilot.managers.letsencrypt import LetsEncryptManager
+        from pilot.managers.letsencrypt import LetsEncryptManager, install_renewal_timer
         from pilot.managers.nginx import NginxManager
 
         if not self.bench.config.letsencrypt.email:
-            raise ConfigError("letsencrypt.email must be set in bench.toml to run setup letsencrypt.")
+            raise ConfigError("letsencrypt.email is not set. Run 'pilot setup production --letsencrypt-email <email>', or set letsencrypt.email in common_config.toml.")
         letsencrypt_manager = LetsEncryptManager(self.bench)
         nginx_manager = NginxManager(self.bench)
         letsencrypt_manager.install()
         letsencrypt_manager.setup_sudoers()
+        install_renewal_timer()
         letsencrypt_manager.ensure_webroot()
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.reload()
+        nginx_manager.apply_config()
         letsencrypt_manager.obtain_all()
-        nginx_manager.generate_config(ssl_ready=True)
-        nginx_manager.reload()
+        nginx_manager.apply_config()
 
     def setup_production(
         self,
@@ -190,7 +204,7 @@ class BenchProduction:
             WafManager(self.bench).install()
         except Exception as exc:
             print(
-                f"Warning: could not install the WAF (ModSecurity/CRS): {exc}. "
+                f"Warning: could not install the WAF (ModSecurity/CRS): {str(exc).rstrip('.')}. "
                 f"Sites are unaffected; re-run setup to retry.",
                 file=sys.stderr,
             )
