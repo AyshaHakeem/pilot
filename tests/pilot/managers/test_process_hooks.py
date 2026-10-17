@@ -38,7 +38,7 @@ def test_systemd_escapes_specifiers_and_quotes() -> None:
         _definition(argv=["/bin/stalwart", "--rate=100%", "$HOME"], env={"MESSAGE": 'say "50%"'})
     )
 
-    assert "ExecStart=/bin/stalwart --rate=100%% '$$HOME'\n" in unit
+    assert 'ExecStart=/bin/stalwart --rate=100%% "$$HOME"\n' in unit
     assert 'Environment="MESSAGE=say \\"50%%\\""\n' in unit
 
 
@@ -162,3 +162,12 @@ def test_names_that_supervisor_would_merge_are_rejected() -> None:
 
     with pytest.raises(BenchError, match="Process 'redis-cache' of app 'redis' has the same name as 'redis_cache'"):
         check_unique_names(definitions)
+
+
+def test_systemd_keeps_backslashes_and_quotes_in_hook_arguments() -> None:
+    """systemd reads C escapes inside quotes, so a literal \\n must reach the hook as written."""
+    unit = SystemdRenderer("bench").render(
+        _definition(pre_run=["/usr/bin/python3", "-c", "print('a\\nb')", 'say "hi"', ""])
+    )
+
+    assert "ExecStartPre=/usr/bin/python3 -c \"print('a\\\\nb')\" \"say \\\"hi\\\"\" \"\"\n" in unit

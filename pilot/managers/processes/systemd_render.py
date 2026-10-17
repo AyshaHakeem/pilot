@@ -1,16 +1,26 @@
 from __future__ import annotations
 
+import re
 import shlex
 
 from pilot.managers.processes.base import ServiceRenderer, override
 from pilot.managers.processes.local import ProcessDefinition
+
+_SAFE_ARGUMENT = re.compile(r"[\w@%+=:,./-]+", re.ASCII)
 
 
 def _exec(argv: list[str]) -> str:
     # Exec lines need an absolute path, so `env` does the PATH lookup for a bare name.
     if "/" not in argv[0]:
         argv = ["/usr/bin/env", *argv]
-    return shlex.join(argv).replace("%", "%%").replace("$", "$$")
+    return " ".join(_quote(argument) for argument in argv)
+
+
+def _quote(argument: str) -> str:
+    """systemd reads C escapes inside quotes and expands % specifiers and $ variables everywhere."""
+    if not _SAFE_ARGUMENT.fullmatch(argument):
+        argument = '"' + argument.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    return argument.replace("%", "%%").replace("$", "$$")
 
 
 def _render_env(env: dict) -> str:
