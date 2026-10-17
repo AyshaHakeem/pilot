@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import contextlib
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 from pilot.config import AppConfig, BenchConfig, MariaDBConfig, RedisConfig, WorkerConfig, WorkerGroup
 from pilot.core.bench import Bench
@@ -419,20 +419,25 @@ def test_systemd_workload_stops_before_redis(tmp_path: Path) -> None:
 def test_supervisor_redis_starts_first_and_stops_last(tmp_path: Path) -> None:
     """A group signals all its programs at once, so redis lives in a group stopped after the workload."""
     from pilot.managers.processes.base import UnitGroup
+    from pilot.managers.processes.supervisor import SupervisorProcessManager
 
     mgr = _make_supervisor_manager(tmp_path)
-    mgr.supervisor_conf_path.parent.mkdir(parents=True, exist_ok=True)
-    mgr.supervisor_conf_path.write_text("")
     with (
         patch.object(mgr, "is_alive", return_value=True),
+        patch.object(
+            SupervisorProcessManager,
+            "loaded_groups",
+            new_callable=PropertyMock,
+            return_value={"test-bench", "test-bench-apps", "test-bench-redis"},
+        ),
         patch("pilot.managers.processes.supervisor.run_command") as run,
     ):
         mgr.apply_unit_action("restart", UnitGroup.WORKLOAD)
 
     commands = [call.args[0][3:] for call in run.call_args_list]
     assert commands == [
-        ["stop", "test-bench:*", "test-bench-redis:*"],
-        ["start", "test-bench-redis:*", "test-bench:*"],
+        ["stop", "test-bench:*", "test-bench-apps:*", "test-bench-redis:*"],
+        ["start", "test-bench-redis:*", "test-bench-apps:*", "test-bench:*"],
     ]
 
 

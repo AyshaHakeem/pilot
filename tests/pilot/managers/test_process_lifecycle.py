@@ -120,19 +120,6 @@ def test_supervisor_targets_only_loaded_groups(bench, avail, targets) -> None:
         assert manager.get_targets(UnitGroup.WORKLOAD) == targets
 
 
-def test_supervisor_restart_stops_redis_last_and_starts_it_first(bench) -> None:
-    manager = SupervisorProcessManager(bench)
-    calls = []
-    with (
-        patch.object(manager, "is_alive", return_value=True),
-        patch.object(manager, "get_targets", return_value=["w:*", "a:*", "r:*"]),
-        patch.object(supervisor_module, "run_command", side_effect=lambda argv: calls.append(argv[3:])),
-    ):
-        manager.apply_unit_action("restart", UnitGroup.WORKLOAD)
-
-    assert calls == [["stop", "w:*", "a:*", "r:*"], ["start", "r:*", "a:*", "w:*"]]
-
-
 def test_supervisor_shutdown_waits_for_the_daemon_to_exit(bench) -> None:
     manager = SupervisorProcessManager(bench)
     alive = iter([True, True, True, False])
