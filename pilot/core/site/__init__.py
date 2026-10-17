@@ -132,6 +132,9 @@ class Site:
         from pilot.core.site.restore import SiteRestore
 
         SiteRestore(self).restore(run, parts, on_progress, skip_failing_patches)
+        # The restored database decides which apps the site runs.
+        if "database" in parts:
+            self.bench.processes.apply()
 
     def set_config_values(self, values: dict) -> None:
         """Write keys into site_config.json under its lock."""

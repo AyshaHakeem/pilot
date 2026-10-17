@@ -205,6 +205,8 @@ def provision_from_backup(
     site = Site.provision(bench, name, [], admin_password, on_progress=on_progress)
     on_progress(f"Restoring backup: {db_file}")
     site.restore(db_file, public_files, private_files)
+    # The restored database decides which apps the site runs.
+    bench.processes.apply()
     return site
 
 

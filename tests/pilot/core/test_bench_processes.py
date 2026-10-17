@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -156,3 +156,25 @@ def test_a_broken_declaration_blocks_only_the_apps_sites_use(bench, monkeypatch)
     monkeypatch.setattr(BenchProcesses, "active_apps", property(lambda self: {"mail", "crm"}))
     with pytest.raises(AppProcessError, match="App 'crm'"):
         bench.processes.get_app_definitions()
+
+
+@pytest.mark.parametrize(("parts", "applies"), [(["database"], True), (["public", "config"], False)])
+def test_a_database_restore_applies_the_process_set(bench, parts, applies) -> None:
+    from pilot.core.site.restore import SiteRestore
+
+    with patch.object(SiteRestore, "restore"), patch.object(BenchProcesses, "apply") as apply:
+        bench.site("site.local").restore_backup(MagicMock(), parts)
+
+    assert apply.called is applies
+
+
+def test_a_site_made_from_a_backup_applies_the_process_set(bench) -> None:
+    from pilot.core.site import Site, provision_from_backup
+
+    with (
+        patch.object(Site, "provision", return_value=MagicMock()),
+        patch.object(BenchProcesses, "apply") as apply,
+    ):
+        provision_from_backup(bench, "site.local", "db.sql.gz", "admin")
+
+    apply.assert_called_once_with()
