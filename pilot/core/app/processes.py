@@ -89,6 +89,7 @@ class AppProcesses:
             working_dir=working_dir,
             stop_timeout=stop_timeout,
             critical=False,
+            app=self.app.config.name,
             restart_on_failure=restart_on_failure,
             pre_run=self._get_argv(name, "pre_run", declaration, working_dir),
             post_run=self._get_argv(name, "post_run", declaration, working_dir),

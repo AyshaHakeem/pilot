@@ -202,8 +202,8 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         self.install_config()
 
     @override
-    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
-        units = {self._unit_name(name): name for name in names}
+    def get_process_states(self, definitions: list[ProcessDefinition]) -> dict[str, ProcessState]:
+        units = {self._unit_name(definition.name): definition.name for definition in definitions}
         result = subprocess.run(
             self._systemctl("show", *units, "--property=Id,ActiveState,SubState,MainPID"),
             capture_output=True,
@@ -220,8 +220,8 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         return states
 
     @override
-    def restart_processes(self, names: list[str]) -> None:
-        units = [self._unit_name(name) for name in names]
+    def restart_processes(self, definitions: list[ProcessDefinition]) -> None:
+        units = [self._unit_name(definition.name) for definition in definitions]
         run_command(self._systemctl("restart", *units), env=self._systemctl_env(), timeout=_SYSTEMCTL_TIMEOUT)
 
     def is_configured(self) -> bool:

@@ -28,6 +28,7 @@ class ProcessDefinition:
     working_dir: Path | None = None  # was `cd {dir} &&`
     stop_timeout: int | None = None  # graceful-stop seconds (redis=300)
     critical: bool = True  # dev runner stops the whole bench when this process exits
+    app: str | None = None  # the app that declares it; None for the bench's own processes
     socket_file: Path | None = None  # removed before each start; a stale one blocks listen()
     restart_on_failure: bool = True
     pre_run: list[str] = field(default_factory=list)

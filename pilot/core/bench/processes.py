@@ -84,61 +84,41 @@ class BenchProcesses:
     def restart(self, names: list[str]) -> list[str]:
         """Restart the named processes. An app name stands for every process of that app that runs."""
         manager = ProcessManager.for_bench(self.bench)
-        app_of = self._declared_apps()
-        running = {
-            definition.name: app_of.get(definition.name, BENCH) for definition in manager.process_definitions
-        }
-        process_names = self._resolve(names, running)
-        manager.restart_processes(process_names)
-        return process_names
+        definitions = self._resolve(names, manager.process_definitions)
+        manager.restart_processes(definitions)
+        return [definition.name for definition in definitions]
 
     def disable(self, names: list[str]) -> list[str]:
         """Stop app processes and keep them off across restarts, updates and installs."""
-        process_names = self._resolve(names, self._declared_apps())
+        disabled = [definition.name for definition in self._resolve(names, self._declared_definitions())]
         config = self.bench.config.processes
-        config.disabled = sorted(set(config.disabled) | set(process_names))
+        config.disabled = sorted(set(config.disabled) | set(disabled))
         self.bench.config.write(self.bench.path)
         self.apply()
-        return process_names
+        return disabled
 
     def enable(self, names: list[str]) -> list[str]:
         """Undo disable. The process starts again if a site uses its app."""
-        process_names = self._resolve(names, self._declared_apps())
+        enabled = [definition.name for definition in self._resolve(names, self._declared_definitions())]
         config = self.bench.config.processes
-        config.disabled = [name for name in config.disabled if name not in process_names]
+        config.disabled = [name for name in config.disabled if name not in enabled]
         self.bench.config.write(self.bench.path)
         self.apply()
-        return process_names
+        return enabled
 
     def get_rows(self, app_name: str | None = None) -> list[ProcessRow]:
         """Each process with its state. A declared process that does not run says why."""
         manager = ProcessManager.for_bench(self.bench)
-        declared = self.get_declared(app_name)
-        app_of = {
-            definition.name: app.config.name
-            for app, definitions in declared.items()
-            for definition in definitions
-        }
-        runs = {definition.name for definition in self.get_app_definitions()} if declared else set()
+        app_definitions = self._declared_definitions(app_name)
+        runs = {definition.name for definition in self.get_app_definitions()} if app_definitions else set()
+        bench_definitions = [] if app_name else [d for d in manager.process_definitions if d.app is None]
+        states = manager.get_process_states([*bench_definitions, *(d for d in app_definitions if d.name in runs)])
 
-        bench_definitions = (
-            [] if app_name else [d for d in manager.process_definitions if d.name not in app_of]
-        )
-        app_definitions = [definition for definitions in declared.values() for definition in definitions]
-        names = [d.name for d in bench_definitions] + [d.name for d in app_definitions if d.name in runs]
-        states = manager.get_process_states(names)
-
-        rows = [
-            self._row(definition, BENCH, states.get(definition.name, STOPPED))
-            for definition in bench_definitions
-        ]
-        for definition in app_definitions:
-            state = (
-                states.get(definition.name, STOPPED)
-                if definition.name in runs
-                else self._idle_state(definition.name)
-            )
-            rows.append(self._row(definition, app_of[definition.name], state))
+        rows = []
+        for definition in [*bench_definitions, *app_definitions]:
+            is_idle = definition.app is not None and definition.name not in runs
+            state = self._idle_state(definition.name) if is_idle else states.get(definition.name, STOPPED)
+            rows.append(ProcessRow(definition.name, definition.app or BENCH, state, shlex.join(definition.argv)))
         return rows
 
     def _idle_state(self, name: str) -> ProcessState:
@@ -147,26 +127,17 @@ class BenchProcesses:
             return ProcessState("disabled")
         return ProcessState("no site uses the app")
 
-    @staticmethod
-    def _row(definition: "ProcessDefinition", app: str, state: ProcessState) -> ProcessRow:
-        return ProcessRow(definition.name, app, state, shlex.join(definition.argv))
-
-    def _declared_apps(self) -> dict[str, str]:
-        """Each declared app process name, mapped to its app."""
-        return {
-            definition.name: app.config.name
-            for app, definitions in self.get_declared().items()
-            for definition in definitions
-        }
+    def _declared_definitions(self, app_name: str | None = None) -> list["ProcessDefinition"]:
+        return [definition for definitions in self.get_declared(app_name).values() for definition in definitions]
 
     @staticmethod
-    def _resolve(names: list[str], processes: dict[str, str]) -> list[str]:
-        """Process names from `names`, where an app name stands for each of its processes."""
-        resolved: list[str] = []
+    def _resolve(names: list[str], definitions: list["ProcessDefinition"]) -> list["ProcessDefinition"]:
+        """The definitions `names` select, where an app name stands for each of its processes."""
+        resolved: list[ProcessDefinition] = []
         for name in names:
-            matches = [process for process, app in processes.items() if name in (process, app)]
+            matches = [d for d in definitions if name in (d.name, d.app or BENCH)]
             if not matches:
-                known = ", ".join(sorted(processes)) or "none"
+                known = ", ".join(sorted(d.name for d in definitions)) or "none"
                 raise BenchError(f"No process or app named '{name}'. Processes: {known}.")
             resolved += [match for match in matches if match not in resolved]
         return resolved

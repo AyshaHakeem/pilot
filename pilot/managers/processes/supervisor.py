@@ -61,9 +61,15 @@ class SupervisorRenderer(ServiceRenderer):
         )
 
     def render_supervisord_conf(self, defs: list[ProcessDefinition], sock, pid) -> str:
-        workload = [pd for pd in defs if pd.name != "admin"]
+        workload = [pd for pd in defs if pd.name != "admin" and pd.app is None]
         admin = [pd for pd in defs if pd.name == "admin"]
-        admin_group = f"[group:{self.bench_name}-admin]\nprograms={self._csv(admin)}\n\n" if admin else ""
+        # Apps get their own group: `update` restarts every program of a group whose list changed.
+        apps = [pd for pd in defs if pd.app is not None]
+        groups = (
+            f"[group:{self.bench_name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in workload)}\n\n"
+            + self._group(f"{self.bench_name}-admin", admin)
+            + self._group(f"{self.bench_name}-apps", apps)
+        )
         programs = "\n".join(self.render(pd) for pd in defs)
         include_glob = Path(sock).parent / "supervisor.d" / "*.conf"
         return (
@@ -83,17 +89,17 @@ class SupervisorRenderer(ServiceRenderer):
             f"serverurl=unix://{sock}\n\n"
             f"[include]\n"
             f"files={include_glob}\n\n"
-            f"[group:{self.bench_name}]\n"
-            f"programs={self._csv(workload)}\n\n"
-            f"{admin_group}"
+            f"{groups}"
             f"{programs}"
         )
 
     def get_program_name(self, name: str) -> str:
         return f"{self.bench_name}-{name.replace('_', '-')}"
 
-    def _csv(self, items: list[ProcessDefinition]) -> str:
-        return ",".join(self.get_program_name(pd.name) for pd in items)
+    def _group(self, name: str, items: list[ProcessDefinition]) -> str:
+        if not items:
+            return ""
+        return f"[group:{name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in items)}\n\n"
 
 
 class SupervisorProcessManager(ManagedProcessManager):
@@ -127,6 +133,10 @@ class SupervisorProcessManager(ManagedProcessManager):
     @property
     def admin_group(self) -> str:
         return f"{self.bench.config.name}-admin"
+
+    @property
+    def apps_group(self) -> str:
+        return f"{self.bench.config.name}-apps"
 
     @override
     def write_config(self) -> None:
@@ -171,7 +181,7 @@ class SupervisorProcessManager(ManagedProcessManager):
         # stop/admin-restart are no-ops when the daemon is down to avoid supervisorctl errors.
         if (action == "stop" or (action == "restart" and role is UnitGroup.ADMIN)) and not self.is_alive():
             return
-        run_command([*self._supervisorctl(), action, self._target(role)])
+        run_command([*self._supervisorctl(), action, *self.get_targets(role)])
 
     @override
     def are_units_running(self, role: UnitGroup) -> bool:
@@ -186,14 +196,14 @@ class SupervisorProcessManager(ManagedProcessManager):
         return "RUNNING" in result.stdout
 
     @override
-    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
+    def get_process_states(self, definitions: list[ProcessDefinition]) -> dict[str, ProcessState]:
         if not self.is_alive():
             return {}
         programs = {}
-        for name in names:
-            group, _, program = self._program(name).partition(":")
+        for definition in definitions:
+            group, _, program = self._program(definition).partition(":")
             # supervisorctl prints a program alone when its group has the same name, as admin does.
-            programs[program if group == program else f"{group}:{program}"] = name
+            programs[program if group == program else f"{group}:{program}"] = definition.name
         result = subprocess.run([*self._supervisorctl(), "status", *programs], capture_output=True, text=True)
         states = {}
         for line in result.stdout.splitlines():
@@ -204,12 +214,16 @@ class SupervisorProcessManager(ManagedProcessManager):
         return states
 
     @override
-    def restart_processes(self, names: list[str]) -> None:
-        run_command([*self._supervisorctl(), "restart", *(self._program(name) for name in names)])
+    def restart_processes(self, definitions: list[ProcessDefinition]) -> None:
+        run_command([*self._supervisorctl(), "restart", *(self._program(definition) for definition in definitions)])
 
-    def _program(self, name: str) -> str:
-        group = self.admin_group if name == "admin" else self.workload_group
-        return f"{group}:{SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(name)}"
+    def _program(self, definition: ProcessDefinition) -> str:
+        if definition.name == "admin":
+            group = self.admin_group
+        else:
+            group = self.apps_group if definition.app else self.workload_group
+        program = SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(definition.name)
+        return f"{group}:{program}"
 
     def is_configured(self) -> bool:
         return self.supervisor_conf_path.exists()
@@ -233,9 +247,13 @@ class SupervisorProcessManager(ManagedProcessManager):
     def _supervisorctl(self) -> list[str]:
         return ["supervisorctl", "-c", str(self.supervisor_conf_path)]
 
-    def _target(self, role: UnitGroup) -> str:
+    def get_targets(self, role: UnitGroup) -> list[str]:
         if role is UnitGroup.ADMIN:
-            return f"{self.admin_group}:*"
+            return [f"{self.admin_group}:*"]
         if role is UnitGroup.WEB:
-            return f"{self.bench.config.name}:{self.bench.config.name}-web"
-        return f"{self.workload_group}:*"
+            return [f"{self.bench.config.name}:{self.bench.config.name}-web"]
+        targets = [f"{self.workload_group}:*"]
+        # supervisorctl rejects a group it does not have, and the apps group exists only while one runs.
+        if f"[group:{self.apps_group}]" in self.supervisor_conf_path.read_text():
+            targets.append(f"{self.apps_group}:*")
+        return targets

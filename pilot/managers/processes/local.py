@@ -202,15 +202,15 @@ class ProcessManager:
     def is_admin_running(self) -> bool:
         return _tcp_port_open(self.bench.config.admin.port)
 
-    def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
+    def get_process_states(self, definitions: list[ProcessDefinition]) -> dict[str, ProcessState]:
         """Read from the pid files the dev runner writes for each process."""
         states = {}
-        for name in names:
-            pid = _live_pid(self.bench.pids_path / f"{name}.pid")
-            states[name] = ProcessState("running", pid) if pid else ProcessState("stopped")
+        for definition in definitions:
+            pid = _live_pid(self.bench.pids_path / f"{definition.name}.pid")
+            states[definition.name] = ProcessState("running", pid) if pid else ProcessState("stopped")
         return states
 
-    def restart_processes(self, names: list[str]) -> None:
+    def restart_processes(self, definitions: list[ProcessDefinition]) -> None:
         raise BenchError("Restarting one process needs a production bench; restart `pilot start` instead.")
 
     def reload_workers(self, web_only: bool = False) -> None:

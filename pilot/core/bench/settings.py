@@ -274,13 +274,13 @@ def restart_running_workload(bench: "Bench") -> bool:
 
     manager = ProcessManager.detect_running(bench)
     if isinstance(manager, SupervisorProcessManager):
-        return _restart_supervisor(manager, bench.config.name)
+        return _restart_supervisor(manager)
     if isinstance(manager, SystemdProcessManager):
         return _restart_systemd(manager)
     return False
 
 
-def _restart_supervisor(manager, bench_name: str) -> bool:
+def _restart_supervisor(manager) -> bool:
     if not manager.is_alive():
         return False
     subprocess.run(
@@ -295,11 +295,10 @@ def _restart_supervisor(manager, bench_name: str) -> bool:
         timeout=10,
         check=True,
     )
-    programs = _non_admin_supervisor_programs(manager.supervisor_conf_path, bench_name)
-    if not programs:
-        return False
+    from pilot.managers.processes.base import UnitGroup
+
     subprocess.run(
-        [*manager._supervisorctl(), "restart", *programs],
+        [*manager._supervisorctl(), "restart", *manager.get_targets(UnitGroup.WORKLOAD)],
         capture_output=True,
         text=True,
         timeout=30,
@@ -335,18 +334,3 @@ def _restart_systemd(manager) -> bool:
         check=True,
     )
     return True
-
-
-def _non_admin_supervisor_programs(conf: Path, bench_name: str) -> list[str]:
-    result = subprocess.run(
-        ["supervisorctl", "-c", str(conf), "status", f"{bench_name}:*"],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=True,
-    )
-    return [
-        line.split()[0]
-        for line in result.stdout.splitlines()
-        if line.strip() and not line.split()[0].endswith("-admin")
-    ]
