@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import os
+import shlex
 import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
-from pilot.managers.processes.definitions import ProcessDefinition
+import pytest
+
+from pilot.exceptions import BenchError
+from pilot.managers.processes.definitions import ProcessDefinition, check_unique_names
 from pilot.managers.processes.supervisor import SupervisorRenderer
 from pilot.managers.processes.systemd_render import SystemdRenderer
 
@@ -46,7 +50,7 @@ def test_supervisor_wraps_hooks_and_escapes_percent() -> None:
     )
 
     assert "command=sh -c '/bin/install.sh || exit; exec /bin/stalwart --rate=100%%'\n" in program
-    assert 'environment=MESSAGE="\\"50%%\\""\n' in program
+    assert "environment=MESSAGE='\"50%%\"'\n" in program
     assert "autorestart=unexpected\n" in program
 
 
@@ -130,3 +134,31 @@ def test_stop_during_pre_run_skips_the_process(tmp_path: Path) -> None:
     assert wrapper.wait(timeout=5) == 0
     assert not started.exists()
     assert (tmp_path / "cleaned").exists()
+
+
+def test_supervisor_keeps_a_semicolon_or_hash_after_whitespace(tmp_path: Path) -> None:
+    """supervisord reads ` ;` and ` #` as a comment, even inside quotes."""
+    program = SupervisorRenderer("bench", Path("/tmp")).render(
+        _definition(argv=["sh", "-c", "echo one ; echo two #three"])
+    )
+
+    command = program.split("command=", 1)[1].split("\n", 1)[0]
+    assert command == "sh -c 'echo one '\\;' echo two '\\#'three'"
+    assert shlex.split(command) == ["sh", "-c", "echo one ; echo two #three"]
+
+
+@pytest.mark.parametrize("value", ["a ;b", "say \"it's\""])
+def test_supervisor_rejects_an_env_value_it_cannot_hold(value) -> None:
+    with pytest.raises(BenchError, match="Supervisor cannot hold the value of MESSAGE"):
+        SupervisorRenderer("bench", Path("/tmp")).render(_definition(env={"MESSAGE": value}))
+
+
+def test_names_that_supervisor_would_merge_are_rejected() -> None:
+    definitions = [
+        ProcessDefinition(name="redis_cache", argv=["redis-server"], log_file=Path("/tmp/x.log")),
+        _definition(),
+        ProcessDefinition(name="redis-cache", argv=["/bin/cache"], log_file=Path("/tmp/x.log"), app="redis"),
+    ]
+
+    with pytest.raises(BenchError, match="Process 'redis-cache' of app 'redis' has the same name as 'redis_cache'"):
+        check_unique_names(definitions)

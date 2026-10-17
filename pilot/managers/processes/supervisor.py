@@ -33,6 +33,24 @@ def is_redis(pd: ProcessDefinition) -> bool:
     return pd.app is None and pd.name.startswith("redis")
 
 
+# supervisord reads a `;` or `#` after whitespace as the start of a comment, quoted or not.
+_COMMENT = re.compile(r"(?<=\s)([;#])")
+
+
+def _command(argv: list[str]) -> str:
+    # shlex quotes each argument holding `;` or `#`, so `'\;'` steps out of the quotes for it.
+    # supervisord also expands %(name)s in every value.
+    return _COMMENT.sub(r"'\\\1'", shlex.join(argv)).replace("%", "%%")
+
+
+def _env_value(name: str, key: str, value: str) -> str:
+    """supervisord's environment parser takes either quote but no escape inside one."""
+    if ('"' in value and "'" in value) or _COMMENT.search(value):
+        raise BenchError(f"Supervisor cannot hold the value of {key} for process '{name}'.")
+    quote = "'" if '"' in value else '"'
+    return f"{quote}{value.replace('%', '%%')}{quote}"
+
+
 class SupervisorRenderer(ServiceRenderer):
     """Builds the bench's supervisord.conf and per-program blocks."""
 
@@ -43,16 +61,12 @@ class SupervisorRenderer(ServiceRenderer):
     @override
     def render(self, pd: ProcessDefinition) -> str:
         directory = f"directory={pd.working_dir}\n" if pd.working_dir else ""
-        pairs = []
-        for key, value in pd.env.items():
-            value = value.replace("%", "%%").replace('"', '\\"')
-            pairs.append(f'{key}="{value}"')
+        pairs = [f"{key}={_env_value(pd.name, key, value)}" for key, value in pd.env.items()]
         env = f"environment={','.join(pairs)}\n" if pairs else ""
         stop = f"stopwaitsecs={pd.stop_timeout}\n" if pd.stop_timeout is not None else ""
         return (
             f"[program:{self.get_program_name(pd.name)}]\n"
-            # supervisord expands %(name)s in every value, quoted or not.
-            f"command={shlex.join(pd.argv_with_hooks).replace('%', '%%')}\n"
+            f"command={_command(pd.argv_with_hooks)}\n"
             f"{env}{directory}"
             f"autostart=true\n"
             # unexpected: restart on a non-zero exit only, like systemd Restart=on-failure.

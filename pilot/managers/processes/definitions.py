@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pilot.exceptions import BenchError
 from pilot.managers.environment import AdminEnvManager
 from pilot.utils import cli_root
 
@@ -62,6 +63,16 @@ class ProcessDefinition:
         return ["sh", "-c", script]
 
 
+def check_unique_names(definitions: list[ProcessDefinition]) -> None:
+    """Supervisor writes `_` as `-`, so two names that differ only there would share a program."""
+    seen: dict[str, ProcessDefinition] = {}
+    for definition in definitions:
+        other = seen.setdefault(definition.name.replace("_", "-"), definition)
+        if other is not definition:
+            owner = f"app '{definition.app}'" if definition.app else "the bench"
+            raise BenchError(f"Process '{definition.name}' of {owner} has the same name as '{other.name}'.")
+
+
 class ProcessDefinitionBuilder:
     def __init__(self, bench: "Bench", python: Path, watch_admin_js: bool) -> None:
         self.bench = bench
@@ -97,6 +108,7 @@ class ProcessDefinitionBuilder:
         defs.append(self.redis_definition("redis_cache", "redis_cache.conf"))
         defs.append(self.redis_definition("redis_queue", "redis_queue.conf"))
         defs.extend(self.bench.processes.get_app_definitions())
+        check_unique_names(defs)
         return defs
 
     def process_definitions(self) -> list[ProcessDefinition]:
