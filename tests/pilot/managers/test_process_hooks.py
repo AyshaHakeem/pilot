@@ -111,3 +111,22 @@ def test_systemd_web_listens_through_a_socket_a_restart_leaves_open() -> None:
     assert "ListenStream=127.0.0.1:8000\n" in socket
     assert "StopPropagatedFrom=bench.target\n" in socket  # pilot stop stops it; a restart does not
     assert "PartOf" not in socket
+
+
+def test_stop_during_pre_run_skips_the_process(tmp_path: Path) -> None:
+    started = tmp_path / "started"
+    definition = _definition(
+        argv=["touch", str(started)],
+        pre_run=["sh", "-c", f"trap 'exit 0' TERM; touch {tmp_path}/pre; sleep 5 & wait"],
+        post_run=["touch", str(tmp_path / "cleaned")],
+    )
+
+    wrapper = subprocess.Popen(definition.argv_with_hooks, start_new_session=True)
+    deadline = time.monotonic() + 5
+    while not (tmp_path / "pre").exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    os.killpg(wrapper.pid, signal.SIGTERM)
+
+    assert wrapper.wait(timeout=5) == 0
+    assert not started.exists()
+    assert (tmp_path / "cleaned").exists()

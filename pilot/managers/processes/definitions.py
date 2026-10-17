@@ -45,7 +45,8 @@ class ProcessDefinition:
             return ["sh", "-c", f"{shlex.join(self.pre_run)} || exit; exec {shlex.join(self.argv)}"]
 
         # One line: supervisord's command= cannot hold a newline.
-        # A trapped TERM ends the first wait early, so wait again before post_run.
+        # A TERM during pre_run skips the process; one during it ends the first wait early,
+        # so wait again before post_run.
         pre_run = f"{shlex.join(self.pre_run)} || status=$?; " if self.pre_run else ""
         run = (
             f"{shlex.join(self.argv)} & child=$!; "
@@ -53,8 +54,9 @@ class ProcessDefinition:
             'kill -0 "$child" 2>/dev/null && { wait "$child"; status=$?; }'
         )
         script = (
-            "status=0; trap 'kill -TERM \"$child\" 2>/dev/null' TERM; "
-            f'{pre_run}if [ "$status" -eq 0 ]; then {run}; fi; '
+            "status=0; stopped=0; child=; "
+            "trap 'stopped=1; [ -n \"$child\" ] && kill -TERM \"$child\" 2>/dev/null' TERM; "
+            f'{pre_run}if [ "$status" -eq 0 ] && [ "$stopped" -eq 0 ]; then {run}; fi; '
             f'{shlex.join(self.post_run)}; exit "$status"'
         )
         return ["sh", "-c", script]
