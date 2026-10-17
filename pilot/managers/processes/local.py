@@ -263,14 +263,6 @@ class ProcessManager:
     def _color(self, name: str) -> str:
         return self._colors.setdefault(name, _COLORS[len(self._colors) % len(_COLORS)])
 
-    def _spawn_all(self, defs: list[ProcessDefinition]) -> None:
-        try:
-            for pd in defs:
-                self._spawn(pd)
-        except OSError:
-            self._stop_all()
-            raise
-
     def _run_processes(self, defs: list[ProcessDefinition]) -> None:
         original_sigterm = signal.getsignal(signal.SIGTERM)
         original_sigint = signal.getsignal(signal.SIGINT)
@@ -283,28 +275,31 @@ class ProcessManager:
         signal.signal(signal.SIGINT, _stop)
 
         self.reload_request_file.unlink(missing_ok=True)
-        self._spawn_all(defs)
-
         defs_by_name = {pd.name: pd for pd in defs}
         is_critical = {pd.name: pd.critical for pd in defs}
-        while not self._stopping:
-            for name, proc in list(self._procs.items()):
-                if proc.poll() is None:
-                    continue
-                if is_critical[name]:
-                    print(f"[{name}] exited with code {proc.returncode}", file=sys.stderr)
-                    self._stopping = True
-                    break
-                print(f"[{name}] exited with code {proc.returncode}; continuing without it", file=sys.stderr)
-                del self._procs[name]
-                (self.bench.pids_path / f"{name}.pid").unlink(missing_ok=True)
-            if not self._stopping:
-                self._apply_reload_request(defs_by_name)
-                time.sleep(0.5)
+        # finally also stops what already started when a critical process cannot launch.
+        try:
+            for pd in defs:
+                self._spawn(pd)
 
-        self._stop_all()
-        signal.signal(signal.SIGTERM, original_sigterm)
-        signal.signal(signal.SIGINT, original_sigint)
+            while not self._stopping:
+                for name, proc in list(self._procs.items()):
+                    if proc.poll() is None:
+                        continue
+                    if is_critical[name]:
+                        print(f"[{name}] exited with code {proc.returncode}", file=sys.stderr)
+                        self._stopping = True
+                        break
+                    print(f"[{name}] exited with code {proc.returncode}; continuing without it", file=sys.stderr)
+                    del self._procs[name]
+                    (self.bench.pids_path / f"{name}.pid").unlink(missing_ok=True)
+                if not self._stopping:
+                    self._apply_reload_request(defs_by_name)
+                    time.sleep(0.5)
+        finally:
+            self._stop_all()
+            signal.signal(signal.SIGTERM, original_sigterm)
+            signal.signal(signal.SIGINT, original_sigint)
 
     def _stream(self, name: str, proc: subprocess.Popen, color: str) -> None:
         assert proc.stdout is not None

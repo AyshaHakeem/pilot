@@ -36,7 +36,7 @@ class ProcessDefinition:
         if not self.post_run:
             return ["sh", "-c", f"{shlex.join(self.pre_run)} || exit; exec {shlex.join(self.argv)}"]
 
-        # One physical line: supervisord rejects newlines in command=.
+        # One line: supervisord's command= cannot hold a newline.
         # A trapped TERM ends the first wait early, so wait again before post_run.
         pre_run = f"{shlex.join(self.pre_run)} || status=$?; " if self.pre_run else ""
         run = (

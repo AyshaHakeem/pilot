@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -228,8 +229,10 @@ def test_failed_critical_launch_stops_the_running_processes(tmp_path: Path, monk
     missing = ProcessDefinition(
         name="x", argv=["true"], log_file=Path("/dev/null"), working_dir=tmp_path / "gone"
     )
+    sigterm = signal.getsignal(signal.SIGTERM)
 
     with pytest.raises(OSError):
-        manager._spawn_all([missing])
+        manager._run_processes([missing])
 
     assert running.poll() is not None
+    assert signal.getsignal(signal.SIGTERM) is sigterm

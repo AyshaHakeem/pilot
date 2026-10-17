@@ -22,7 +22,7 @@ Each process needs `command` or `frappe_command`. The process runs as `<app>-<na
 | `command` | list of strings | one of the two | Executable and arguments. Never a shell string. |
 | `frappe_command` | list of strings | one of the two | A Frappe CLI command, used instead of `command`. |
 | `pre_run` | list of strings | none | Runs before each start. |
-| `post_run` | list of strings | none | Runs after each stop. |
+| `post_run` | list of strings | none | Runs after each stop, and after a failed `pre_run`. |
 | `working_dir` | string | app directory | Directory the process runs in. |
 | `restart_on_failure` | bool | `true` | Restart after a non-zero exit. |
 | `stop_timeout` | int | manager default | Seconds to wait for a graceful stop. |
@@ -47,8 +47,8 @@ frappe_command = ["flow-server", "serve"]
 
 `pre_run` runs on every start, so keep it idempotent. A shell line needs an explicit shell: `pre_run = ["bash", "-c", "test -x ./stalwart || ./scripts/install.sh"]`.
 
-systemd runs the hooks as `ExecStartPre` and `ExecStopPost`. Supervisor and the dev runner run a process with hooks inside `sh`, which runs `post_run` after the process exits and keeps its exit code.
+systemd runs the hooks as `ExecStartPre` and `ExecStopPost`. Supervisor and the dev runner run a process with hooks inside `sh`, which runs `post_run` after the process exits and keeps the exit code of the process, or of `pre_run` when it fails.
 
 ## Failures
 
-A malformed declaration stops the bench from writing its process configuration, so the running processes stay as they are until the app is fixed. The dev runner does not restart a declared process, and a declared process that exits does not stop the bench.
+A malformed declaration stops the bench from writing its process configuration, so the running processes stay as they are until the app is fixed. The dev runner does not restart a declared process, and a declared process that exits or cannot start does not stop the bench.
