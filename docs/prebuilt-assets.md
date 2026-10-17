@@ -90,6 +90,7 @@ Set inputs under `with:` in the job.
 
 | Input | Default | Use |
 |---|---|---|
+| `ref` | The pushed commit | The commit to build. Set this input when the workflow makes a commit after the push and must build that commit, for example a release workflow that commits a version bump. |
 | `keep-untagged` | `30` | The number of newest untagged commits that keep their assets. At least 1. |
 | `keep-tagged` | `0` | The number of newest tagged commits that keep their assets. `0` keeps all of them. |
 | `frappe-branch` | From the branch | The Frappe branch to build against. A `version-NN` or `version-NN-hotfix` branch builds against `version-NN`, and all other branches build against `develop`. Set this input when the branch name does not tell the Frappe branch, for example for a `main` branch that benches run on a stable Frappe: `frappe-branch: ${{ github.ref_name == 'main' && 'version-16' || 'develop' }}`. |
