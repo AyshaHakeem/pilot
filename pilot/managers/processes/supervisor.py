@@ -231,9 +231,10 @@ class SupervisorProcessManager(ManagedProcessManager):
     def get_process_states(self, definitions: list[ProcessDefinition]) -> dict[str, ProcessState]:
         if not self.is_alive():
             return {}
+        loaded = self.loaded_programs
         programs = {}
         for definition in definitions:
-            group, _, program = self._program(definition).partition(":")
+            group, _, program = self._program(definition, loaded).partition(":")
             # supervisorctl prints a program alone when its group has the same name, as admin does.
             programs[program if group == program else f"{group}:{program}"] = definition.name
         result = subprocess.run([*self._supervisorctl(), "status", *programs], capture_output=True, text=True)
@@ -247,16 +248,21 @@ class SupervisorProcessManager(ManagedProcessManager):
 
     @override
     def restart_processes(self, definitions: list[ProcessDefinition]) -> None:
-        run_command([*self._supervisorctl(), "restart", *(self._program(definition) for definition in definitions)])
+        loaded = self.loaded_programs
+        run_command([*self._supervisorctl(), "restart", *(self._program(definition, loaded) for definition in definitions)])
 
-    def _program(self, definition: ProcessDefinition) -> str:
+    def _program(self, definition: ProcessDefinition, loaded: dict[str, str]) -> str:
+        """`group:program` as supervisord has it loaded. A bench from before the redis group keeps
+        redis in the workload group until its config is applied."""
+        program = SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(definition.name)
+        if program in loaded:
+            return f"{loaded[program]}:{program}"
         if definition.name == "admin":
             group = self.admin_group
         elif definition.app:
             group = self.apps_group
         else:
             group = self.redis_group if is_redis(definition) else self.workload_group
-        program = SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(definition.name)
         return f"{group}:{program}"
 
     def is_configured(self) -> bool:
@@ -301,6 +307,16 @@ class SupervisorProcessManager(ManagedProcessManager):
     @property
     def loaded_groups(self) -> set[str]:
         """Groups the running supervisord has loaded. A config written since loads on update."""
+        return set(self.loaded_programs.values())
+
+    @property
+    def loaded_programs(self) -> dict[str, str]:
+        """The group of each program the running supervisord has loaded, by program name."""
         result = subprocess.run([*self._supervisorctl(), "avail"], capture_output=True, text=True)
-        # A program alone in a group of its name prints without the group, as admin does.
-        return {line.split()[0].partition(":")[0] for line in result.stdout.splitlines() if line.strip()}
+        programs = {}
+        for line in result.stdout.splitlines():
+            if line.strip():
+                group, _, program = line.split()[0].rpartition(":")
+                # A program alone in a group of its name prints without the group, as admin does.
+                programs[program] = group or program
+        return programs

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -168,6 +168,7 @@ def test_broken_declaration_fails_the_switch_before_the_old_manager_stops(bench)
         patch.object(ProductionSetup, "_installed_manager", return_value="supervisor"),
         patch.object(ProductionSetup, "_migrate_from") as migrate,
         patch.object(bench.config, "validate"),
+        patch.object(BenchProcesses, "active_apps", new_callable=PropertyMock, return_value={"mail"}),
         pytest.raises(AppProcessError),
     ):
         setup.run()
@@ -201,3 +202,17 @@ def test_settings_restart_reopens_the_web_socket_on_its_new_port(bench) -> None:
         assert _restart_systemd(manager)
 
     assert calls == ["link", "daemon-reload", "reopen", "restart"]
+
+
+def test_supervisor_finds_redis_in_the_workload_group_of_an_old_layout(bench) -> None:
+    manager = SupervisorProcessManager(bench)
+    avail = "test-bench:test-bench-web  in use  auto  999:999\ntest-bench:test-bench-redis-cache  in use  auto  999:999\n"
+    redis = MagicMock(app=None)
+    redis.name = "redis_cache"
+    with (
+        patch.object(supervisor_module.subprocess, "run", return_value=MagicMock(stdout=avail)),
+        patch.object(supervisor_module, "run_command") as run,
+    ):
+        manager.restart_processes([redis])
+
+    assert run.call_args.args[0][-1] == "test-bench:test-bench-redis-cache"

@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from pilot.config import BenchConfig
+from pilot.core.app.processes import AppProcessError
 from pilot.core.bench.processes import BenchProcesses
 from pilot.core.site.apps import SiteApps
 from pilot.exceptions import BenchError
@@ -143,3 +144,15 @@ def test_an_app_change_applies_the_processes_of_its_dependencies(bench, action) 
         getattr(site, action)(bench.app("crm"))
 
     apply.assert_called_once_with()
+
+
+def test_a_broken_declaration_blocks_only_the_apps_sites_use(bench, monkeypatch) -> None:
+    (bench.apps_path / "crm" / "pyproject.toml").write_text("[tool.pilot.processes.desk]\ncommand = 1\n")
+
+    assert {d.name for d in bench.processes.get_app_definitions()} == {"mail-stalwart", "mail-relay"}
+    # Counted as declaring processes, so a removal goes ahead and the apply after it reports the error.
+    assert bench.processes.has_declarations(["crm"])
+
+    monkeypatch.setattr(BenchProcesses, "active_apps", property(lambda self: {"mail", "crm"}))
+    with pytest.raises(AppProcessError, match="App 'crm'"):
+        bench.processes.get_app_definitions()

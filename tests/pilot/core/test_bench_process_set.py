@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
 from pilot.core.app.processes import AppProcessError
+from pilot.core.bench.processes import BenchProcesses
 from pilot.core.bench.production import BenchProduction
 from pilot.core.bench.settings import BenchSettings, restart_trigger_values
 from pilot.exceptions import CommandError
@@ -39,6 +40,7 @@ def test_a_broken_app_declaration_fails_the_rebuild_before_the_bench_stops(tmp_p
 
     with (
         patch("pilot.managers.processes.local.ProcessManager.for_bench", return_value=manager),
+        patch.object(BenchProcesses, "active_apps", new_callable=PropertyMock, return_value={"mail"}),
         pytest.raises(AppProcessError),
     ):
         BenchProduction(bench).rebuild_process_set(on_progress=lambda message: None)

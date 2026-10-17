@@ -6,6 +6,7 @@ from itertools import chain
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from pilot.core.app.processes import AppProcessError
 from pilot.exceptions import BenchError
 from pilot.managers.processes.definitions import ProcessState
 from pilot.managers.processes.local import ProcessManager
@@ -49,15 +50,32 @@ class BenchProcesses:
         return {app: definitions for app, definitions in declared.items() if definitions}
 
     def get_app_definitions(self) -> list["ProcessDefinition"]:
-        """The app processes that run: declared by an app a site uses, and not disabled."""
-        return self.get_running(self.get_declared())
-
-    def get_running(self, declared: dict["App", list["ProcessDefinition"]]) -> list["ProcessDefinition"]:
-        """Those of `declared` that run."""
-        if not declared:
+        """The app processes that run: declared by an app a site uses, and not disabled.
+        A broken declaration fails only when a site uses its app, so removing that app still works."""
+        declared: dict[App, list[ProcessDefinition]] = {}
+        broken: dict[App, AppProcessError] = {}
+        for app in self.bench.apps():
+            try:
+                declared[app] = app.processes.get_definitions()
+            except AppProcessError as error:
+                broken[app] = error
+        if not broken and not any(declared.values()):
             return []
 
         active = self.active_apps
+        for app, error in broken.items():
+            if app.module_name in active:
+                raise error
+        return self.get_running(declared, active)
+
+    def get_running(
+        self, declared: dict["App", list["ProcessDefinition"]], active: set[str] | None = None
+    ) -> list["ProcessDefinition"]:
+        """Those of `declared` that run. `active` defaults to the apps the sites use."""
+        if not any(declared.values()):
+            return []
+
+        active = self.active_apps if active is None else active
         disabled = set(self.bench.config.processes.disabled)
         return [
             definition
@@ -68,10 +86,17 @@ class BenchProcesses:
         ]
 
     def has_declarations(self, app_names: "Iterable[str]") -> bool:
-        """Whether any of these apps, by app or module name, declares a process. Parses only those apps."""
+        """Whether any of these apps, by app or module name, declares a process. Parses only those apps.
+        A broken declaration counts, so applying the process set reports it instead of blocking a removal."""
         names = set(app_names)
         apps = [app for app in self.bench.apps() if app.config.name in names or app.module_name in names]
-        return any(app.processes.get_definitions() for app in apps)
+        for app in apps:
+            try:
+                if app.processes.get_definitions():
+                    return True
+            except AppProcessError:
+                return True
+        return False
 
     @property
     def realtime_folders(self) -> list[Path]:
