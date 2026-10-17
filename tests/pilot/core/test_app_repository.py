@@ -344,8 +344,10 @@ def test_has_migrate_changes_sees_a_doctype_moved_out_of_place(tmp_path: Path) -
     assert _repository(path).has_migrate_changes(pin) is True
 
 
-def _remote_with_three_commits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> tuple[Path, list[str]]:
-    """A remote whose third commit is dated after the first two, and its commits oldest first."""
+def _remote_with_three_commits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tip_date: str = "2090-01-01T00:00:00"
+) -> tuple[Path, list[str]]:
+    """A remote whose third commit is committed at `tip_date`, and its commits oldest first."""
     _set_dev_install(monkeypatch, False)
     remote, _ = _repo_with_two_commits(tmp_path / "remote")
     (remote / "file").write_text("third")
@@ -353,7 +355,7 @@ def _remote_with_three_commits(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
         ["git", "-C", str(remote), "commit", "-qam", "third"],
         check=True,
         capture_output=True,
-        env={**os.environ, "GIT_COMMITTER_DATE": "2090-01-01T00:00:00"},
+        env={**os.environ, "GIT_COMMITTER_DATE": tip_date},
     )
     return remote, GitRepo(remote)._run("rev-list", "--reverse", "HEAD").stdout.split()
 
@@ -398,3 +400,17 @@ def test_a_shallow_clone_decides_a_same_version_update_by_commit_date(
 
     assert behind._is_ahead_of_installed(tip, "17.0.0-dev") is True
     assert ahead._is_ahead_of_installed(first, "17.0.0-dev") is False
+
+
+def test_a_shallow_clone_does_not_offer_a_same_version_commit_from_the_same_time(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without history or a later date, nothing proves the release is newer."""
+    monkeypatch.setenv("GIT_COMMITTER_DATE", "2030-01-01T00:00:00")
+    remote, (first, _, tip) = _remote_with_three_commits(
+        tmp_path, monkeypatch, tip_date="2030-01-01T00:00:00"
+    )
+    repository = _shallow_clone_at(remote, first, tmp_path / "app")
+    repository.app.installed_version = "17.0.0.dev0"
+
+    assert repository._is_ahead_of_installed(tip, "17.0.0-dev") is False
