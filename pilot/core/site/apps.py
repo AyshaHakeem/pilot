@@ -70,8 +70,9 @@ class SiteApps:
             self._clear_cache()
 
     def restore_installed_apps_copy(self) -> None:
-        """Frappe clears its installed apps cache before it commits an uninstall, so a process
-        that reads in between caches the old list, and Frappe copies it to site_config.json."""
+        """Match the installed_apps copy in site_config.json to the database. A restore leaves it
+        stale, and so can an uninstall: Frappe clears its installed apps cache before it commits,
+        so a process that reads in between caches the old list, and Frappe copies it here."""
         from pilot.core.site.config import query_installed_apps_setting_via_db, set_site_config_values
 
         if not (self.site.path / "site_config.json").exists():

@@ -171,10 +171,13 @@ def test_a_database_restore_applies_the_process_set(bench, parts, applies) -> No
 def test_a_site_made_from_a_backup_applies_the_process_set(bench) -> None:
     from pilot.core.site import Site, provision_from_backup
 
+    calls = []
     with (
         patch.object(Site, "provision", return_value=MagicMock()),
-        patch.object(BenchProcesses, "apply") as apply,
+        patch.object(SiteApps, "restore_installed_apps_copy", side_effect=lambda: calls.append("refresh")),
+        patch.object(BenchProcesses, "apply", side_effect=lambda: calls.append("apply")),
     ):
         provision_from_backup(bench, "site.local", "db.sql.gz", "admin")
 
-    apply.assert_called_once_with()
+    # The saved app list comes from the restored database first, or a new app's processes stay off.
+    assert calls == ["refresh", "apply"]
