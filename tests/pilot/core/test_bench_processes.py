@@ -117,10 +117,15 @@ def test_removing_a_handler_folder_counts_as_a_realtime_change(bench) -> None:
     bench.config_path.mkdir(parents=True, exist_ok=True)
     assert not bench.processes.is_realtime_changed_since(2000)
 
+    bench.processes.save_realtime_folders()
+
     (handlers / "handlers.js").unlink()
     handlers.rmdir()
 
+    # Until a reload saves the folders socketio restarted with, the removal still counts.
     assert bench.processes.is_realtime_changed_since(2000)
+    assert bench.processes.is_realtime_changed_since(2000)
+    bench.processes.save_realtime_folders()
     assert not bench.processes.is_realtime_changed_since(2000)
 
 

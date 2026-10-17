@@ -6,8 +6,11 @@ import contextlib
 from pathlib import Path
 from unittest.mock import MagicMock, PropertyMock, patch
 
+import pytest
+
 from pilot.config import AppConfig, BenchConfig, MariaDBConfig, RedisConfig, WorkerConfig, WorkerGroup
 from pilot.core.bench import Bench
+from pilot.exceptions import CommandError
 from pilot.managers.processes.systemd import _ADMIN_IDLE_TIMEOUT
 from pilot.managers.redis import RedisManager
 
@@ -692,7 +695,7 @@ class _FakeProcessManager:
 
         class _Impl(ManagedProcessManager):
             def __init__(self) -> None:
-                pass  # skip Bench wiring; the primitives below are pure recorders
+                self.bench = MagicMock()  # skip Bench wiring; the primitives below are pure recorders
 
             def write_config(self_impl) -> None:
                 fake.generated += 1
@@ -785,6 +788,22 @@ def test_supervised_reload_workers_restarts_socketio_when_realtime_changed() -> 
     fake.is_realtime_stale = True
     fake.manager.reload_workers()
     assert fake.calls == [("restart", ["web", "socketio", "worker_pool", "mail-stalwart"])]
+
+
+def test_reload_saves_realtime_folders_only_after_a_successful_restart() -> None:
+    fake = _FakeProcessManager()
+    fake.is_realtime_stale = True
+    fake.manager.reload_workers()
+    fake.manager.bench.processes.save_realtime_folders.assert_called_once_with()
+
+    failing = _FakeProcessManager()
+    failing.is_realtime_stale = True
+    with (
+        patch.object(type(failing.manager), "restart_processes", side_effect=CommandError("restart failed")),
+        pytest.raises(CommandError),
+    ):
+        failing.manager.reload_workers()
+    failing.manager.bench.processes.save_realtime_folders.assert_not_called()
 
 
 def test_supervised_reload_workers_noop_when_not_running() -> None:

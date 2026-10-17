@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from pilot.managers.processes.definitions import ProcessDefinition
 
 BENCH = "bench"
+REALTIME_FOLDERS = "realtime-folders.txt"
 STOPPED = ProcessState("stopped")
 
 
@@ -87,12 +88,16 @@ class BenchProcesses:
 
     def is_realtime_changed_since(self, started: float) -> bool:
         """Whether the code socketio loads changed after `started`. A removed folder leaves no mtime,
-        so the folders seen at the last check are saved and compared."""
+        so the folders saved after the last reload are compared too."""
         folders = "".join(f"{folder}\n" for folder in self.realtime_folders)
-        record = self.bench.config_path / "realtime-folders.txt"
+        record = self.bench.config_path / REALTIME_FOLDERS
         seen = record.read_text() if record.is_file() else folders
-        record.write_text(folders)
         return seen != folders or self.get_realtime_change_time() > started
+
+    def save_realtime_folders(self) -> None:
+        """Record the folders a running socketio has loaded, once a reload restarted it or found it current."""
+        folders = "".join(f"{folder}\n" for folder in self.realtime_folders)
+        (self.bench.config_path / REALTIME_FOLDERS).write_text(folders)
 
     def apply(self) -> None:
         """Write, link and start the production process set. Running processes keep running;
