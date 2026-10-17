@@ -8,6 +8,19 @@ from pilot.config.llm import LLMConfig
 from pilot.config.mail import MailConfig
 from pilot.core.alerts import check_mail_credentials
 
+_GROUP_TYPES: dict[str, type] = {
+    "bench": dict,
+    "lite_mode": dict,
+    "letsencrypt": dict,
+    "workers": list,
+    "firewall": dict,
+    "waf": dict,
+    "llm": dict,
+    "s3": dict,
+    "resource_limits": dict,
+    "mail": dict,
+}
+
 
 def _coerce_int(value):
     """Let config validation reject bad numeric input with a clean API error."""
@@ -24,6 +37,8 @@ class ConfigPatcher:
         self.mail = mail or MailConfig()
 
     def apply(self) -> str | None:
+        if error := self.get_group_type_error():
+            return error
         self._apply_bench()
         self._apply_lite_mode()
         self._apply_letsencrypt()
@@ -42,6 +57,13 @@ class ConfigPatcher:
             self.config.validate()
         except Exception as error:
             return str(error)
+        return None
+
+    def get_group_type_error(self) -> str | None:
+        for name, expected in _GROUP_TYPES.items():
+            value = self.data.get(name)
+            if value is not None and not isinstance(value, expected):
+                return f"{name} must be {'a list' if expected is list else 'an object'}."
         return None
 
     def _apply_bench(self) -> None:
