@@ -45,7 +45,7 @@ def test_supervisor_wraps_hooks_and_escapes_percent() -> None:
         )
     )
 
-    assert "command=sh -c '/bin/install.sh || exit\nexec /bin/stalwart --rate=100%%'\n" in program
+    assert "command=sh -c '/bin/install.sh || exit; exec /bin/stalwart --rate=100%%'\n" in program
     assert 'environment=MESSAGE="\\"50%%\\""\n' in program
     assert "autorestart=unexpected\n" in program
 
@@ -61,16 +61,18 @@ def test_post_run_waits_for_a_terminated_process(tmp_path: Path) -> None:
         sys.executable,
         "-c",
         "import os, signal, sys, time\n"
-        f"open({str(marker)!r}, 'w').close()\n"
         f"signal.signal(signal.SIGTERM, lambda *_: (time.sleep(0.5), os.remove({str(marker)!r}), sys.exit(0)))\n"
+        f"open({str(marker)!r}, 'w').close()\n"
         "time.sleep(60)",
     ]
     check = f"test -e {marker} && echo running > {tmp_path}/result || echo stopped > {tmp_path}/result"
     definition = _definition(argv=process, post_run=["sh", "-c", check])
 
     wrapper = subprocess.Popen(definition.argv_with_hooks, start_new_session=True)
-    while not marker.exists():
+    deadline = time.monotonic() + 5
+    while not marker.exists() and time.monotonic() < deadline:
         time.sleep(0.05)
+    assert marker.exists()
     os.killpg(wrapper.pid, signal.SIGTERM)
 
     assert wrapper.wait(timeout=5) == 0
@@ -82,3 +84,16 @@ def test_wrapper_keeps_the_process_exit_code(tmp_path: Path) -> None:
 
     assert subprocess.run(definition.argv_with_hooks).returncode == 7
     assert (tmp_path / "cleaned").exists()
+
+
+def test_post_run_runs_when_pre_run_fails(tmp_path: Path) -> None:
+    definition = _definition(pre_run=["sh", "-c", "exit 3"], post_run=["touch", str(tmp_path / "cleaned")])
+
+    assert subprocess.run(definition.argv_with_hooks).returncode == 3
+    assert (tmp_path / "cleaned").exists()
+
+
+def test_hooked_command_is_a_single_line() -> None:
+    definition = _definition(pre_run=["install.sh"], post_run=["cleanup.sh"])
+
+    assert "\n" not in definition.argv_with_hooks[2]

@@ -206,3 +206,30 @@ assert manager._procs["probe"].wait(timeout=5) == 0
     )
 
     assert output.read_text() == ""
+
+
+def test_spawn_skips_a_noncritical_process_that_cannot_launch(tmp_path: Path, monkeypatch) -> None:
+    manager = _manager(tmp_path, monkeypatch)
+    missing = ProcessDefinition(
+        name="app-x", argv=["true"], log_file=Path("/dev/null"), working_dir=tmp_path / "gone", critical=False
+    )
+
+    manager._spawn(missing)
+
+    assert "app-x" not in manager._procs
+
+
+def test_failed_critical_launch_stops_the_running_processes(tmp_path: Path, monkeypatch) -> None:
+    manager = _manager(tmp_path, monkeypatch)
+    running = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    manager._procs = {"web": running}
+    missing = ProcessDefinition(
+        name="x", argv=["true"], log_file=Path("/dev/null"), working_dir=tmp_path / "gone"
+    )
+
+    try:
+        manager._spawn_all([missing])
+    except OSError:
+        pass
+
+    assert running.poll() is not None

@@ -241,21 +241,35 @@ class ProcessManager:
                 os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
 
     def _spawn(self, pd: ProcessDefinition) -> None:
-        proc = subprocess.Popen(
-            pd.argv_with_hooks,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            preexec_fn=os.setsid,
-            cwd=str(pd.working_dir) if pd.working_dir else None,
-            env={**os.environ, **pd.env} if pd.env else None,
-        )
+        try:
+            proc = subprocess.Popen(
+                pd.argv_with_hooks,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                preexec_fn=os.setsid,
+                cwd=str(pd.working_dir) if pd.working_dir else None,
+                env={**os.environ, **pd.env} if pd.env else None,
+            )
+        except OSError as exc:
+            if pd.critical:
+                raise
+            print(f"[{pd.name}] failed to start: {exc}; continuing without it", file=sys.stderr)
+            return
         self._procs[pd.name] = proc
         (self.bench.pids_path / f"{pd.name}.pid").write_text(str(proc.pid))
         threading.Thread(target=self._stream, args=(pd.name, proc, self._color(pd.name)), daemon=True).start()
 
     def _color(self, name: str) -> str:
         return self._colors.setdefault(name, _COLORS[len(self._colors) % len(_COLORS)])
+
+    def _spawn_all(self, defs: list[ProcessDefinition]) -> None:
+        try:
+            for pd in defs:
+                self._spawn(pd)
+        except OSError:
+            self._stop_all()
+            raise
 
     def _run_processes(self, defs: list[ProcessDefinition]) -> None:
         original_sigterm = signal.getsignal(signal.SIGTERM)
@@ -269,8 +283,7 @@ class ProcessManager:
         signal.signal(signal.SIGINT, _stop)
 
         self.reload_request_file.unlink(missing_ok=True)
-        for pd in defs:
-            self._spawn(pd)
+        self._spawn_all(defs)
 
         defs_by_name = {pd.name: pd for pd in defs}
         is_critical = {pd.name: pd.critical for pd in defs}
