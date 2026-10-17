@@ -156,20 +156,30 @@ def test_switch_tears_down_the_running_manager_first(bench, running, expected) -
         assert ProductionSetup(bench)._installed_manager() == expected
 
 
-def test_broken_declaration_fails_the_switch_before_the_old_manager_stops(bench) -> None:
+@pytest.mark.parametrize(
+    ("target", "old", "declaration", "error"),
+    [
+        ("systemd", "supervisor", 'command = "server"\n', AppProcessError),
+        # systemd holds this value, supervisord cannot.
+        ("supervisor", "systemd", 'command = ["server"]\nenv = { MESSAGE = "it\'s \\"here\\"" }\n', BenchError),
+    ],
+    ids=["broken-declaration", "value-the-target-cannot-hold"],
+)
+def test_the_target_config_must_build_before_the_old_manager_stops(bench, target, old, declaration, error) -> None:
     app = bench.apps_path / "mail"
     (app / ".git").mkdir(parents=True)
-    (app / "pyproject.toml").write_text('[tool.pilot.processes.server]\ncommand = "server"\n')
-    setup = ProductionSetup(bench, process_manager="systemd")
+    (app / "pyproject.toml").write_text("[tool.pilot.processes.server]\n" + declaration)
+    bench.config.production.process_manager = target
+    setup = ProductionSetup(bench, process_manager=target)
     preflight = ("_require_linux", "_check_sudo_available", "_resolve_target", "_require_production_inputs")
     steps = (*preflight, "_check_admin_domain", "_register_admin_domain", "_rollback_admin_domain")
     with (
         patch.multiple(ProductionSetup, **dict.fromkeys(steps, MagicMock())),
-        patch.object(ProductionSetup, "_installed_manager", return_value="supervisor"),
+        patch.object(ProductionSetup, "_installed_manager", return_value=old),
         patch.object(ProductionSetup, "_migrate_from") as migrate,
         patch.object(bench.config, "validate"),
         patch.object(BenchProcesses, "active_apps", new_callable=PropertyMock, return_value={"mail"}),
-        pytest.raises(AppProcessError),
+        pytest.raises(error),
     ):
         setup.run()
 

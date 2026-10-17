@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 from pilot.core.app.processes import AppProcessError
-from pilot.core.bench.processes import BenchProcesses
 from pilot.core.bench.production import BenchProduction
 from pilot.core.bench.settings import BenchSettings, restart_trigger_values
 from pilot.exceptions import CommandError
@@ -31,16 +30,14 @@ def test_a_failed_rebuild_still_starts_the_workload(tmp_path: Path) -> None:
     manager.start_workload.assert_called_once()
 
 
-def test_a_broken_app_declaration_fails_the_rebuild_before_the_bench_stops(tmp_path: Path) -> None:
+def test_a_config_that_cannot_build_fails_the_rebuild_before_the_bench_stops(tmp_path: Path) -> None:
     bench = make_bench(tmp_path)
     bench.config.production.enabled = True
-    (bench.apps_path / "mail" / ".git").mkdir(parents=True)
-    (bench.apps_path / "mail" / "pyproject.toml").write_text("[tool.pilot.processes.server]\ncommand = 1\n")
     manager = MagicMock()
+    manager.check_config.side_effect = AppProcessError("App 'mail' has a malformed process.")
 
     with (
         patch("pilot.managers.processes.local.ProcessManager.for_bench", return_value=manager),
-        patch.object(BenchProcesses, "active_apps", new_callable=PropertyMock, return_value={"mail"}),
         pytest.raises(AppProcessError),
     ):
         BenchProduction(bench).rebuild_process_set(on_progress=lambda message: None)

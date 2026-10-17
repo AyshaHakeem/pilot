@@ -44,8 +44,10 @@ def _command(argv: list[str]) -> str:
 
 
 def _env_value(name: str, key: str, value: str) -> str:
-    """supervisord's environment parser takes either quote but no escape inside one."""
-    if ('"' in value and "'" in value) or _COMMENT.search(value):
+    """supervisord's environment parser takes either quote but no escape inside one, and strips
+    every quote from both ends of the value."""
+    quotes = ("'", '"')
+    if ('"' in value and "'" in value) or value.startswith(quotes) or value.endswith(quotes) or _COMMENT.search(value):
         raise BenchError(f"Supervisor cannot hold the value of {key} for process '{name}'.")
     quote = "'" if '"' in value else '"'
     return f"{quote}{value.replace('%', '%%')}{quote}"
@@ -173,9 +175,17 @@ class SupervisorProcessManager(ManagedProcessManager):
         GunicornManager(self.bench).generate_admin_config()
         self.supervisor_dir.mkdir(parents=True, exist_ok=True)
         self.supervisor_include_dir.mkdir(parents=True, exist_ok=True)
+        self.supervisor_conf_path.write_text(self.get_config_text())
+
+    @override
+    def check_config(self) -> None:
+        self.get_config_text()
+
+    def get_config_text(self) -> str:
+        """supervisord.conf for the current process set. Raises for a value supervisord cannot hold."""
         renderer = SupervisorRenderer(self.bench.config.name, self.bench.logs_path)
-        self.supervisor_conf_path.write_text(
-            renderer.render_supervisord_conf(self._prod_process_definitions(), self.supervisor_sock, self.supervisor_pid)
+        return renderer.render_supervisord_conf(
+            self._prod_process_definitions(), self.supervisor_sock, self.supervisor_pid
         )
 
     @override

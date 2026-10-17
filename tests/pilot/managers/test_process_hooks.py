@@ -45,12 +45,12 @@ def test_systemd_escapes_specifiers_and_quotes() -> None:
 def test_supervisor_wraps_hooks_and_escapes_percent() -> None:
     program = SupervisorRenderer("bench", Path("/tmp")).render(
         _definition(
-            argv=["/bin/stalwart", "--rate=100%"], pre_run=["/bin/install.sh"], env={"MESSAGE": '"50%"'}
+            argv=["/bin/stalwart", "--rate=100%"], pre_run=["/bin/install.sh"], env={"MESSAGE": 'say "50%" now'}
         )
     )
 
     assert "command=sh -c '/bin/install.sh || exit; exec /bin/stalwart --rate=100%%'\n" in program
-    assert "environment=MESSAGE='\"50%%\"'\n" in program
+    assert "environment=MESSAGE='say \"50%%\" now'\n" in program
     assert "autorestart=unexpected\n" in program
 
 
@@ -147,7 +147,8 @@ def test_supervisor_keeps_a_semicolon_or_hash_after_whitespace(tmp_path: Path) -
     assert shlex.split(command) == ["sh", "-c", "echo one ; echo two #three"]
 
 
-@pytest.mark.parametrize("value", ["a ;b", "say \"it's\""])
+# supervisord strips every quote from both ends of a value, so "50%" would arrive as 50%.
+@pytest.mark.parametrize("value", ["a ;b", "say \"it's\"", '"50%"', "it's'"])
 def test_supervisor_rejects_an_env_value_it_cannot_hold(value) -> None:
     with pytest.raises(BenchError, match="Supervisor cannot hold the value of MESSAGE"):
         SupervisorRenderer("bench", Path("/tmp")).render(_definition(env={"MESSAGE": value}))

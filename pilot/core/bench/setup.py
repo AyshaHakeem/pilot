@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pilot.core.bench.admin_domain import ProductionAdminDomain
 from pilot.core.bench.telemetry import apply_credential as apply_telemetry_credential
@@ -10,6 +10,7 @@ from pilot.exceptions import BenchError
 
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
+    from pilot.managers.processes.base import ManagedProcessManager
 
 
 class ProductionSetup:
@@ -44,8 +45,8 @@ class ProductionSetup:
         try:
             self.bench.config.validate()
             old_pm = self._installed_manager()
-            # A broken app declaration must fail before the old manager stops the bench.
-            self.bench.processes.get_app_definitions()
+            # The new manager's configuration must build before the old manager stops the bench.
+            self._target_manager().check_config()
             self._write_dns_multitenancy()
             # Free the old manager's ports before the new one binds them: systemd binds
             # the admin socket during setup, before the workload starts.
@@ -119,6 +120,11 @@ class ProductionSetup:
             raise BenchError(
                 "A contact email is required with --tls for Let's Encrypt. Pass --letsencrypt-email <email>, or set letsencrypt.email in common_config.toml."
             )
+
+    def _target_manager(self) -> "ManagedProcessManager":
+        from pilot.managers.processes.local import ProcessManager
+
+        return cast("ManagedProcessManager", ProcessManager.for_bench(self.bench))
 
     def _installed_manager(self) -> str | None:
         """Return the process manager that runs the bench, else the one deployed on disk.

@@ -38,6 +38,10 @@ class ManagedProcessManager(ProcessManager, ABC):
     def process_definitions(self) -> list[ProcessDefinition]:
         return self._prod_process_definitions()
 
+    def check_config(self) -> None:
+        """Build the configuration without writing it, so what would fail to write fails before a stop."""
+        self._prod_process_definitions()
+
     @abstractmethod
     def write_config(self) -> None: ...
 
