@@ -121,7 +121,7 @@ class AppRepository:
     def _is_ahead_of_installed(self, commit: str, version: str) -> bool:
         """Whether `commit` descends from HEAD. A stale registry can advertise an older
         release, so only proven descent counts. When a shallow clone holds both commits
-        without the history between them, a strictly newer version decides."""
+        without the history between them, the version decides, then the commit date."""
         installed = self.installed_hash
         if installed == commit:
             return False
@@ -133,15 +133,20 @@ class AppRepository:
             return True
         if not repo.has_commit(commit) or repo.is_ancestor(commit, installed):
             return False
-        return self._is_newer_than_installed(version)
+        return self._is_newer_than_installed(commit, version)
 
-    def _is_newer_than_installed(self, version: str) -> bool:
+    def _is_newer_than_installed(self, commit: str, version: str) -> bool:
+        """A newer version, or the same version at a later commit, since develop releases share one."""
         from pilot._vendor.packaging.version import InvalidVersion, Version
 
         try:
-            return Version(version) > Version(self.app.installed_version)
+            release, installed = Version(version), Version(self.app.installed_version)
         except InvalidVersion:
             return False
+        if release != installed:
+            return release > installed
+        repo = self.repo
+        return repo.get_commit_time(commit) > repo.get_commit_time(self.installed_hash)
 
     @property
     def remote_url(self) -> str:
