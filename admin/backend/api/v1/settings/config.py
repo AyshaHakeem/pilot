@@ -26,6 +26,7 @@ class ConfigPatcher:
     def apply(self) -> str | None:
         self._apply_bench()
         self._apply_lite_mode()
+        self._apply_letsencrypt()
         self._apply_workers()
         self._apply_firewall()
         self._apply_waf()
@@ -58,6 +59,11 @@ class ConfigPatcher:
         lite_mode = self.data.get("lite_mode") or {}
         if "enabled" in lite_mode:
             self.config.lite_mode.enabled = bool(lite_mode["enabled"])
+
+    def _apply_letsencrypt(self) -> None:
+        letsencrypt = self.data.get("letsencrypt") or {}
+        if "email" in letsencrypt:
+            self.config.letsencrypt.email = str(letsencrypt["email"]).strip()
 
     def _apply_workers(self) -> None:
         workers = self.data.get("workers")
