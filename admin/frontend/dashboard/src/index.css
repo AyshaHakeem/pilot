@@ -133,3 +133,9 @@ body {
 .hover-scrollbar::-webkit-scrollbar-track {
   background: transparent;
 }
+
+input:autofill {
+  filter: none;
+  -webkit-text-fill-color: var(--ink-gray-8);
+  transition: background-color 600000s 0s;
+}
