@@ -13,3 +13,4 @@ serve_realtime_on_unix_socket
 start_admin_at_boot
 keep_mariadb_out_of_swap
 check_realtime_sessions_locally
+enable_database_at_boot
