@@ -54,6 +54,14 @@ Runtime commands:
 
 `pilot restart` targets the production workload. Local development start/stop uses bench runtime managers.
 
+### Restarts
+
+When apps change (get, remove, update or branch switch), Pilot restarts web, the workers and the app processes. It restarts socketio only when frappe's realtime server or an app's `realtime/` handlers changed after socketio started, so open realtime connections stay up. Redis keeps running and keeps its cache.
+
+With systemd, a socket unit, `<bench>-web.socket`, holds the web port. A web restart, including `pilot restart`, leaves the socket open, so requests wait in its queue while gunicorn starts instead of getting a 502. `pilot stop` stops the socket too. Lite mode's bench process binds its own port, and supervisor has no socket units, so their restarts still refuse requests while web starts.
+
+Supervisor stops one group at a time: the workload, then the app processes, then redis, and starts them in reverse. A group signals all its programs at once, so redis has its own group to outlive the processes that drain into it.
+
 ### Supervisor Extensions
 
 Supervisor benches may define app-specific processes in `config/services/supervisor.d/*.conf`. Pilot includes this directory from its generated `config/services/supervisord.conf` and preserves its fragments when production configuration is regenerated.
