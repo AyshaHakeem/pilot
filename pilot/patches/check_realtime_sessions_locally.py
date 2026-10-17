@@ -23,16 +23,19 @@ def run(benches_root: Path) -> None:
 
 def check_sessions_locally(bench) -> None:
     from pilot.config.common_site_config import update_common_site_config
+    from pilot.managers.processes.definitions import ProcessDefinitionBuilder
     from pilot.managers.processes.local import ProcessManager
 
     with update_common_site_config(bench.sites_path) as config:
         config["webserver_host"] = "127.0.0.1"
 
-    # The Node server reads its config once, at start.
+    # The socketio server reads its config once, at start. Lite mode has none.
+    if not bench.config.production.enabled or bench.is_lite_mode:
+        return
     manager = ProcessManager.for_bench(bench)
-    socketio = [pd for pd in manager.process_definitions if pd.name == "socketio"]
-    if bench.config.production.enabled and socketio and manager.is_running():
-        manager.restart_processes(socketio)
+    if manager.is_running():
+        builder = ProcessDefinitionBuilder(bench, manager.python, watch_admin_js=False)
+        manager.restart_processes([builder.socketio_definition()])
 
 
 if __name__ == "__main__":
