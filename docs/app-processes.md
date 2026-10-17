@@ -59,7 +59,8 @@ An app's processes run while at least one site has the app installed and enabled
 |---|---|
 | `get-app` | Nothing changes. |
 | `install-app` or `new-site` installs the app on its first site | They start. |
-| `uninstall-app` or `drop-site` removes the app from its last site | They stop. |
+| `uninstall-app`, `remove-app` or `drop-site` removes the app from its last site | They stop. |
+| The last site using the app disables it, or a site enables it again | They stop, or start again. |
 | An app update or revert | Pilot applies its declarations, then restarts the workload. |
 | `pilot restart` | Pilot applies the declarations, then restarts the workload. |
 | `pilot processes disable` or `enable` | They stop, or start again. |

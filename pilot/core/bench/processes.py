@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shlex
 from dataclasses import dataclass
+from itertools import chain
 from typing import TYPE_CHECKING
 
 from pilot.exceptions import BenchError
@@ -46,7 +47,10 @@ class BenchProcesses:
 
     def get_app_definitions(self) -> list["ProcessDefinition"]:
         """The app processes that run: declared by an app a site uses, and not disabled."""
-        declared = self.get_declared()
+        return self.get_running(self.get_declared())
+
+    def get_running(self, declared: dict["App", list["ProcessDefinition"]]) -> list["ProcessDefinition"]:
+        """Those of `declared` that run."""
         if not declared:
             return []
 
@@ -67,12 +71,13 @@ class BenchProcesses:
         return any(app.processes.get_definitions() for app in apps)
 
     def get_realtime_change_time(self) -> float:
-        """Latest change to the code the socketio server loads: frappe's server and each app's handlers."""
+        """Latest change to the code the socketio server loads: frappe's server and each app's handlers.
+        Folders count too, since removing a file changes only its folder."""
         paths = [self.bench.apps_path / "frappe" / name for name in ("socketio.js", "node_utils.js")]
         for app in self.bench.apps():
             for folder in (app.path / "realtime", app.path / app.module_name / "realtime"):
-                paths += [path for path in folder.rglob("*") if "__pycache__" not in path.parts]
-        return max((path.stat().st_mtime for path in paths if path.is_file()), default=0.0)
+                paths += [folder, *(path for path in folder.rglob("*") if "__pycache__" not in path.parts)]
+        return max((path.stat().st_mtime for path in paths if path.exists()), default=0.0)
 
     def apply(self) -> None:
         """Write, link and start the production process set. Running processes keep running;
@@ -117,15 +122,15 @@ class BenchProcesses:
     def get_rows(self, app_name: str | None = None) -> list[ProcessRow]:
         """Each process with its state. A declared process that does not run says why."""
         manager = ProcessManager.for_bench(self.bench)
-        app_definitions = self._declared_definitions(app_name)
-        runs = {definition.name for definition in self.get_app_definitions()} if app_definitions else set()
         bench_definitions = [] if app_name else [d for d in manager.process_definitions if d.app is None]
-        states = manager.get_process_states([*bench_definitions, *(d for d in app_definitions if d.name in runs)])
+        declared = self.get_declared(app_name)
+        running = [*bench_definitions, *self.get_running(declared)]
+        states = manager.get_process_states(running)
 
         rows = []
-        for definition in [*bench_definitions, *app_definitions]:
-            is_idle = definition.app is not None and definition.name not in runs
-            state = self._idle_state(definition.name) if is_idle else states.get(definition.name, STOPPED)
+        for definition in [*bench_definitions, *chain.from_iterable(declared.values())]:
+            is_running = definition in running
+            state = states.get(definition.name, STOPPED) if is_running else self._idle_state(definition.name)
             rows.append(ProcessRow(definition.name, definition.app or BENCH, state, shlex.join(definition.argv)))
         return rows
 
@@ -136,7 +141,7 @@ class BenchProcesses:
         return ProcessState("no site uses the app")
 
     def _declared_definitions(self, app_name: str | None = None) -> list["ProcessDefinition"]:
-        return [definition for definitions in self.get_declared(app_name).values() for definition in definitions]
+        return list(chain.from_iterable(self.get_declared(app_name).values()))
 
     @staticmethod
     def _resolve(names: list[str], definitions: list["ProcessDefinition"]) -> list["ProcessDefinition"]:

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
 from pilot.config import BenchConfig
 from pilot.core.bench.processes import BenchProcesses
+from pilot.core.site.apps import SiteApps
 from pilot.exceptions import BenchError
 from pilot.managers.processes.definitions import ProcessDefinitionBuilder
 from tests.pilot.commands.test_commands import make_bench
@@ -73,7 +75,30 @@ def test_realtime_change_time_follows_handlers_not_compiled_files(bench) -> None
     handlers = bench.apps_path / "mail" / "mail" / "realtime"
     (handlers / "__pycache__").mkdir(parents=True)
     (handlers / "handlers.py").write_text("")
-    os.utime(handlers / "handlers.py", (1000, 1000))
     (handlers / "__pycache__" / "handlers.pyc").write_text("")
+    for path in (handlers, handlers / "handlers.py"):
+        os.utime(path, (1000, 1000))
 
     assert bench.processes.get_realtime_change_time() == 1000
+
+
+def test_removing_a_handler_counts_as_a_realtime_change(bench) -> None:
+    handlers = bench.apps_path / "mail" / "realtime"
+    handlers.mkdir()
+    (handlers / "old.js").write_text("")
+    (handlers / "kept.js").write_text("")
+    for path in (handlers, handlers / "kept.js"):
+        os.utime(path, (1000, 1000))
+
+    (handlers / "old.js").unlink()
+
+    assert bench.processes.get_realtime_change_time() > 1000
+
+
+@pytest.mark.parametrize("action", ["install_app", "enable_app", "disable_app", "uninstall_app"])
+def test_site_app_changes_apply_the_process_set_for_apps_that_declare_one(bench, action) -> None:
+    site = bench.site("site.local")
+    for app_name, applies in (("mail", True), ("crm", False)):
+        with patch.object(SiteApps, action), patch.object(BenchProcesses, "apply") as apply:
+            getattr(site, action)(bench.app(app_name))
+        assert apply.called is applies

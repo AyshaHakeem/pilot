@@ -160,17 +160,25 @@ class Site:
     def uninstall_app(self, app: "App", force: bool = False) -> None:
         from pilot.core.site.apps import SiteApps
 
+        # Checked first: the app may leave the bench along with its declarations.
+        has_processes = self.bench.processes.has_declarations([app.config.name])
         SiteApps(self).uninstall_app(app, force)
+        if has_processes:
+            self.bench.processes.apply()
 
     def enable_app(self, app: "App") -> None:
         from pilot.core.site.apps import SiteApps
 
         SiteApps(self).enable_app(app)
+        if self.bench.processes.has_declarations([app.config.name]):
+            self.bench.processes.apply()
 
     def disable_app(self, app: "App") -> None:
         from pilot.core.site.apps import SiteApps
 
         SiteApps(self).disable_app(app)
+        if self.bench.processes.has_declarations([app.config.name]):
+            self.bench.processes.apply()
 
     def disabled_apps(self) -> list[str]:
         from pilot.core.site.apps import SiteApps
@@ -235,11 +243,7 @@ class Site:
     ) -> None:
         from pilot.core.site.apps import SiteApps
 
-        # Checked first: the app may leave the bench along with its declarations.
-        has_processes = self.bench.processes.has_declarations(app_names)
         SiteApps(self).uninstall_apps(app_names, force, on_progress, remove_from_bench)
-        if has_processes:
-            self.bench.processes.apply()
 
     def _remove_app_if_not_on_any_site(self, app_name: str, on_progress: Callable[[str], None]) -> None:
         from pilot.core.site.apps import SiteApps
