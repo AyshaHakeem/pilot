@@ -170,3 +170,14 @@ def test_a_failed_init_keeps_the_task_records(tmp_path: Path) -> None:
 
     assert record.exists()
     assert not bench.apps_path.exists()
+
+
+def test_init_builds_the_framework_assets(tmp_path: Path) -> None:
+    """A get-app before the first new-site links `sites/assets/frappe` without building it."""
+    bench = make_bench(tmp_path)
+    python_env_manager = MagicMock()
+
+    BenchInitializer(bench)._build_framework_assets(python_env_manager)
+
+    built_app = python_env_manager.build_assets_for_app.call_args.args[0]
+    assert built_app.config.name == bench.config.framework_app.name

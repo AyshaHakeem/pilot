@@ -52,6 +52,7 @@ class BenchInitializer:
             ),
             ("Install Node.js", python_env_manager.install_node),
             ("Install Node.js dependencies", python_env_manager.install_node_dependencies),
+            ("Build framework assets", lambda: self._build_framework_assets(python_env_manager)),
             ("Configure Redis", self._configure_redis),
             ("Prepare admin frontend", lambda: self._ensure_admin_frontend(on_progress)),
             ("Generate process config", self._generate_process_config),
@@ -106,6 +107,13 @@ class BenchInitializer:
             on_progress(f"  Installing {app.config.name}...")
             python_env_manager.install_app(app)
         self.bench.write_apps_txt()
+
+    def _build_framework_assets(self, python_env_manager) -> None:
+        """Build the framework's assets here: new-site skips an app that has `sites/assets/<app>`,
+        and a get-app build links that for every app without building it."""
+        from pilot.core.app import App
+
+        python_env_manager.build_assets_for_app(App(self.bench.config.framework_app, self.bench))
 
     def _ensure_admin_password(self) -> None:
         import secrets
