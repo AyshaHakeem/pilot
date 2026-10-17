@@ -18,6 +18,7 @@ from pilot.exceptions import BenchError
 from pilot.utils import installed_app_version, run_command
 
 if TYPE_CHECKING:
+    from pilot.core.app.processes import AppProcesses
     from pilot.core.bench import Bench
 
 
@@ -130,6 +131,12 @@ class App:
     def path(self) -> Path:
         root = self.bench.staging_path if self.is_staged else self.bench.apps_path
         return root / self.config.name
+
+    @property
+    def processes(self) -> "AppProcesses":
+        from pilot.core.app.processes import AppProcesses
+
+        return AppProcesses(self)
 
     @property
     def installed_version(self) -> str:

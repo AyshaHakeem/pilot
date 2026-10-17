@@ -201,10 +201,14 @@ def provision_from_backup(
     if not isinstance(admin_password, str) or not admin_password.strip():
         raise BenchError("Site Administrator password must not be empty.")
     from pilot.core.site import Site
+    from pilot.core.site.apps import SiteApps
 
     site = Site.provision(bench, name, [], admin_password, on_progress=on_progress)
     on_progress(f"Restoring backup: {db_file}")
     site.restore(db_file, public_files, private_files)
+    # The restored database decides which apps the site runs.
+    SiteApps(site).restore_installed_apps_copy()
+    bench.processes.apply()
     return site
 
 

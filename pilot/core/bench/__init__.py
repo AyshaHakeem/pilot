@@ -14,6 +14,7 @@ if TYPE_CHECKING:
     from pilot.core.app import App, NewAppOptions, RevisionPin
     from pilot.core.bench.hostname_aliases import HostnameAliases
     from pilot.core.bench.migration.store import MigrationStore
+    from pilot.core.bench.processes import BenchProcesses
     from pilot.core.database import Database
     from pilot.core.notification import NotificationStore
     from pilot.core.site import Site
@@ -95,6 +96,12 @@ class Bench:
         from pilot.core.bench.migration.store import MigrationStore
 
         return MigrationStore(self)
+
+    @cached_property
+    def processes(self) -> "BenchProcesses":
+        from pilot.core.bench.processes import BenchProcesses
+
+        return BenchProcesses(self)
 
     @cached_property
     def notifications(self) -> "NotificationStore":
@@ -305,6 +312,13 @@ class Bench:
     def supports_lite_mode(self) -> bool:
         """Whether this bench's frappe ships the one process lite mode runs."""
         return (self.apps_path / "frappe" / "frappe" / "runner.py").is_file()
+
+    @property
+    def has_runner_socket_support(self) -> bool:
+        """Whether lite mode's process serves on a socket systemd passes it. An older one binds
+        the port itself, which a socket already holding it would refuse."""
+        runner = self.apps_path / "frappe" / "frappe" / "runner.py"
+        return runner.is_file() and "LISTEN_FDS" in runner.read_text()
 
     @property
     def is_lite_mode(self) -> bool:

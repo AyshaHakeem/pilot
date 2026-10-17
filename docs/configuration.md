@@ -153,6 +153,7 @@ These tables are per-bench unless noted otherwise:
 
 - `[gunicorn]`: Gunicorn settings.
 - `[build]`: manual override for the asset build memory cap.
+- `[processes]`: `disabled`, the app processes that stay off. `pilot processes disable` and `enable` write it. See [App Processes](app-processes.md).
 - `[firewall]`: firewall behavior.
 - `[waf]`: WAF rules and behavior.
 - `[s3]`: backup storage credentials and bucket settings. Set `endpoint_url` for a custom S3-compatible provider.

@@ -87,6 +87,13 @@ Site behavior belongs on `Site` or a module under `pilot/core/site`.
 
 Production setup uses the bench config and system managers. The command should not duplicate nginx, process manager, or certificate logic.
 
+## Process Commands
+
+- `pilot processes ls [--app APP]`: list the bench and app processes with their state, pid and command. `ls` is also `list`. With `--app`, list only that app's declared processes, which also checks its `pyproject.toml` before any site uses it.
+- `pilot processes restart NAME...`: restart processes on a production bench. A name is a process, such as `web` or `mail-stalwart`, or an app, which stands for every process of that app.
+- `pilot processes disable NAME...`: stop app processes and keep them off. Pilot saves them in `[processes] disabled` in `bench.toml`.
+- `pilot processes enable NAME...`: turn disabled app processes back on. They run while a site uses their app.
+
 ## Task Worker Commands
 
 - `pilot tasks status`: show Admin task worker state.
