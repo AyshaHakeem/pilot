@@ -278,8 +278,15 @@ class SupervisorProcessManager(ManagedProcessManager):
     def get_targets(self, role: UnitGroup) -> list[str]:
         if role is UnitGroup.ADMIN:
             return [f"{self.admin_group}:*"]
-        targets = [f"{self.workload_group}:*"]
-        # supervisorctl rejects a group it does not have, and the apps group exists only while one runs.
-        if f"[group:{self.apps_group}]" in self.supervisor_conf_path.read_text():
-            targets.append(f"{self.apps_group}:*")
-        return [*targets, f"{self.redis_group}:*"]
+        # supervisorctl rejects a group it has not loaded: the apps group exists only while an app
+        # process runs, and a bench from before the redis group lacks it until its config is applied.
+        loaded = self.loaded_groups
+        groups = (self.workload_group, self.apps_group, self.redis_group)
+        return [f"{group}:*" for group in groups if group in loaded]
+
+    @property
+    def loaded_groups(self) -> set[str]:
+        """Groups the running supervisord has loaded. A config written since loads on update."""
+        result = subprocess.run([*self._supervisorctl(), "avail"], capture_output=True, text=True)
+        # A program alone in a group of its name prints without the group, as admin does.
+        return {line.split()[0].partition(":")[0] for line in result.stdout.splitlines() if line.strip()}

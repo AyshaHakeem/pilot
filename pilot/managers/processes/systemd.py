@@ -148,11 +148,15 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         self._activate_sockets(env)
 
     def _activate_sockets(self, env: dict) -> None:
-        """A service that bound its port itself has to let go before its new socket can listen."""
+        """A service that bound its port itself has to let go before its new socket can listen.
+        A stopped workload keeps its sockets closed, or a request would start web alone."""
+        is_workload_running = self.is_running()
         for socket in self.changed_sockets:
             service = socket.removesuffix(".socket") + ".service"
             was_active = subprocess.run(self._systemctl("is-active", service), capture_output=True, env=env)
             subprocess.run(self._systemctl("stop", service), capture_output=True, env=env)
+            if not is_workload_running:
+                continue
             run_command(self._systemctl("restart", socket), env=env, timeout=_SYSTEMCTL_TIMEOUT)
             if was_active.returncode == 0:
                 run_command(self._systemctl("start", service), env=env, timeout=_SYSTEMCTL_TIMEOUT)

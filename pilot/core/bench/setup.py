@@ -44,6 +44,8 @@ class ProductionSetup:
         try:
             self.bench.config.validate()
             old_pm = self._installed_manager()
+            # A broken app declaration must fail before the old manager stops the bench.
+            self.bench.processes.get_app_definitions()
             self._write_dns_multitenancy()
             # Free the old manager's ports before the new one binds them: systemd binds
             # the admin socket during setup, before the workload starts.
