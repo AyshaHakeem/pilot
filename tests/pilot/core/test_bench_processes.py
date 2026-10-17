@@ -99,6 +99,38 @@ def test_removing_a_handler_counts_as_a_realtime_change(bench) -> None:
 def test_site_app_changes_apply_the_process_set_for_apps_that_declare_one(bench, action) -> None:
     site = bench.site("site.local")
     for app_name, applies in (("mail", True), ("crm", False)):
-        with patch.object(SiteApps, action), patch.object(BenchProcesses, "apply") as apply:
+        with (
+            patch.object(SiteApps, action),
+            patch.object(SiteApps, "get_required_apps", return_value=[]),
+            patch.object(BenchProcesses, "apply") as apply,
+        ):
             getattr(site, action)(bench.app(app_name))
         assert apply.called is applies
+
+
+def test_removing_a_handler_folder_counts_as_a_realtime_change(bench) -> None:
+    handlers = bench.apps_path / "mail" / "realtime"
+    handlers.mkdir()
+    (handlers / "handlers.js").write_text("")
+    os.utime(handlers / "handlers.js", (1000, 1000))
+    os.utime(handlers, (1000, 1000))
+    bench.config_path.mkdir(parents=True, exist_ok=True)
+    assert not bench.processes.is_realtime_changed_since(2000)
+
+    (handlers / "handlers.js").unlink()
+    handlers.rmdir()
+
+    assert bench.processes.is_realtime_changed_since(2000)
+    assert not bench.processes.is_realtime_changed_since(2000)
+
+
+def test_installing_an_app_applies_the_processes_of_its_dependencies(bench) -> None:
+    site = bench.site("site.local")
+    with (
+        patch.object(SiteApps, "install_app"),
+        patch.object(SiteApps, "get_required_apps", return_value=["mail"]),
+        patch.object(BenchProcesses, "apply") as apply,
+    ):
+        site.install_app(bench.app("crm"))
+
+    apply.assert_called_once_with()

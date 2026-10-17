@@ -3,6 +3,7 @@ from __future__ import annotations
 import shlex
 from dataclasses import dataclass
 from itertools import chain
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.exceptions import BenchError
@@ -70,14 +71,28 @@ class BenchProcesses:
         apps = [app for app in self.bench.apps() if app.config.name in names or app.module_name in names]
         return any(app.processes.get_definitions() for app in apps)
 
+    @property
+    def realtime_folders(self) -> list[Path]:
+        """Each app's realtime handler folders: `realtime/` for Node, `<module>/realtime/` for Python."""
+        folders = [(app.path / "realtime", app.path / app.module_name / "realtime") for app in self.bench.apps()]
+        return [folder for pair in folders for folder in pair if folder.is_dir()]
+
     def get_realtime_change_time(self) -> float:
         """Latest change to the code the socketio server loads: frappe's server and each app's handlers.
         Folders count too, since removing a file changes only its folder."""
         paths = [self.bench.apps_path / "frappe" / name for name in ("socketio.js", "node_utils.js")]
-        for app in self.bench.apps():
-            for folder in (app.path / "realtime", app.path / app.module_name / "realtime"):
-                paths += [folder, *(path for path in folder.rglob("*") if "__pycache__" not in path.parts)]
+        for folder in self.realtime_folders:
+            paths += [folder, *(path for path in folder.rglob("*") if "__pycache__" not in path.parts)]
         return max((path.stat().st_mtime for path in paths if path.exists()), default=0.0)
+
+    def is_realtime_changed_since(self, started: float) -> bool:
+        """Whether the code socketio loads changed after `started`. A removed folder leaves no mtime,
+        so the folders seen at the last check are saved and compared."""
+        folders = "".join(f"{folder}\n" for folder in self.realtime_folders)
+        record = self.bench.config_path / "realtime-folders.txt"
+        seen = record.read_text() if record.is_file() else folders
+        record.write_text(folders)
+        return seen != folders or self.get_realtime_change_time() > started
 
     def apply(self) -> None:
         """Write, link and start the production process set. Running processes keep running;

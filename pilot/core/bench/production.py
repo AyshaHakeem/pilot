@@ -37,6 +37,8 @@ class BenchProduction:
         from pilot.managers.processes.local import ProcessManager
 
         manager = cast("ManagedProcessManager", ProcessManager.for_bench(self.bench))
+        # A broken app declaration must fail before the bench stops.
+        self.bench.processes.get_app_definitions()
         on_progress("Stopping the running processes")
         manager.stop()
         # A failed step must not leave the sites down.

@@ -114,7 +114,7 @@ class ManagedProcessManager(ProcessManager, ABC):
             return False
         state = self.get_process_states(socketio).get("socketio")
         started = get_process_start_time(state.pid) if state and state.pid else None
-        return started is None or self.bench.processes.get_realtime_change_time() > started
+        return started is None or self.bench.processes.is_realtime_changed_since(started)
 
     @staticmethod
     def _is_reloaded(pd: ProcessDefinition, web_only: bool, realtime: bool) -> bool:
