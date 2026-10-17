@@ -94,6 +94,39 @@ def test_inactive_web_is_left_to_its_socket(bench) -> None:
     assert calls[1:] == [["stop", "test-bench-web.service"], ["restart", "test-bench-web.socket"]]
 
 
+@pytest.mark.parametrize(
+    ("is_running", "argv"),
+    [
+        (
+            True,
+            [
+                "restart",
+                "test-bench-web.service",
+                "test-bench-redis_cache.service",
+                "test-bench-redis_queue.service",
+            ],
+        ),
+        (False, ["restart", "test-bench.target"]),
+    ],
+)
+def test_restart_keeps_the_web_socket_open(bench, is_running, argv) -> None:
+    """A target restart closes the socket too, which resets the requests waiting in it."""
+    manager = SystemdProcessManager(bench)
+    names = ["web", "admin", "redis_cache", "redis_queue"]
+    definitions = [MagicMock() for _ in names]
+    for definition, name in zip(definitions, names, strict=True):
+        definition.name = name
+    calls = []
+    with (
+        patch.object(SystemdProcessManager, "process_definitions", new_callable=PropertyMock, return_value=definitions),
+        patch.object(manager, "is_running", return_value=is_running),
+        patch.object(systemd_module, "run_command", side_effect=lambda argv, **kwargs: calls.append(argv[2:])),
+    ):
+        manager.restart()
+
+    assert calls == [argv]
+
+
 _AVAIL = (
     "test-bench:test-bench-web           in use    auto      999:999\n"
     "test-bench-admin                    in use    auto      999:999\n"

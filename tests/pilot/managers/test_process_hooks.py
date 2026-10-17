@@ -113,7 +113,7 @@ def test_systemd_web_listens_through_a_socket_a_restart_leaves_open() -> None:
 
     assert "Requires=bench-web.socket\nAfter=bench-web.socket\n" in renderer.render(web)
     assert "ListenStream=127.0.0.1:8000\n" in socket
-    assert "StopPropagatedFrom=bench.target\n" in socket  # pilot stop stops it; a restart does not
+    assert "StopPropagatedFrom=bench.target\n" in socket  # pilot stop stops it
     assert "PartOf" not in socket
 
 
