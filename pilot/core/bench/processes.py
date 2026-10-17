@@ -4,7 +4,7 @@ import shlex
 from dataclasses import dataclass
 from itertools import chain
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from pilot.exceptions import BenchError
 from pilot.managers.processes.definitions import ProcessState
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
     from pilot.core.app import App
     from pilot.core.bench import Bench
+    from pilot.managers.processes.base import ManagedProcessManager
     from pilot.managers.processes.definitions import ProcessDefinition
 
 BENCH = "bench"
@@ -104,8 +105,10 @@ class BenchProcesses:
         a new app process starts, and a removed one stops and is unlinked."""
         from pilot.managers.processes.base import UnitGroup
 
-        manager = ProcessManager.for_bench(self.bench)
-        if not self.bench.config.production.enabled or not manager.is_configured():
+        if not self.bench.config.production.enabled:
+            return
+        manager = cast("ManagedProcessManager", ProcessManager.for_bench(self.bench))
+        if not manager.is_configured():
             return
 
         # Read first: supervisor's update starts the programs of a group it newly loads.
