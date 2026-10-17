@@ -189,7 +189,11 @@ class SupervisorProcessManager(ManagedProcessManager):
     def get_process_states(self, names: list[str]) -> dict[str, ProcessState]:
         if not self.is_alive():
             return {}
-        programs = {self._program(name): name for name in names}
+        programs = {}
+        for name in names:
+            group, _, program = self._program(name).partition(":")
+            # supervisorctl prints a program alone when its group has the same name, as admin does.
+            programs[program if group == program else f"{group}:{program}"] = name
         result = subprocess.run([*self._supervisorctl(), "status", *programs], capture_output=True, text=True)
         states = {}
         for line in result.stdout.splitlines():
