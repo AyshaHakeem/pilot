@@ -5,8 +5,10 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
+from pilot.exceptions import BenchError
 from pilot.managers.cron import CronManager
 from pilot.managers.environment import AdminEnvManager
 from pilot.managers.gunicorn import GunicornManager
@@ -21,6 +23,8 @@ from pilot.managers.processes.local import ProcessDefinition
 from pilot.utils import cli_root, run_command
 
 _BOOT_JOB = "supervisord-boot"
+# Above the longest stop timeout a program gets, the lite runner's job drain.
+_SHUTDOWN_TIMEOUT = 900
 # `group:program   RUNNING   pid 123, uptime 0:01:02`
 _STATUS_LINE = re.compile(r"^(?P<program>\S+)\s+(?P<state>\S+)(?:\s+pid (?P<pid>\d+),)?")
 
@@ -257,8 +261,16 @@ class SupervisorProcessManager(ManagedProcessManager):
     def shutdown(self) -> None:
         """Tear down everything, including the admin group and the daemon."""
         CronManager(self.bench.path).remove_schedule(_BOOT_JOB)
-        if self.is_alive():
-            run_command([*self._supervisorctl(), "shutdown"])
+        if not self.is_alive():
+            return
+
+        run_command([*self._supervisorctl(), "shutdown"])
+        # shutdown returns at once, and the programs hold their ports until supervisord exits.
+        deadline = time.monotonic() + _SHUTDOWN_TIMEOUT
+        while self.is_alive():
+            if time.monotonic() > deadline:
+                raise BenchError(f"supervisord did not exit within {_SHUTDOWN_TIMEOUT} seconds of shutdown.")
+            time.sleep(0.5)
 
     def _supervisorctl(self) -> list[str]:
         return ["supervisorctl", "-c", str(self.supervisor_conf_path)]
