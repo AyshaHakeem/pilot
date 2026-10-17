@@ -189,6 +189,11 @@ class ProcessDefinitionBuilder:
             env={**self.python_env(), "MALLOC_ARENA_MAX": "2", "FRAPPE_PRELOAD_MODULES": "0"},
             working_dir=self.bench.sites_path,
             stop_timeout=lite_mode.stop_timeout,
+            listen_address=(
+                f"127.0.0.1:{self.bench.config.http_port}"
+                if not dev and self.bench.has_runner_socket_support
+                else None
+            ),
         )
 
     def socketio_definition(self, dev: bool = False) -> ProcessDefinition:

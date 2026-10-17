@@ -314,6 +314,13 @@ class Bench:
         return (self.apps_path / "frappe" / "frappe" / "runner.py").is_file()
 
     @property
+    def has_runner_socket_support(self) -> bool:
+        """Whether lite mode's process serves on a socket systemd passes it. An older one binds
+        the port itself, which a socket already holding it would refuse."""
+        runner = self.apps_path / "frappe" / "frappe" / "runner.py"
+        return runner.is_file() and "LISTEN_FDS" in runner.read_text()
+
+    @property
     def is_lite_mode(self) -> bool:
         """Whether lite mode is enabled and supported by Frappe."""
         return self.config.lite_mode.enabled and self.supports_lite_mode
