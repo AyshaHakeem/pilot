@@ -305,6 +305,7 @@ def _restart_systemd(manager) -> bool:
     if not manager.is_running():
         return False
     env = manager._systemctl_env()
+    manager.link_units()
     subprocess.run(
         ["systemctl", "--user", "daemon-reload"],
         capture_output=True,
@@ -312,6 +313,8 @@ def _restart_systemd(manager) -> bool:
         timeout=10,
         check=True,
     )
+    # The web port may have changed, and the socket keeps its old one until it restarts.
+    manager.reopen_sockets()
     non_admin_units = [
         manager._unit_name(process.name)
         for process in manager._prod_process_definitions()

@@ -103,11 +103,12 @@ class BenchProcesses:
         if not self.bench.config.production.enabled or not manager.is_configured():
             return
 
+        # Read first: supervisor's update starts the programs of a group it newly loads.
+        is_running = manager.is_running()
         manager.write_config()
         manager.install_config()
         manager.reload_manager_config()
-        if manager.is_running():
-            manager.apply_unit_action("start", UnitGroup.WORKLOAD)
+        manager.apply_unit_action("start" if is_running else "stop", UnitGroup.WORKLOAD)
 
     def restart(self, names: list[str]) -> list[str]:
         """Restart the named processes. An app name stands for every process of that app that runs."""

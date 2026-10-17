@@ -103,7 +103,21 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
 
     @override
     def install_config(self) -> None:
+        units = self.link_units()
+        self._ensure_linger()
 
+        env = self._systemctl_env()
+        run_command(self._systemctl("daemon-reload"), env=env)
+        # reset-failed clears rate-limit state so re-deploys can restart the admin socket.
+        subprocess.run(self._systemctl("reset-failed", *units), capture_output=True, env=env)
+        run_command(self._systemctl("enable", self._target_name()), env=env)
+        self.enable_admin_at_boot()
+        self._enable_central_bootstrap(env)
+        self._activate_admin(env)
+        self._activate_sockets(env)
+
+    def link_units(self) -> set[str]:
+        """Link the bench's generated units into the user unit dir; stop and unlink dropped ones."""
         self.user_unit_dir.mkdir(parents=True, exist_ok=True)
         defs = self._prod_process_definitions()
         renderer = SystemdRenderer(self.bench.config.name)
@@ -134,18 +148,12 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
             if dst.is_symlink() or dst.exists():
                 dst.unlink()
             dst.symlink_to(src)
+        return units
 
-        self._ensure_linger()
-
-        env = self._systemctl_env()
-        run_command(self._systemctl("daemon-reload"), env=env)
-        # reset-failed clears rate-limit state so re-deploys can restart the admin socket.
-        subprocess.run(self._systemctl("reset-failed", *units), capture_output=True, env=env)
-        run_command(self._systemctl("enable", self._target_name()), env=env)
-        self.enable_admin_at_boot()
-        self._enable_central_bootstrap(env)
-        self._activate_admin(env)
-        self._activate_sockets(env)
+    def reopen_sockets(self) -> None:
+        """Give each workload socket the address in its unit file, as after a port change."""
+        self.changed_sockets = tuple(self._workload_socket_text())
+        self._activate_sockets(self._systemctl_env())
 
     def _activate_sockets(self, env: dict) -> None:
         """A service that bound its port itself has to let go before its new socket can listen.
@@ -187,7 +195,8 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
 
     @override
     def ensure_ready(self) -> None:
-        self.reload_manager_config()
+        # Links the units an upgrade added, such as the web socket a web unit requires.
+        self.install_config()
 
     @override
     def apply_unit_action(self, action: str, role: UnitGroup) -> None:

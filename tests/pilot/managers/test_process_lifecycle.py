@@ -26,8 +26,8 @@ def bench(tmp_path: Path):
     return bench
 
 
-@pytest.mark.parametrize("is_running", [True, False])
-def test_apply_installs_the_process_set_and_starts_only_a_running_workload(bench, is_running) -> None:
+@pytest.mark.parametrize(("is_running", "action"), [(True, "start"), (False, "stop")])
+def test_apply_installs_the_process_set_and_keeps_the_workload_state(bench, is_running, action) -> None:
     manager = MagicMock()
     manager.is_running.return_value = is_running
     with patch.object(ProcessManager, "for_bench", return_value=manager):
@@ -36,10 +36,9 @@ def test_apply_installs_the_process_set_and_starts_only_a_running_workload(bench
     manager.write_config.assert_called_once_with()
     manager.install_config.assert_called_once_with()
     manager.reload_manager_config.assert_called_once_with()
-    # start leaves running processes alone, so only an added one starts.
-    starts = [call for call in manager.apply_unit_action.call_args_list if call.args == ("start", UnitGroup.WORKLOAD)]
-    assert len(starts) == is_running
-    assert all(call.args[0] == "start" for call in manager.apply_unit_action.call_args_list)
+    # start leaves running processes alone, so only an added one starts; stop undoes
+    # supervisor starting a newly loaded group on a stopped bench.
+    manager.apply_unit_action.assert_called_once_with(action, UnitGroup.WORKLOAD)
     manager.restart_processes.assert_not_called()
 
 
@@ -174,3 +173,31 @@ def test_broken_declaration_fails_the_switch_before_the_old_manager_stops(bench)
         setup.run()
 
     migrate.assert_not_called()
+
+
+def test_systemd_start_links_units_an_upgrade_added(bench) -> None:
+    manager = SystemdProcessManager(bench)
+    with (
+        patch.object(manager, "write_config"),
+        patch.object(manager, "install_config") as install,
+        patch.object(manager, "apply_unit_action"),
+    ):
+        manager.start_workload()
+
+    install.assert_called_once_with()
+
+
+def test_settings_restart_reopens_the_web_socket_on_its_new_port(bench) -> None:
+    from pilot.core.bench.settings import _restart_systemd
+
+    manager = SystemdProcessManager(bench)
+    calls = []
+    with (
+        patch.object(manager, "is_running", return_value=True),
+        patch.object(manager, "link_units", side_effect=lambda: calls.append("link")),
+        patch.object(manager, "reopen_sockets", side_effect=lambda: calls.append("reopen")),
+        patch("pilot.core.bench.settings.subprocess.run", side_effect=lambda argv, **kwargs: calls.append(argv[2])),
+    ):
+        assert _restart_systemd(manager)
+
+    assert calls == ["link", "daemon-reload", "reopen", "restart"]
