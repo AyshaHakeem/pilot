@@ -212,6 +212,17 @@ def test_buffer_pool_editor_requires_the_mariadb_118_live_ceiling() -> None:
     assert "does not expose the live Buffer Pool ceiling" in row["reason"]
 
 
+def test_edits_do_not_depend_on_bench_management() -> None:
+    manager = _manager({"connect_timeout": "10", "max_connections": "50"})
+    with patch(f"{MODULE}.is_linux", return_value=True):
+        result = DatabaseConfigurations(_config(allow_management=False), manager).snapshot()
+
+    rows = {row["name"]: row for row in result["variables"]}
+    assert result["editable"] is True
+    assert rows["connect_timeout"]["editable"] is True
+    assert rows["max_connections"]["editable"] is True
+
+
 def test_external_mariadb_values_are_readable_but_all_edits_are_disabled() -> None:
     manager = _manager({"connect_timeout": "10"})
     result = DatabaseConfigurations(_config(existing=True), manager).snapshot()

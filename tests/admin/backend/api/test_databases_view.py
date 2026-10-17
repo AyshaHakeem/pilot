@@ -612,9 +612,10 @@ def test_sizing_actions_return_range_errors_as_unprocessable(
         "/api/v1/database/quick-actions/performance-schema",
         "/api/v1/database/quick-actions/innodb-buffer-pool-size",
         "/api/v1/database/quick-actions/max-connections",
+        "/api/v1/database/quick-actions/memory-share",
     ],
 )
-def test_database_mutations_are_forbidden_when_bench_management_is_disabled(
+def test_database_settings_do_not_depend_on_bench_management(
     tmp_path: Path,
     path: str,
 ) -> None:
@@ -622,12 +623,13 @@ def test_database_mutations_are_forbidden_when_bench_management_is_disabled(
         tmp_path / "benches" / "current",
         allow_bench_management=False,
     )
-    with patch("admin.backend.api.v1.databases._quick_actions") as actions:
+    with patch(
+        "admin.backend.api.v1.databases._quick_actions",
+        side_effect=DatabaseError("unavailable"),
+    ):
         response = client.post(path)
 
-    assert response.status_code == 403
-    assert response.get_json()["error"]["code"] == "bench_management_forbidden"
-    actions.assert_not_called()
+    assert response.status_code in (409, 422)
 
 
 def test_diagnostics_maps_unexpected_failure_to_500(tmp_path: Path) -> None:

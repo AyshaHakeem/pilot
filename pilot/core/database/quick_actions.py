@@ -16,7 +16,6 @@ if TYPE_CHECKING:
 
 _MARIADB_ONLY = "This action is available only when the bench uses MariaDB."
 _SQLITE_HAS_NO_SERVER = "SQLite does not have a shared database server."
-_MANAGEMENT_DISABLED = "Bench management is disabled on this server."
 _UNREACHABLE = "MariaDB is not reachable with Pilot's admin credentials."
 _EXTERNAL_MARIADB = "Database actions are available only for Pilot-managed MariaDB instances."
 _MEMORY_SHARE_STEP = 0.05
@@ -189,8 +188,6 @@ class DatabaseQuickActions:
         engine_reason = self._engine_reason()
         if engine_reason:
             return self._capability(False, engine_reason)
-        if not self.config.admin.allow_bench_management:
-            return self._capability(False, _MANAGEMENT_DISABLED)
         if self.config.mariadb.existing:
             return self._capability(False, "Pilot cannot restart an external MariaDB server.")
 
@@ -207,8 +204,6 @@ class DatabaseQuickActions:
         engine_reason = self._engine_reason()
         if engine_reason:
             return self._capability(False, engine_reason)
-        if not self.config.admin.allow_bench_management:
-            return self._capability(False, _MANAGEMENT_DISABLED)
         if self.config.mariadb.existing:
             return self._capability(
                 False,

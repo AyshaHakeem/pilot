@@ -132,18 +132,15 @@ def test_external_mariadb_restart_is_rejected_before_manager_call() -> None:
     manager.restart_managed_server.assert_not_called()
 
 
-def test_disabled_bench_management_blocks_mutations_but_not_binlog_view() -> None:
+def test_actions_do_not_depend_on_bench_management() -> None:
     manager = _manager()
-    result = DatabaseQuickActions(
-        _config(allow_management=False),
-        manager,
-    ).capabilities()
+    with patch(f"{MODULE}.is_linux", return_value=True):
+        result = DatabaseQuickActions(
+            _config(allow_management=False),
+            manager,
+        ).capabilities()
 
-    assert result["actions"]["restart"]["reason"] == "Bench management is disabled on this server."
-    assert result["actions"]["performance_schema"]["available"] is False
-    assert result["actions"]["innodb_buffer_pool_size"]["available"] is False
-    assert result["actions"]["max_connections"]["available"] is False
-    assert result["actions"]["manage_binlogs"]["available"] is True
+    assert all(action["available"] for action in result["actions"].values())
 
 
 def test_unreachable_mariadb_can_be_restarted_but_cannot_be_configured() -> None:
