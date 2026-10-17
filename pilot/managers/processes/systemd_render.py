@@ -132,7 +132,7 @@ class SystemdRenderer(ServiceRenderer):
         return f"{self.bench_name}-{pd.name}.socket" if pd.listen_address else None
 
     def render_socket(self, pd: ProcessDefinition) -> str:
-        # A target restart restarts the service only, so requests wait in the socket's queue.
+        # A target stop stops the socket. A target restart would restart it too, so `restart` avoids one.
         return (
             f"[Unit]\n"
             f"Description={self.bench_name} {pd.name} (socket)\n"

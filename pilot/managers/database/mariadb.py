@@ -130,14 +130,8 @@ class MariaDBManager(UserOwnedDBManager):
             sizing = self._write_config()
             self._initialize_data_dir()
             self._install_unit(sizing)
-            self.install_sizing_unit()
-            self._reset_failed_state()
-            run_command(self._systemctl("enable", "--now", self._UNIT_NAME), env=self._systemctl_env())
-
-        elif not self.is_running():
-            self._reset_failed_state()
-            run_command(self._systemctl("start", self._UNIT_NAME), env=self._systemctl_env())
-
+        self.install_sizing_unit()
+        self.enable_and_start()
         self._wait_until_reachable()
         self.secure_installation()
         return None
