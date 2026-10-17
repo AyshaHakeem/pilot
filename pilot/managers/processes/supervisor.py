@@ -22,19 +22,6 @@ from pilot.utils import cli_root, run_command
 _BOOT_JOB = "supervisord-boot"
 
 
-# supervisorctl status states -> the status vocabulary the admin UI shows.
-_SUPERVISOR_STATE_TO_STATUS = {
-    "RUNNING": "running",
-    "STARTING": "starting",
-    "STOPPING": "stopping",
-    "STOPPED": "stopped",
-    "EXITED": "stopped",
-    "FATAL": "start_failed",
-    "BACKOFF": "start_failed",
-    "UNKNOWN": "unknown",
-}
-
-
 def _escape_percent(value: str) -> str:
     # supervisord expands %(...)s in every value, quoted or not.
     return value.replace("%", "%%")
@@ -234,35 +221,3 @@ class SupervisorProcessManager(ManagedProcessManager):
         if role is UnitGroup.WEB:
             return f"{self.bench.config.name}:{self.bench.config.name}-web"
         return f"{self.workload_group}:*"
-
-    def apply_process_action(self, action: str, process_name: str) -> None:
-        """start/stop/restart one declared process by its ProcessDefinition name."""
-        program = f"{self.bench.config.name}-{process_name.replace('_', '-')}"
-        run_command([*self._supervisorctl(), action, f"{self.workload_group}:{program}"])
-
-    def live_states(self) -> dict[str, dict]:
-        """{process_name: {status, pid}} for every workload program this bench owns."""
-        if not self.is_configured() or not self.is_alive():
-            return {}
-        result = subprocess.run(
-            [*self._supervisorctl(), "status", f"{self.workload_group}:*"],
-            capture_output=True,
-            text=True,
-        )
-        states: dict[str, dict] = {}
-        prefix = f"{self.bench.config.name}-"
-        for line in result.stdout.splitlines():
-            parts = line.split()
-            if not parts:
-                continue
-            program = parts[0].split(":", 1)[-1]  # "group:program" -> "program"
-            state = parts[1] if len(parts) > 1 else "UNKNOWN"
-            pid = None
-            if state == "RUNNING" and len(parts) > 3 and parts[2] == "pid":
-                pid = int(parts[3].rstrip(","))
-            # Program names have underscores dashed; map back via a stripped key match later.
-            states[program.removeprefix(prefix)] = {
-                "status": _SUPERVISOR_STATE_TO_STATUS.get(state, "unknown"),
-                "pid": pid,
-            }
-        return states

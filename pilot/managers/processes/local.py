@@ -202,27 +202,6 @@ class ProcessManager:
     def is_admin_running(self) -> bool:
         return _tcp_port_open(self.bench.config.admin.port)
 
-    def live_states(self) -> dict[str, dict]:
-        """{process_name: {status, pid}}, read from pid files the running dev
-        supervisor already writes per process. The dev runner has no separate
-        control daemon to send a start/stop/restart to from another process,
-        so this is status-only."""
-        if not self.is_running() or not self.bench.pids_path.is_dir():
-            return {}
-        states: dict[str, dict] = {}
-        for pid_file in sorted(self.bench.pids_path.glob("*.pid")):
-            name = pid_file.stem
-            if name == "bench":
-                continue
-            try:
-                pid = int(pid_file.read_text().strip())
-                os.kill(pid, 0)
-                status = "running"
-            except (ValueError, ProcessLookupError, PermissionError, OSError):
-                pid, status = None, "stopped"
-            states[name] = {"status": status, "pid": pid}
-        return states
-
     def reload_workers(self, web_only: bool = False) -> None:
         """Ask the running dev supervisor to restart its workload processes.
 

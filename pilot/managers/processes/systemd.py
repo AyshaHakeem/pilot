@@ -24,22 +24,6 @@ from pilot.utils import cli_root, run_command
 _ADMIN_IDLE_TIMEOUT = 600
 _SYSTEMCTL_TIMEOUT = 90
 
-# systemd SubState -> the status vocabulary the admin UI shows.
-_STATE_TO_STATUS = {
-    "running": "running",
-    "start-pre": "starting",
-    "start": "starting",
-    "start-post": "starting",
-    "stop": "stopping",
-    "stop-sigterm": "stopping",
-    "stop-sigkill": "stopping",
-    "stop-post": "stopping",
-    "auto-restart": "restarting",
-    "dead": "stopped",
-    "exited": "stopped",
-    "failed": "failed",
-}
-
 
 class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
     """Manages bench processes via systemd --user (no sudo required)."""
@@ -216,34 +200,6 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         self.bench.logs_path.mkdir(parents=True, exist_ok=True)
         self.write_config()
         self.install_config()
-
-    def apply_process_action(self, action: str, process_name: str) -> None:
-        """start/stop/restart one declared process by its ProcessDefinition name."""
-        run_command(self._systemctl(action, self._unit_name(process_name)), env=self._systemctl_env())
-
-    def live_states(self) -> dict[str, dict]:
-        """{process_name: {status, pid}} for every non-admin unit this bench owns."""
-        env = self._systemctl_env()
-        units = sorted(u for u in self._installed_bench_units() if u.endswith(".service"))
-        admin_unit = self._unit_name("admin")
-        states: dict[str, dict] = {}
-        for unit in units:
-            if unit == admin_unit:
-                continue
-            name = unit.removeprefix(f"{self.bench.config.name}-").removesuffix(".service")
-            show = subprocess.run(
-                self._systemctl("show", unit, "--property=SubState,MainPID"),
-                capture_output=True,
-                text=True,
-                env=env,
-            )
-            props = dict(line.split("=", 1) for line in show.stdout.splitlines() if "=" in line)
-            pid = int(props.get("MainPID", "0") or "0")
-            states[name] = {
-                "status": _STATE_TO_STATUS.get(props.get("SubState", ""), "unknown"),
-                "pid": pid or None,
-            }
-        return states
 
     def is_configured(self) -> bool:
         result = subprocess.run(
