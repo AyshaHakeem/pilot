@@ -473,8 +473,6 @@ def test_systemd_generate_config_writes_unit_files(tmp_path: Path) -> None:
 
 
 def test_systemd_write_config_keeps_units_when_a_declaration_is_broken(tmp_path: Path) -> None:
-    """Definitions are built before anything is unlinked. Clearing first would
-    leave dangling symlinks and drop services on the next daemon-reload."""
     import pytest
 
     from pilot.exceptions import BenchError

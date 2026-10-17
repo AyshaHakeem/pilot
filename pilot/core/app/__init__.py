@@ -18,7 +18,7 @@ from pilot.exceptions import BenchError
 from pilot.utils import installed_app_version, run_command
 
 if TYPE_CHECKING:
-    from pilot.core.app.requirements import AppRequirements
+    from pilot.core.app.processes import AppProcesses
     from pilot.core.bench import Bench
 
 
@@ -133,10 +133,10 @@ class App:
         return root / self.config.name
 
     @property
-    def requirements(self) -> "AppRequirements":
-        from pilot.core.app.requirements import AppRequirements
+    def processes(self) -> "AppProcesses":
+        from pilot.core.app.processes import AppProcesses
 
-        return AppRequirements(self)
+        return AppProcesses(self)
 
     @property
     def installed_version(self) -> str:

@@ -368,7 +368,6 @@ def test_unbuffered_env_reaches_service_units(tmp_path: Path) -> None:
     bench = make_bench(tmp_path, GunicornConfig())
     web = next(pd for pd in _definitions(bench).prod_process_definitions() if pd.name == "web")
 
-    # Quoted: an unquoted value with a space would split into a second assignment.
     assert 'Environment="PYTHONUNBUFFERED=1"' in SystemdRenderer("test-bench").render(web)
     assert 'PYTHONUNBUFFERED="1"' in SupervisorRenderer("test-bench", bench.logs_path).render(web)
 

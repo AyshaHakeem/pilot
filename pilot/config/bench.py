@@ -143,11 +143,6 @@ class BenchConfig:
     s3: S3Config = field(default_factory=S3Config)
     llm: LLMConfig = field(default_factory=LLMConfig)
     resource_limits: ResourceLimitConfig = field(default_factory=ResourceLimitConfig)
-    # Escape hatch for a bad third-party [tool.pilot.background_processes] declaration:
-    # a malformed pyproject.toml fails before individual process names are parsed,
-    # so this is keyed by app name - disabling one app's declarations entirely lets
-    # the rest of the bench start.
-    disabled_app_processes: list[str] = field(default_factory=list)
     frappe_cloud: FrappeCloudConfig = field(default_factory=FrappeCloudConfig)
     # What common_config.toml held when this was read, so a write can tell which
     # shared settings this view changed. Not a setting itself: kept out of

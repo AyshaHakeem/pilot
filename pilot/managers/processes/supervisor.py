@@ -15,21 +15,10 @@ from pilot.managers.processes.base import (
     UnitGroup,
     override,
 )
-from pilot.managers.processes.definitions import hook_wrapped_argv, reject_control_chars
 from pilot.managers.processes.local import ProcessDefinition
 from pilot.utils import cli_root, run_command
 
 _BOOT_JOB = "supervisord-boot"
-
-
-def _escape_percent(value: str) -> str:
-    # supervisord expands %(...)s in every value, quoted or not.
-    return value.replace("%", "%%")
-
-
-def _escape_quoted(value: str) -> str:
-    # Only for a value that will itself be wrapped in "...": also escape its quotes.
-    return _escape_percent(value).replace('"', '\\"')
 
 
 class SupervisorRenderer(ServiceRenderer):
@@ -41,25 +30,24 @@ class SupervisorRenderer(ServiceRenderer):
 
     @override
     def render(self, pd: ProcessDefinition) -> str:
-        reject_control_chars(pd)
         directory = f"directory={pd.working_dir}\n" if pd.working_dir else ""
-        env = ""
-        if pd.env:
-            pairs = ",".join(f'{k}="{_escape_quoted(v)}"' for k, v in pd.env.items())
-            env = f"environment={pairs}\n"
+        pairs = []
+        for key, value in pd.env.items():
+            value = value.replace("%", "%%").replace('"', '\\"')
+            pairs.append(f'{key}="{value}"')
+        env = f"environment={','.join(pairs)}\n" if pairs else ""
         stop = f"stopwaitsecs={pd.stop_timeout}\n" if pd.stop_timeout is not None else ""
         # Lower priority starts first and stops last, so redis outlives what drains into it.
         priority = "priority=100\n" if pd.name.startswith("redis") else ""
         return (
             f"[program:{self.get_program_name(pd)}]\n"
             f"{priority}"
-            f"command={_escape_percent(shlex.join(hook_wrapped_argv(pd)))}\n"
+            # supervisord expands %(name)s in every value, quoted or not.
+            f"command={shlex.join(pd.argv_with_hooks).replace('%', '%%')}\n"
             f"{env}{directory}"
             f"autostart=true\n"
-            # 'unexpected' restarts only on a non-zero exit, matching systemd's
-            # Restart=on-failure; 'true' would also restart a clean, expected exit.
+            # unexpected: restart on a non-zero exit only, like systemd Restart=on-failure.
             f"autorestart={'unexpected' if pd.restart_on_failure else 'false'}\n"
-            f"exitcodes=0\n"
             f"startretries=3\n"
             f"stdout_logfile={self.log_dir}/{pd.name}.log\n"
             f"stderr_logfile={self.log_dir}/{pd.name}.error.log\n"

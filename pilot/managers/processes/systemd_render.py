@@ -3,24 +3,22 @@ from __future__ import annotations
 import shlex
 
 from pilot.managers.processes.base import ServiceRenderer, override
-from pilot.managers.processes.definitions import reject_control_chars
 from pilot.managers.processes.local import ProcessDefinition
 
 
 def _exec(argv: list[str]) -> str:
-    # ExecStart must be absolute, so a bare name goes through `env` for the PATH lookup.
+    # Exec lines need an absolute path, so `env` does the PATH lookup for a bare name.
     if "/" not in argv[0]:
         argv = ["/usr/bin/env", *argv]
-    return shlex.join(argv)
-
-
-def _escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace('"', '\\"')
+    return shlex.join(argv).replace("%", "%%").replace("$", "$$")
 
 
 def _render_env(env: dict) -> str:
-    # Quoted: an unquoted value with a space becomes a second, bogus assignment.
-    return "".join(f'Environment="{key}={_escape(value)}"\n' for key, value in env.items())
+    lines = []
+    for key, value in env.items():
+        value = value.replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
+        lines.append(f'Environment="{key}={value}"\n')
+    return "".join(lines)
 
 
 class SystemdRenderer(ServiceRenderer):
@@ -28,7 +26,6 @@ class SystemdRenderer(ServiceRenderer):
 
     @override
     def render(self, pd: ProcessDefinition) -> str:
-        reject_control_chars(pd)
         working_dir = f"WorkingDirectory={pd.working_dir}\n" if pd.working_dir else ""
         env = _render_env(pd.env)
         stop = f"TimeoutStopSec={pd.stop_timeout}\n" if pd.stop_timeout is not None else ""
@@ -72,7 +69,6 @@ class SystemdRenderer(ServiceRenderer):
         )
 
     def render_admin_service(self, pd: ProcessDefinition, socket_name: str) -> str:
-        reject_control_chars(pd)
         env = _render_env(pd.env)
         return (
             f"[Unit]\n"
