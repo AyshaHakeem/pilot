@@ -110,7 +110,8 @@ class ProcessDefinitionBuilder:
             return self.socketio_definition(dev=True)
         return pd
 
-    def python_env(self) -> dict:
+    @staticmethod
+    def python_env() -> dict:
         """Shared env for Python processes. PYTHONUNBUFFERED keeps stdout unbuffered:
         every runner captures it into a pipe or log file, where Python would otherwise
         block-buffer app-code print() until ~8KB accumulates."""

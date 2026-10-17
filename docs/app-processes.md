@@ -4,7 +4,7 @@ An app can declare background processes in its own `pyproject.toml`. The bench r
 
 ```toml
 [tool.pilot.background_processes.stalwart]
-cmd = ["./stalwart", "--config", "config.toml"]
+command = ["./stalwart", "--config", "config.toml"]
 pre_run = ["./scripts/install_stalwart.sh"]
 post_run = ["rm", "-f", "stalwart.sock"]
 working_dir = "server"
@@ -13,13 +13,14 @@ stop_timeout = 30
 env = { STALWART_PATH = "/opt/stalwart" }
 ```
 
-Only `cmd` is required. The process runs as `<app>-<name>`, here `mail-stalwart`, and logs to `logs/mail-stalwart.log`.
+Each process needs `command` or `frappe_command`. The process runs as `<app>-<name>`, here `mail-stalwart`, and logs to `logs/mail-stalwart.log`.
 
 ## Fields
 
 | Field | Type | Default | Meaning |
 |---|---|---|---|
-| `cmd` | list of strings | required | Executable and arguments. Never a shell string. |
+| `command` | list of strings | one of the two | Executable and arguments. Never a shell string. |
+| `frappe_command` | list of strings | one of the two | A Frappe CLI command, used instead of `command`. |
 | `pre_run` | list of strings | none | Runs before each start. |
 | `post_run` | list of strings | none | Runs after each stop. |
 | `working_dir` | string | app directory | Directory the process runs in. |
@@ -31,7 +32,16 @@ The table key must match `^[a-z0-9][a-z0-9_-]{0,31}$` and env keys must match `^
 
 ## Paths
 
-A relative `working_dir` is read from the app directory. The first entry of `cmd`, `pre_run` and `post_run` resolves from `working_dir` when it contains a slash (`./stalwart`, `bin/stalwart`). An absolute path is used as given, and a bare name (`flow`) is looked up on `PATH`. Paths are not checked on disk, so `pre_run` can download the executable.
+A relative `working_dir` is read from the app directory. The first entry of `command`, `pre_run` and `post_run` resolves from `working_dir` when it contains a slash (`./stalwart`, `bin/stalwart`). An absolute path is used as given, and a bare name (`flow`) is looked up on `PATH`. Paths are not checked on disk, so `pre_run` can download the executable.
+
+## Frappe commands
+
+`frappe_command` runs a command the app adds to the Frappe CLI, the same as `bench <command>`. Pilot runs it with the bench Python in the `sites` directory, so it takes no `working_dir`.
+
+```toml
+[tool.pilot.background_processes.server]
+frappe_command = ["flow-server", "serve"]
+```
 
 ## Hooks
 

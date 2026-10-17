@@ -5,7 +5,7 @@ import tomllib
 from typing import TYPE_CHECKING
 
 from pilot.exceptions import BenchError
-from pilot.managers.processes.definitions import ProcessDefinition
+from pilot.managers.processes.definitions import ProcessDefinition, ProcessDefinitionBuilder
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -54,9 +54,11 @@ class AppProcesses:
         if not isinstance(declaration, dict):
             raise self._error(f"process '{name}' must be a table.")
 
-        working_dir = self.app.path / self._get_string(
-            name, "working_dir", declaration.get("working_dir", ".")
-        )
+        argv, working_dir = self._get_command(name, declaration)
+
+        env = self._get_env(name, declaration.get("env", {}))
+        if "frappe_command" in declaration:
+            env = {**ProcessDefinitionBuilder.python_env(), **env}
 
         restart_on_failure = declaration.get("restart_on_failure", True)
         if not isinstance(restart_on_failure, bool):
@@ -69,9 +71,9 @@ class AppProcesses:
         full_name = f"{self.app.config.name}-{name}"
         return ProcessDefinition(
             name=full_name,
-            argv=self._get_argv(name, "cmd", declaration, working_dir, required=True),
+            argv=argv,
             log_file=self.app.bench.logs_path / f"{full_name}.log",
-            env=self._get_env(name, declaration.get("env", {})),
+            env=env,
             working_dir=working_dir,
             stop_timeout=stop_timeout,
             critical=False,
@@ -80,11 +82,26 @@ class AppProcesses:
             post_run=self._get_argv(name, "post_run", declaration, working_dir),
         )
 
-    def _get_argv(
-        self, name: str, field: str, declaration: dict, working_dir: Path, required: bool = False
-    ) -> list[str]:
+    def _get_command(self, name: str, declaration: dict) -> tuple[list[str], Path]:
+        """argv and working directory from `command`, or from `frappe_command` run in the sites directory."""
+        if ("command" in declaration) == ("frappe_command" in declaration):
+            raise self._error(f"process '{name}' needs exactly one of command or frappe_command.")
+
+        if "command" in declaration:
+            working_dir = self.app.path / self._get_string(
+                name, "working_dir", declaration.get("working_dir", ".")
+            )
+            return self._get_argv(name, "command", declaration, working_dir), working_dir
+
+        if "working_dir" in declaration:
+            raise self._error(f"process '{name}' frappe_command always runs in the sites directory.")
+        sites_path = self.app.bench.sites_path
+        arguments = self._get_argv(name, "frappe_command", declaration, sites_path)
+        return [*self.app.bench.frappe_call, "frappe", *arguments], sites_path
+
+    def _get_argv(self, name: str, field: str, declaration: dict, working_dir: Path) -> list[str]:
         value = declaration.get(field)
-        if value is None and not required:
+        if value is None:
             return []
         if not isinstance(value, list) or not value:
             raise self._error(f"process '{name}' {field} must be a non-empty list of strings.")

@@ -24,7 +24,7 @@ def _app(tmp_path: Path, pyproject: str) -> App:
 def test_reads_full_declaration(tmp_path: Path) -> None:
     app = _app(
         tmp_path,
-        _SECTION + 'cmd = ["./stalwart", "--config", "config.toml"]\n'
+        _SECTION + 'command = ["./stalwart", "--config", "config.toml"]\n'
         'pre_run = ["scripts/install.sh"]\n'
         'post_run = ["rm", "-f", "stalwart.sock"]\n'
         'working_dir = "/opt/stalwart"\n'
@@ -48,7 +48,7 @@ def test_reads_full_declaration(tmp_path: Path) -> None:
 
 
 def test_minimal_declaration_runs_in_the_app_directory(tmp_path: Path) -> None:
-    app = _app(tmp_path, _SECTION + 'cmd = ["./stalwart"]\n')
+    app = _app(tmp_path, _SECTION + 'command = ["./stalwart"]\n')
 
     (definition,) = app.processes.get_definitions()
 
@@ -56,6 +56,16 @@ def test_minimal_declaration_runs_in_the_app_directory(tmp_path: Path) -> None:
     assert definition.argv == [str(app.path / "stalwart")]
     assert definition.restart_on_failure is True
     assert definition.pre_run == definition.post_run == []
+
+
+def test_frappe_command_runs_through_the_bench_helper_in_sites(tmp_path: Path) -> None:
+    app = _app(tmp_path, _SECTION + 'frappe_command = ["flow-server", "serve"]\nenv = { MODE = "test" }\n')
+
+    (definition,) = app.processes.get_definitions()
+
+    assert definition.argv == [*app.bench.frappe_call, "frappe", "flow-server", "serve"]
+    assert definition.working_dir == app.bench.sites_path
+    assert definition.env == {"PYTHONUNBUFFERED": "1", "MODE": "test"}
 
 
 @pytest.mark.parametrize("pyproject", ["", "[project]\nname = 'mail'\n"])
@@ -68,16 +78,18 @@ def test_app_without_declarations_has_no_processes(tmp_path: Path, pyproject: st
     [
         "[tool.pilot\n",
         "[tool.pilot]\nbackground_processes = 1\n",
-        '[tool.pilot.background_processes."Bad Name"]\ncmd = ["/bin/true"]\n',
+        '[tool.pilot.background_processes."Bad Name"]\ncommand = ["/bin/true"]\n',
         _SECTION + "restart_on_failure = true\n",
-        _SECTION + "cmd = []\n",
-        _SECTION + 'cmd = "/bin/true"\n',
-        _SECTION + 'cmd = ["/bin/true\\n[Service]"]\n',
-        _SECTION + 'cmd = ["/bin/true"]\npre_run = "echo hi"\n',
-        _SECTION + 'cmd = ["/bin/true"]\nenv = { "bad-key" = "v" }\n',
-        _SECTION + 'cmd = ["/bin/true"]\nenv = { PORT = 8080 }\n',
-        _SECTION + 'cmd = ["/bin/true"]\nrestart_on_failure = "yes"\n',
-        _SECTION + 'cmd = ["/bin/true"]\nstop_timeout = true\n',
+        _SECTION + "command = []\n",
+        _SECTION + 'command = "/bin/true"\n',
+        _SECTION + 'command = ["/bin/true\\n[Service]"]\n',
+        _SECTION + 'command = ["/bin/true"]\npre_run = "echo hi"\n',
+        _SECTION + 'command = ["/bin/true"]\nenv = { "bad-key" = "v" }\n',
+        _SECTION + 'command = ["/bin/true"]\nenv = { PORT = 8080 }\n',
+        _SECTION + 'command = ["/bin/true"]\nrestart_on_failure = "yes"\n',
+        _SECTION + 'command = ["/bin/true"]\nstop_timeout = true\n',
+        _SECTION + 'command = ["/bin/true"]\nfrappe_command = ["flow-server", "serve"]\n',
+        _SECTION + 'frappe_command = ["flow-server", "serve"]\nworking_dir = "server"\n',
     ],
 )
 def test_malformed_declaration_is_rejected(tmp_path: Path, pyproject: str) -> None:
@@ -86,7 +98,7 @@ def test_malformed_declaration_is_rejected(tmp_path: Path, pyproject: str) -> No
 
 
 def test_bench_runs_declared_processes(tmp_path: Path) -> None:
-    app = _app(tmp_path, _SECTION + 'cmd = ["/usr/bin/stalwart"]\n')
+    app = _app(tmp_path, _SECTION + 'command = ["/usr/bin/stalwart"]\n')
     builder = ProcessDefinitionBuilder(app.bench, Path("/usr/bin/python3"), watch_admin_js=False)
 
     names = [definition.name for definition in builder.prod_process_definitions()]
