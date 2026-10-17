@@ -150,9 +150,7 @@ def test_update_of_a_full_repo_passes_no_depth(
     assert "--depth=1" not in git_calls[0]
 
 
-def test_pinned_tag_fetch_passes_git_auth_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pinned_tag_fetch_passes_git_auth_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], dict]] = []
 
     def record(cmd, **kwargs):
@@ -171,9 +169,7 @@ def test_pinned_tag_fetch_passes_git_auth_env(
     assert calls[0][1]["env"] == {"GIT_CONFIG_COUNT": "1"}
 
 
-def test_pinned_commit_fetch_passes_git_auth_env(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_pinned_commit_fetch_passes_git_auth_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[list[str], dict]] = []
 
     def record(cmd, **kwargs):
@@ -258,6 +254,7 @@ def test_a_commit_the_server_will_not_fetch_by_sha_comes_from_the_full_history(
     _set_dev_install(monkeypatch, False)
     remote, _ = _repo_with_two_commits(tmp_path / "remote")
     first = GitRepo(remote)._run("rev-parse", "HEAD~1").stdout.strip()
+
     def refuse(self: AppRepository, commit: str) -> None:
         subprocess.run(["git", "init", "-q", str(self.app.path)], check=True)
         raise CommandError("fatal: remote error: upload-pack: not our ref")
@@ -344,3 +341,39 @@ def test_has_migrate_changes_sees_a_doctype_moved_out_of_place(tmp_path: Path) -
 
     pin = RevisionPin(kind="commit", ref=target)
     assert _repository(path).has_migrate_changes(pin) is True
+
+
+def _shallow_clone_behind_two_commits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[AppRepository, str, str]:
+    """A shallow clone at a remote's first commit, the remote's middle commit, and its tip."""
+    _set_dev_install(monkeypatch, False)
+    remote, _ = _repo_with_two_commits(tmp_path / "remote")
+    (remote / "file").write_text("third")
+    _git(remote, "commit", "-qam", "third")
+    remote_repo = GitRepo(remote)
+    first, middle = (remote_repo._run("rev-parse", ref).stdout.strip() for ref in ("HEAD~2", "HEAD~1"))
+    repository = _repository_of(remote, tmp_path / "app")
+    repository.clone_rev(first)
+    return repository, middle, remote_repo.head_sha
+
+
+def test_a_shallow_clone_fetches_the_update_target_without_its_history(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A plain fetch into a shallow clone downloads the whole repository, gigabytes for erpnext."""
+    repository, middle, tip = _shallow_clone_behind_two_commits(tmp_path, monkeypatch)
+
+    assert repository.has_migrate_changes(RevisionPin(kind="commit", ref=tip)) is False
+    assert repository.repo.has_commit(tip)
+    assert not repository.repo.has_commit(middle)
+
+
+def test_a_shallow_clone_decides_an_update_by_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repository, _, tip = _shallow_clone_behind_two_commits(tmp_path, monkeypatch)
+    repository.app.installed_version = "1.0.0"
+
+    assert repository._is_ahead_of_installed(tip, "1.1.0") is True
+    assert repository._is_ahead_of_installed(tip, "0.9.0") is False
