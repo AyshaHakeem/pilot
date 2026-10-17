@@ -108,6 +108,19 @@ class SiteApps:
                     self.install_app(dependency)
         self._toggle_app("enable-app", app)
 
+    def get_dependency_closure(self, app: "App") -> list[str]:
+        """The app and each bench app it requires, directly or through another."""
+        names: list[str] = []
+        pending = [app]
+        while pending:
+            current = pending.pop()
+            if current.config.name in names:
+                continue
+            names.append(current.config.name)
+            bench = self.site.bench
+            pending += [bench.app(name) for name in self.get_required_apps(current) if bench.is_app_installed(name)]
+        return names
+
     def get_required_apps(self, app: "App") -> list[str]:
         """Frappe validates these itself and names what is missing, so an unreadable
         hooks.py only costs us the chance to bring a dependency back automatically."""

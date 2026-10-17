@@ -150,7 +150,7 @@ class Site:
         apps = SiteApps(self)
         apps.install_app(app)
         # Frappe installs the required apps along with it.
-        if self.bench.processes.has_declarations([app.config.name, *apps.get_required_apps(app)]):
+        if self.bench.processes.has_declarations(apps.get_dependency_closure(app)):
             self.bench.processes.apply()
 
     def install_app_with_dependencies(self, app: "App") -> list["App"]:
@@ -171,8 +171,10 @@ class Site:
     def enable_app(self, app: "App") -> None:
         from pilot.core.site.apps import SiteApps
 
-        SiteApps(self).enable_app(app)
-        if self.bench.processes.has_declarations([app.config.name]):
+        apps = SiteApps(self)
+        apps.enable_app(app)
+        # The required apps come back with it.
+        if self.bench.processes.has_declarations(apps.get_dependency_closure(app)):
             self.bench.processes.apply()
 
     def disable_app(self, app: "App") -> None:

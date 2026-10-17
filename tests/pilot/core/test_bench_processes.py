@@ -124,13 +124,17 @@ def test_removing_a_handler_folder_counts_as_a_realtime_change(bench) -> None:
     assert not bench.processes.is_realtime_changed_since(2000)
 
 
-def test_installing_an_app_applies_the_processes_of_its_dependencies(bench) -> None:
+@pytest.mark.parametrize("action", ["install_app", "enable_app"])
+def test_an_app_change_applies_the_processes_of_its_dependencies(bench, action) -> None:
+    (bench.apps_path / "helpdesk" / ".git").mkdir(parents=True)
     site = bench.site("site.local")
+    required = {"crm": ["helpdesk"], "helpdesk": ["mail"], "mail": []}
     with (
-        patch.object(SiteApps, "install_app"),
-        patch.object(SiteApps, "get_required_apps", return_value=["mail"]),
+        patch.object(SiteApps, action),
+        patch.object(SiteApps, "get_required_apps", side_effect=lambda app: required[app.config.name]),
+        patch.object(type(bench), "is_app_installed", return_value=True),
         patch.object(BenchProcesses, "apply") as apply,
     ):
-        site.install_app(bench.app("crm"))
+        getattr(site, action)(bench.app("crm"))
 
     apply.assert_called_once_with()
