@@ -110,7 +110,7 @@ tls = true
 allow_bench_management = true
 ```
 
-Nginx proxies admin traffic to `port + 1` on localhost. In production, `admin.domain` is required. `allow_bench_management` permits this admin to manage sibling benches and defaults to enabled only for development installs.
+Nginx proxies admin traffic to `port + 1` on localhost. In production, `admin.domain` is required. `allow_bench_management` permits this admin to manage sibling benches and defaults to enabled only for development installs. It also permits killing database processes and purging binlogs, because both affect every bench on the host. Database settings and the MariaDB restart do not need it.
 
 A new site calls Pilot at `pilot_endpoint` in its `site_config.json`. This is the admin URL on localhost, so it does not depend on DNS or `admin.domain`. The browser loads Cloud Settings from `cloud_server_url` and `cloud_settings_embed_url`, which hold the public admin URL. An admin domain change updates the public URLs and any `pilot_endpoint` that is not on localhost.
 

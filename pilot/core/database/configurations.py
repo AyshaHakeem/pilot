@@ -363,8 +363,6 @@ class DatabaseConfigurations:
             return _MARIADB_ONLY
         if self.config.mariadb.existing:
             return _EXTERNAL_READ_ONLY
-        if not self.config.admin.allow_bench_management:
-            return "Bench management is disabled on this server."
         if not is_linux():
             return "MariaDB configuration changes are available only on Linux."
         if require_reachable:
