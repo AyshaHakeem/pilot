@@ -75,8 +75,7 @@ class UserOwnedDBManager(SystemdUserMixin):
         self._control("stop")
 
     def enable_and_start(self) -> None:
-        """Start the user unit and start it at boot. Safe to repeat, so a retry finishes an
-        earlier setup that stopped after writing the unit."""
+        """Start the user unit and enable it at boot. Safe to repeat."""
         if not self.is_running():
             self._reset_failed_state()
         run_command(self._systemctl("enable", "--now", self._UNIT_NAME), env=self._systemctl_env())

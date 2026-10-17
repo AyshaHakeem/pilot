@@ -109,8 +109,7 @@ class BenchInitializer:
         self.bench.write_apps_txt()
 
     def _build_framework_assets(self, python_env_manager) -> None:
-        """Build the framework's assets here: new-site skips an app that has `sites/assets/<app>`,
-        and a get-app build links that for every app without building it."""
+        """Build the framework app's assets, or download its prebuilt archive."""
         from pilot.core.app import App
 
         python_env_manager.build_assets_for_app(App(self.bench.config.framework_app, self.bench))

@@ -200,8 +200,7 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
 
     @override
     def restart(self) -> None:
-        # systemd passes a target restart on to the sockets as well, which drops the requests
-        # waiting in them. So a running bench restarts its services, and its sockets stay open.
+        # A target restart also restarts the sockets, which drops the requests waiting in them.
         if not self.is_running():
             return super().restart()
         units = [self._unit_name(pd.name) for pd in self.process_definitions if pd.name != "admin"]

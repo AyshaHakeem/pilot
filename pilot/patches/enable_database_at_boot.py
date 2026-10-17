@@ -6,8 +6,7 @@ PATCH_NAME = Path(__file__).stem
 
 
 def run(benches_root: Path) -> None:
-    """Enable Pilot's database unit, which a setup retried after a failed first pass left
-    disabled, so the server came back stopped after a reboot."""
+    """Enable Pilot's database user unit at boot."""
     from pilot.config import BenchConfig
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.database import MariaDBManager, PostgresManager

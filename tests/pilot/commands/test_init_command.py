@@ -175,9 +175,24 @@ def test_a_failed_init_keeps_the_task_records(tmp_path: Path) -> None:
 def test_init_builds_the_framework_assets(tmp_path: Path) -> None:
     """A get-app before the first new-site links `sites/assets/frappe` without building it."""
     bench = make_bench(tmp_path)
-    python_env_manager = MagicMock()
+    initializer = BenchInitializer(bench)
+    steps = [
+        "_ensure_admin_password",
+        "_ensure_database_credentials",
+        "_install_system_packages",
+        "_create_bench_structure",
+        "_create_virtualenv",
+        "_install_framework_apps",
+        "_configure_redis",
+        "_ensure_admin_frontend",
+        "_generate_process_config",
+    ]
+    with (
+        patch.multiple(initializer, **{step: MagicMock() for step in steps}),
+        patch.object(bench.config, "validate"),
+        patch("pilot.managers.environment.PythonEnvManager") as python_env_manager,
+    ):
+        initializer._run_steps(lambda message: None)
 
-    BenchInitializer(bench)._build_framework_assets(python_env_manager)
-
-    built_app = python_env_manager.build_assets_for_app.call_args.args[0]
+    built_app = python_env_manager.return_value.build_assets_for_app.call_args.args[0]
     assert built_app.config.name == bench.config.framework_app.name
