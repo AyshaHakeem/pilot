@@ -297,13 +297,7 @@ def _restart_supervisor(manager) -> bool:
     )
     from pilot.managers.processes.base import UnitGroup
 
-    subprocess.run(
-        [*manager._supervisorctl(), "restart", *manager.get_targets(UnitGroup.WORKLOAD)],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        check=True,
-    )
+    manager.apply_unit_action("restart", UnitGroup.WORKLOAD)
     return True
 
 

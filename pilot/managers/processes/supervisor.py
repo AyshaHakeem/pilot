@@ -25,6 +25,10 @@ _BOOT_JOB = "supervisord-boot"
 _STATUS_LINE = re.compile(r"^(?P<program>\S+)\s+(?P<state>\S+)(?:\s+pid (?P<pid>\d+),)?")
 
 
+def is_redis(pd: ProcessDefinition) -> bool:
+    return pd.app is None and pd.name.startswith("redis")
+
+
 class SupervisorRenderer(ServiceRenderer):
     """Builds the bench's supervisord.conf and per-program blocks."""
 
@@ -41,11 +45,8 @@ class SupervisorRenderer(ServiceRenderer):
             pairs.append(f'{key}="{value}"')
         env = f"environment={','.join(pairs)}\n" if pairs else ""
         stop = f"stopwaitsecs={pd.stop_timeout}\n" if pd.stop_timeout is not None else ""
-        # Lower priority starts first and stops last, so redis outlives what drains into it.
-        priority = "priority=100\n" if pd.name.startswith("redis") else ""
         return (
             f"[program:{self.get_program_name(pd.name)}]\n"
-            f"{priority}"
             # supervisord expands %(name)s in every value, quoted or not.
             f"command={shlex.join(pd.argv_with_hooks).replace('%', '%%')}\n"
             f"{env}{directory}"
@@ -61,12 +62,15 @@ class SupervisorRenderer(ServiceRenderer):
         )
 
     def render_supervisord_conf(self, defs: list[ProcessDefinition], sock, pid) -> str:
-        workload = [pd for pd in defs if pd.name != "admin" and pd.app is None]
+        # A group stops all its programs at once, and `update` restarts every program of a group
+        # whose list changed. So redis and app programs get their own groups.
+        redis = [pd for pd in defs if is_redis(pd)]
         admin = [pd for pd in defs if pd.name == "admin"]
-        # Apps get their own group: `update` restarts every program of a group whose list changed.
         apps = [pd for pd in defs if pd.app is not None]
+        workload = [pd for pd in defs if pd not in (*redis, *admin, *apps)]
         groups = (
             f"[group:{self.bench_name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in workload)}\n\n"
+            + self._group(f"{self.bench_name}-redis", redis)
             + self._group(f"{self.bench_name}-admin", admin)
             + self._group(f"{self.bench_name}-apps", apps)
         )
@@ -138,6 +142,10 @@ class SupervisorProcessManager(ManagedProcessManager):
     def apps_group(self) -> str:
         return f"{self.bench.config.name}-apps"
 
+    @property
+    def redis_group(self) -> str:
+        return f"{self.bench.config.name}-redis"
+
     @override
     def write_config(self) -> None:
         AdminEnvManager(cli_root()).ensure()
@@ -181,7 +189,12 @@ class SupervisorProcessManager(ManagedProcessManager):
         # stop/admin-restart are no-ops when the daemon is down to avoid supervisorctl errors.
         if (action == "stop" or (action == "restart" and role is UnitGroup.ADMIN)) and not self.is_alive():
             return
-        run_command([*self._supervisorctl(), action, *self.get_targets(role)])
+        # supervisorctl handles one group at a time, in order: redis stops last and starts first.
+        targets = self.get_targets(role)
+        if action in ("stop", "restart"):
+            run_command([*self._supervisorctl(), "stop", *targets])
+        if action in ("start", "restart"):
+            run_command([*self._supervisorctl(), "start", *reversed(targets)])
 
     @override
     def are_units_running(self, role: UnitGroup) -> bool:
@@ -220,8 +233,10 @@ class SupervisorProcessManager(ManagedProcessManager):
     def _program(self, definition: ProcessDefinition) -> str:
         if definition.name == "admin":
             group = self.admin_group
+        elif definition.app:
+            group = self.apps_group
         else:
-            group = self.apps_group if definition.app else self.workload_group
+            group = self.redis_group if is_redis(definition) else self.workload_group
         program = SupervisorRenderer(self.bench.config.name, self.bench.logs_path).get_program_name(definition.name)
         return f"{group}:{program}"
 
@@ -256,4 +271,4 @@ class SupervisorProcessManager(ManagedProcessManager):
         # supervisorctl rejects a group it does not have, and the apps group exists only while one runs.
         if f"[group:{self.apps_group}]" in self.supervisor_conf_path.read_text():
             targets.append(f"{self.apps_group}:*")
-        return targets
+        return [*targets, f"{self.redis_group}:*"]
