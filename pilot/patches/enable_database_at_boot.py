@@ -18,10 +18,7 @@ def run(benches_root: Path) -> None:
         if is_applied(bench_dir, PATCH_NAME):
             continue
         config = BenchConfig.read(bench_dir)
-        if config.db_type == "postgres":
-            manager = PostgresManager(config.postgres)
-        else:
-            manager = MariaDBManager(config.mariadb)
+        manager = PostgresManager(config.postgres) if config.db_type == "postgres" else MariaDBManager(config.mariadb)
         if not is_macos() and not manager.config.existing and manager.unit_path.exists():
             manager.enable_and_start()
         mark_applied(bench_dir, PATCH_NAME)
