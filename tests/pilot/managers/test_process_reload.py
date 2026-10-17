@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from unittest.mock import ANY
 
+import pytest
+
 from pilot.managers.processes.definitions import ProcessDefinition
 from pilot.managers.processes.local import ProcessManager
 from tests.pilot.managers.test_managers_extra import make_bench
@@ -227,9 +229,7 @@ def test_failed_critical_launch_stops_the_running_processes(tmp_path: Path, monk
         name="x", argv=["true"], log_file=Path("/dev/null"), working_dir=tmp_path / "gone"
     )
 
-    try:
+    with pytest.raises(OSError):
         manager._spawn_all([missing])
-    except OSError:
-        pass
 
     assert running.poll() is not None
