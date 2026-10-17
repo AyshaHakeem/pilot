@@ -31,7 +31,7 @@ A process runs as `<app>-<name>`, here `mail-stalwart`, and logs to `logs/mail-s
 | `restart_on_failure` | bool | `true` | Restart after a non-zero exit. |
 | `stop_timeout` | int | manager default | Seconds to wait for a graceful stop. |
 
-The table key must match `^[a-z0-9][a-z0-9_-]{0,31}$` and env keys must match `^[A-Z_][A-Z0-9_]*$`. Values must not contain control characters.
+The table key must match `^[a-z0-9][a-z0-9_]{0,31}$`, with no hyphen so `<app>-<name>` stays unique, and env keys must match `^[A-Z_][A-Z0-9_]*$`. Values must not contain control characters.
 
 ## Environment
 

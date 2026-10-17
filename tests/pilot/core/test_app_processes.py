@@ -90,6 +90,8 @@ def test_app_without_declarations_has_no_processes(tmp_path: Path, pyproject: st
         "[tool.pilot\n",
         "[tool.pilot]\nprocesses = 1\n",
         '[tool.pilot.processes."Bad Name"]\ncommand = ["/bin/true"]\n',
+        # `mail` + `smtp-relay` would share a name with app `mail-smtp` + `relay`.
+        '[tool.pilot.processes.smtp-relay]\ncommand = ["/bin/true"]\n',
         _SECTION + "restart_on_failure = true\n",
         _SECTION + "command = []\n",
         _SECTION + 'command = "/bin/true"\n',

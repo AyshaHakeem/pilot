@@ -13,7 +13,8 @@ if TYPE_CHECKING:
 
     from pilot.core.app import App
 
-NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
+# No hyphen, so `<app>-<name>` names one process of one app.
+NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_]{0,31}$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 CONTROL_CHARACTER_PATTERN = re.compile(r"[\x00-\x1f\x7f]")
 # Fixed rather than the caller's PATH, so a unit reads the same whoever writes it.
