@@ -32,6 +32,8 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
     # Until write_config compares them, assume both admin units changed.
     admin_service_changed = True
     admin_socket_changed = True
+    # Workload sockets write_config rewrote, which install_config must hand their ports to.
+    changed_sockets: tuple[str, ...] = ()
 
     @property
     def systemd_conf_dir(self) -> Path:
@@ -40,6 +42,7 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
     @override
     def write_config(self) -> None:
         service_before, socket_before = self._admin_unit_text()
+        sockets_before = self._workload_socket_text()
         AdminEnvManager(cli_root()).ensure()
         self._ensure_redis_config()
         self._ensure_gunicorn_config()
@@ -65,6 +68,9 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
             else:
                 (self.systemd_conf_dir / self._unit_name(pd.name)).write_text(renderer.render(pd))
                 workload_units.append(self._unit_name(pd.name))
+                if socket := renderer.get_socket_name(pd):
+                    (self.systemd_conf_dir / socket).write_text(renderer.render_socket(pd))
+                    workload_units.append(socket)
         (self.systemd_conf_dir / self._target_name()).write_text(renderer.render_target(workload_units))
         if self.bench.config.central.enabled:
             (self.systemd_conf_dir / self._central_bootstrap_name()).write_text(
@@ -78,6 +84,15 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         service_after, socket_after = self._admin_unit_text()
         self.admin_service_changed = service_after != service_before
         self.admin_socket_changed = socket_after != socket_before
+        sockets_after = self._workload_socket_text()
+        self.changed_sockets = tuple(
+            name for name, text in sockets_after.items() if sockets_before.get(name) != text
+        )
+
+    def _workload_socket_text(self) -> dict[str, str]:
+        """The workload socket units as they stand on disk, by name."""
+        sockets = self.systemd_conf_dir.glob("*.socket") if self.systemd_conf_dir.is_dir() else []
+        return {path.name: path.read_text() for path in sockets if path.name != self._admin_socket_name()}
 
     def _admin_unit_text(self) -> list[str]:
         """The admin unit files as they stand on disk."""
@@ -91,8 +106,11 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
 
         self.user_unit_dir.mkdir(parents=True, exist_ok=True)
         defs = self._prod_process_definitions()
+        renderer = SystemdRenderer(self.bench.config.name)
+        sockets = {socket for pd in defs if (socket := renderer.get_socket_name(pd))}
         units = (
             set(self._unit_name(pd.name) for pd in defs)
+            | sockets
             | {self._target_name(), self._admin_socket_name()}
             | self._central_bootstrap_units()
         )
@@ -127,6 +145,18 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         self.enable_admin_at_boot()
         self._enable_central_bootstrap(env)
         self._activate_admin(env)
+        self._activate_sockets(env)
+
+    def _activate_sockets(self, env: dict) -> None:
+        """A service that bound its port itself has to let go before its new socket can listen."""
+        for socket in self.changed_sockets:
+            service = socket.removesuffix(".socket") + ".service"
+            was_active = subprocess.run(self._systemctl("is-active", service), capture_output=True, env=env)
+            subprocess.run(self._systemctl("stop", service), capture_output=True, env=env)
+            run_command(self._systemctl("restart", socket), env=env, timeout=_SYSTEMCTL_TIMEOUT)
+            if was_active.returncode == 0:
+                run_command(self._systemctl("start", service), env=env, timeout=_SYSTEMCTL_TIMEOUT)
+        self.changed_sockets = ()
 
     @staticmethod
     def _ensure_linger() -> None:
@@ -160,8 +190,6 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
         env = self._systemctl_env()
         if role is UnitGroup.ADMIN:
             self._control_admin(action, env)
-        elif role is UnitGroup.WEB:
-            run_command(self._systemctl("restart", self._unit_name("web")), env=env)
         else:
             run_command(self._systemctl(action, self._target_name()), env=env)
 

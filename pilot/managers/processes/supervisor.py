@@ -278,8 +278,6 @@ class SupervisorProcessManager(ManagedProcessManager):
     def get_targets(self, role: UnitGroup) -> list[str]:
         if role is UnitGroup.ADMIN:
             return [f"{self.admin_group}:*"]
-        if role is UnitGroup.WEB:
-            return [f"{self.bench.config.name}:{self.bench.config.name}-web"]
         targets = [f"{self.workload_group}:*"]
         # supervisorctl rejects a group it does not have, and the apps group exists only while one runs.
         if f"[group:{self.apps_group}]" in self.supervisor_conf_path.read_text():

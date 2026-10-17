@@ -97,3 +97,17 @@ def test_hooked_command_is_a_single_line() -> None:
     definition = _definition(pre_run=["install.sh"], post_run=["cleanup.sh"])
 
     assert "\n" not in definition.argv_with_hooks[2]
+
+
+def test_systemd_web_listens_through_a_socket_a_restart_leaves_open() -> None:
+    renderer = SystemdRenderer("bench")
+    web = ProcessDefinition(
+        name="web", argv=["/bin/gunicorn"], log_file=Path("/tmp/x.log"), listen_address="127.0.0.1:8000"
+    )
+
+    socket = renderer.render_socket(web)
+
+    assert "Requires=bench-web.socket\nAfter=bench-web.socket\n" in renderer.render(web)
+    assert "ListenStream=127.0.0.1:8000\n" in socket
+    assert "StopPropagatedFrom=bench.target\n" in socket  # pilot stop stops it; a restart does not
+    assert "PartOf" not in socket

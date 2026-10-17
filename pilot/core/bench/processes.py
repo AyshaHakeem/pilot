@@ -66,6 +66,14 @@ class BenchProcesses:
         apps = [app for app in self.bench.apps() if app.config.name in names or app.module_name in names]
         return any(app.processes.get_definitions() for app in apps)
 
+    def get_realtime_change_time(self) -> float:
+        """Latest change to the code the socketio server loads: frappe's server and each app's handlers."""
+        paths = [self.bench.apps_path / "frappe" / name for name in ("socketio.js", "node_utils.js")]
+        for app in self.bench.apps():
+            for folder in (app.path / "realtime", app.path / app.module_name / "realtime"):
+                paths += [path for path in folder.rglob("*") if "__pycache__" not in path.parts]
+        return max((path.stat().st_mtime for path in paths if path.is_file()), default=0.0)
+
     def apply(self) -> None:
         """Write, link and start the production process set. Running processes keep running;
         a new app process starts, and a removed one stops and is unlinked."""

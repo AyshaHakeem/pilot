@@ -30,6 +30,7 @@ class ProcessDefinition:
     critical: bool = True  # dev runner stops the whole bench when this process exits
     app: str | None = None  # the app that declares it; None for the bench's own processes
     socket_file: Path | None = None  # removed before each start; a stale one blocks listen()
+    listen_address: str | None = None  # systemd holds it, so a restart queues requests instead of refusing them
     restart_on_failure: bool = True
     pre_run: list[str] = field(default_factory=list)
     post_run: list[str] = field(default_factory=list)
@@ -155,6 +156,8 @@ class ProcessDefinitionBuilder:
             log_file=self.bench.logs_path / "web.log",
             env=self.python_env(),
             working_dir=sites,
+            # gunicorn takes systemd's socket when given one, and binds this address itself otherwise.
+            listen_address=f"127.0.0.1:{self.bench.config.http_port}",
         )
 
     def lite_definition(self, dev: bool = False) -> ProcessDefinition:

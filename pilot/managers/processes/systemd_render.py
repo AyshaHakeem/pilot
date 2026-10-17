@@ -39,11 +39,13 @@ class SystemdRenderer(ServiceRenderer):
             if pd.name.startswith("redis")
             else f"After={self.bench_name}-redis_cache.service {self.bench_name}-redis_queue.service\n"
         )
+        socket = self.get_socket_name(pd)
+        requires_socket = f"Requires={socket}\nAfter={socket}\n" if socket else ""
         return (
             f"[Unit]\n"
             f"Description={self.bench_name} {pd.name}\n"
             f"PartOf={self.bench_name}.target\n"
-            f"{after_redis}\n"
+            f"{after_redis}{requires_socket}\n"
             f"[Service]\n"
             f"Type=simple\n"
             f"{working_dir}{env}"
@@ -114,6 +116,19 @@ class SystemdRenderer(ServiceRenderer):
             f"StandardError=append:{log_file}.error.log\n\n"
             f"[Install]\n"
             f"WantedBy=default.target\n"
+        )
+
+    def get_socket_name(self, pd: ProcessDefinition) -> str | None:
+        return f"{self.bench_name}-{pd.name}.socket" if pd.listen_address else None
+
+    def render_socket(self, pd: ProcessDefinition) -> str:
+        # A target restart restarts the service only, so requests wait in the socket's queue.
+        return (
+            f"[Unit]\n"
+            f"Description={self.bench_name} {pd.name} (socket)\n"
+            f"StopPropagatedFrom={self.bench_name}.target\n\n"
+            f"[Socket]\n"
+            f"ListenStream={pd.listen_address}\n"
         )
 
     def render_target(self, unit_names: list[str]) -> str:

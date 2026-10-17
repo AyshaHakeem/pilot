@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -66,3 +67,13 @@ def test_a_broken_app_does_not_block_checking_another(bench) -> None:
     (bench.apps_path / "crm" / "pyproject.toml").write_text("[tool.pilot\n")
 
     assert bench.processes.has_declarations(["mail"])
+
+
+def test_realtime_change_time_follows_handlers_not_compiled_files(bench) -> None:
+    handlers = bench.apps_path / "mail" / "mail" / "realtime"
+    (handlers / "__pycache__").mkdir(parents=True)
+    (handlers / "handlers.py").write_text("")
+    os.utime(handlers / "handlers.py", (1000, 1000))
+    (handlers / "__pycache__" / "handlers.pyc").write_text("")
+
+    assert bench.processes.get_realtime_change_time() == 1000

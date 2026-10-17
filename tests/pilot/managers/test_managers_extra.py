@@ -681,6 +681,7 @@ class _FakeProcessManager:
         self.prepared = 0
         self.generated = 0
         self._is_running = True
+        self.is_realtime_stale = False
 
         fake = self
 
@@ -705,6 +706,20 @@ class _FakeProcessManager:
 
             def are_units_running(self_impl, role) -> bool:
                 return fake._is_running
+
+            def _is_realtime_stale(self_impl, definitions) -> bool:
+                return fake.is_realtime_stale
+
+            def restart_processes(self_impl, definitions) -> None:
+                fake.calls.append(("restart", [definition.name for definition in definitions]))
+
+            @property
+            def process_definitions(self_impl):
+                from pilot.managers.processes.definitions import ProcessDefinition
+
+                names = [("web", None), ("socketio", None), ("worker_pool", None), ("redis_cache", None)]
+                names += [("admin", None), ("mail-stalwart", "mail")]
+                return [ProcessDefinition(name, ["x"], Path("/tmp/x.log"), app=app) for name, app in names]
 
             def _clear_frappe_cache(self_impl) -> None:
                 pass
@@ -749,19 +764,22 @@ def test_supervised_stop_admin_targets_admin_only() -> None:
 
 
 def test_supervised_reload_workers_web_only_restarts_web() -> None:
-    from pilot.managers.processes.base import UnitGroup
-
     fake = _FakeProcessManager()
     fake.manager.reload_workers(web_only=True)
-    assert fake.calls == [("restart", UnitGroup.WEB)]
+    assert fake.calls == [("restart", ["web"])]
 
 
-def test_supervised_reload_workers_full_restarts_workload() -> None:
-    from pilot.managers.processes.base import UnitGroup
-
+def test_supervised_reload_workers_keeps_socketio_redis_and_admin_running() -> None:
     fake = _FakeProcessManager()
-    fake.manager.reload_workers(web_only=False)
-    assert fake.calls == [("restart", UnitGroup.WORKLOAD)]
+    fake.manager.reload_workers()
+    assert fake.calls == [("restart", ["web", "worker_pool", "mail-stalwart"])]
+
+
+def test_supervised_reload_workers_restarts_socketio_when_realtime_changed() -> None:
+    fake = _FakeProcessManager()
+    fake.is_realtime_stale = True
+    fake.manager.reload_workers()
+    assert fake.calls == [("restart", ["web", "socketio", "worker_pool", "mail-stalwart"])]
 
 
 def test_supervised_reload_workers_noop_when_not_running() -> None:
