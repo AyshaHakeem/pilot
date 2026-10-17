@@ -45,14 +45,15 @@ class ProductionSetup:
             self.bench.config.validate()
             old_pm = self._installed_manager()
             self._write_dns_multitenancy()
+            # Free the old manager's ports before the new one binds them: systemd binds
+            # the admin socket during setup, before the workload starts.
+            self._migrate_from(old_pm, on_progress)
             pm = self.bench.config.production.process_manager
             if pm == "systemd":
                 self._setup_systemd()
             else:
                 self._setup_supervisor()
 
-            # Free the old manager's ports before the new one binds them.
-            self._migrate_from(old_pm, on_progress)
             self._start_workload()
             self.bench.setup_nginx(on_progress=on_progress)
             self._setup_letsencrypt_if_needed()
@@ -118,14 +119,18 @@ class ProductionSetup:
             )
 
     def _installed_manager(self) -> str | None:
-        """Return the process manager already deployed on disk, if any."""
+        """Return the process manager that runs the bench, else the one deployed on disk.
+        A switch that failed halfway leaves both configured, and the running one must be torn down."""
         from pilot.managers.processes.supervisor import SupervisorProcessManager
         from pilot.managers.processes.systemd import SystemdProcessManager
 
-        if SystemdProcessManager(self.bench).is_configured():
-            return "systemd"
-        if SupervisorProcessManager(self.bench).is_configured():
-            return "supervisor"
+        managers = {"systemd": SystemdProcessManager(self.bench), "supervisor": SupervisorProcessManager(self.bench)}
+        for name, manager in managers.items():
+            if manager.is_running():
+                return name
+        for name, manager in managers.items():
+            if manager.is_configured():
+                return name
         return None
 
     def _migrate_from(self, old_pm: str | None, on_progress: Callable[[str], None]) -> None:

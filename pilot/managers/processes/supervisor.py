@@ -70,7 +70,8 @@ class SupervisorRenderer(ServiceRenderer):
         workload = [pd for pd in defs if pd not in (*redis, *admin, *apps)]
         groups = (
             f"[group:{self.bench_name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in workload)}\n\n"
-            + self._group(f"{self.bench_name}-redis", redis)
+            # supervisord starts and shuts down whole groups by priority; lower starts first, stops last.
+            + self._group(f"{self.bench_name}-redis", redis, "priority=100\n")
             + self._group(f"{self.bench_name}-admin", admin)
             + self._group(f"{self.bench_name}-apps", apps)
         )
@@ -100,10 +101,10 @@ class SupervisorRenderer(ServiceRenderer):
     def get_program_name(self, name: str) -> str:
         return f"{self.bench_name}-{name.replace('_', '-')}"
 
-    def _group(self, name: str, items: list[ProcessDefinition]) -> str:
+    def _group(self, name: str, items: list[ProcessDefinition], extra: str = "") -> str:
         if not items:
             return ""
-        return f"[group:{name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in items)}\n\n"
+        return f"[group:{name}]\nprograms={','.join(self.get_program_name(pd.name) for pd in items)}\n{extra}\n"
 
 
 class SupervisorProcessManager(ManagedProcessManager):
