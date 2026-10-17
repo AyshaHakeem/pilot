@@ -63,9 +63,9 @@ class BenchProcesses:
             return []
 
         active = self.active_apps
-        for app, error in broken.items():
+        for app, failure in broken.items():
             if app.module_name in active:
-                raise error
+                raise failure
         return self.get_running(declared, active)
 
     def get_running(
