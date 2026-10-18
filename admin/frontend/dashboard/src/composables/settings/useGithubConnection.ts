@@ -10,12 +10,15 @@ export const useGithubConnection = () => {
   const loading = ref(true)
   const connecting = ref(false)
   const verifying = ref(false)
+  const redirecting = ref(false)
   const error = ref('')
   const status = ref<GitConnection | null>(null)
   const username = ref('')
   const token = ref('')
 
   const viaCentral = computed(() => status.value?.auth_type === 'github_app')
+  const centralAvailable = computed(() => Boolean(status.value?.central?.available))
+  const centralAccounts = computed(() => status.value?.central?.connections ?? [])
   const connected = computed(() =>
     Boolean(status.value?.connected && (viaCentral.value || status.value?.is_token_valid)),
   )
@@ -70,6 +73,23 @@ export const useGithubConnection = () => {
     }
   }
 
+  const connectViaCentral = async (returnUrl: string) => {
+    redirecting.value = true
+    error.value = ''
+
+    try {
+      const result = await gitApi.connectViaCentral(returnUrl)
+
+      if (hasApiError(result))
+        throw new Error(apiErrorMessage(result, 'Could not reach Frappe Cloud.'))
+
+      window.location.assign(result.url)
+    } catch (e) {
+      error.value = errorMessage(e, 'Could not reach Frappe Cloud.')
+      redirecting.value = false
+    }
+  }
+
   const verifyConnection = async () => {
     verifying.value = true
 
@@ -103,14 +123,19 @@ export const useGithubConnection = () => {
     loading,
     connecting,
     verifying,
+    redirecting,
     error,
     status,
     username,
     token,
     connected,
+    viaCentral,
+    centralAvailable,
+    centralAccounts,
     tokenHelpUrl,
     load,
     connect,
+    connectViaCentral,
     verifyConnection,
     disconnect,
   }

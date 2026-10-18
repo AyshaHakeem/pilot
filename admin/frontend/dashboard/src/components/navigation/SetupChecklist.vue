@@ -1,6 +1,4 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import {
   Button,
   Checkbox,
@@ -12,11 +10,11 @@ import {
   TextInput,
   toast,
 } from 'frappe-ui'
-
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { settingsApi } from '@/api/settings'
 import AppIcon from '@/components/apps/AppIcon.vue'
 import CircularProgress from '@/components/common/CircularProgress.vue'
-
-import { settingsApi } from '@/api/settings'
 import { useGithubConnection } from '@/composables/settings/useGithubConnection'
 import { useObjectStorage } from '@/composables/settings/useObjectStorage'
 import { useNewSite } from '@/composables/sites/useNewSite'
@@ -24,15 +22,38 @@ import { useSites } from '@/composables/sites/useSites'
 import { errorMessage } from '@/utils/error'
 
 const route = useRoute()
+const router = useRouter()
 const { sites, load: loadSites } = useSites()
 const storage = reactive(useObjectStorage())
 const github = reactive(useGithubConnection())
 const site = reactive(useNewSite())
 
 const onboarding = ref('')
+const siteStarted = ref(false)
+const useToken = ref(false)
+const origin = window.location.origin
+
+const githubViaCloud = computed(() => github.centralAvailable && !useToken.value)
+
 const loaded = ref(false)
 
 const steps = computed(() => [
+  {
+    id: 'github',
+    name: 'GitHub',
+    label: 'Connect GitHub',
+    icon: 'lucide-git-branch',
+    title: 'Connect your GitHub account',
+    description: 'Lets Pilot install apps from private repos.',
+    action: githubViaCloud.value ? 'Connect GitHub' : 'Next',
+    savingLabel: githubViaCloud.value ? 'Opening Frappe Cloud' : 'Verifying token',
+    done: github.connected,
+    saving: github.connecting || github.redirecting,
+    canSave: githubViaCloud.value || Boolean(github.token.trim()),
+    save: githubViaCloud.value
+      ? () => github.connectViaCentral(`${origin}${route.path}?github=connected`)
+      : github.connect,
+  },
   {
     id: 'site',
     name: 'First site',
@@ -41,25 +62,11 @@ const steps = computed(() => [
     title: 'Launch your first site',
     description: 'Pick a name and apps. Pilot handles the rest.',
     action: 'Create site',
-    savingLabel: 'Creating site',
-    done: sites.value.length > 0,
-    saving: site.creating,
-    canSave: Boolean(site.name),
+    savingLabel: undefined,
+    done: siteStarted.value || sites.value.length > 0,
+    saving: false,
+    canSave: !site.nameError,
     save: createSite,
-  },
-  {
-    id: 'github',
-    name: 'GitHub',
-    label: 'Connect GitHub',
-    icon: 'lucide-git-branch',
-    title: 'Connect your GitHub account',
-    description: 'Lets Pilot install apps from private repos.',
-    action: 'Next',
-    savingLabel: 'Verifying token',
-    done: github.connected,
-    saving: github.connecting,
-    canSave: Boolean(github.token.trim()),
-    save: github.connect,
   },
   {
     id: 'storage',
@@ -99,8 +106,8 @@ const nodeState = (index: number) => {
 const railClasses = {
   done: 'border-outline-green-5 text-ink-green-7',
   current: 'bg-surface-base border-dashed border-outline-gray-9 text-ink-gray-9',
-  skipped: 'border-dashed border-outline-gray-3 text-ink-gray-5',
-  upcoming: 'border-dashed border-outline-gray-3 text-ink-gray-5',
+  skipped: 'border-dashed border-outline-gray-4 text-ink-gray-5',
+  upcoming: 'border-dashed border-outline-gray-4 text-ink-gray-5',
 }
 
 const statusLabels = {
@@ -126,6 +133,8 @@ const firstPending = () => {
 const open = (index = firstPending()) => {
   current.value = index
   isOpen.value = true
+
+  loadSites()
 }
 
 const advance = () => {
@@ -143,12 +152,20 @@ const submit = async () => {
 
 const createSite = async () => {
   const name = site.name
-  const taskId = await site.create()
 
-  if (!taskId) return false
+  siteStarted.value = true
 
-  toast.success(`Creating ${name}. You can keep setting up meanwhile.`)
-  await loadSites()
+  site.create().then((taskId) => {
+    if (!taskId) {
+      siteStarted.value = false
+      current.value = steps.value.findIndex((step) => step.id === 'site')
+
+      return
+    }
+
+    toast.success(`Creating ${name} in the background`)
+    loadSites()
+  })
 
   return true
 }
@@ -183,7 +200,15 @@ const refresh = async () => {
     onboarding.value = settings.bench.onboarding
     loaded.value = true
 
-    if (!onboarding.value && isVisible.value && !isOpen.value) open()
+    const returnedFromGithub = route.query.github === 'connected'
+
+    if (returnedFromGithub) {
+      router.replace({ query: { ...route.query, github: undefined } })
+
+      if (github.viaCentral) toast.success('GitHub connected through Frappe Cloud')
+    }
+
+    if ((returnedFromGithub || !onboarding.value) && isVisible.value && !isOpen.value) open()
   } catch {
     loaded.value = false
   }
@@ -196,12 +221,9 @@ watch(
   },
 )
 
-watch(
-  () => isOpen.value && currentStep.value.id === 'site',
-  (showing) => {
-    if (showing) site.reset()
-  },
-)
+watch(isOpen, (opened) => {
+  if (opened) site.reset()
+})
 
 onMounted(refresh)
 </script>
@@ -215,7 +237,8 @@ onMounted(refresh)
         <h2 class="text-ink-gray-8 text-base-semibold">Get started</h2>
         <p class="flex items-center gap-1.5 mt-1 text-ink-gray-5 text-sm">
           <CircularProgress :value="progress" />
-          {{ doneCount }} of {{ steps.length }} done
+          {{ doneCount }}
+          of {{ steps.length }} done
         </p>
 
         <ol aria-hidden="true" class="mt-6">
@@ -226,7 +249,7 @@ onMounted(refresh)
             :class="
               step.done
                 ? 'after:w-px after:bg-surface-green-7'
-                : 'after:border-l after:border-outline-gray-3 after:border-dashed'
+                : 'after:border-l after:border-outline-gray-4 after:border-dashed'
             "
           >
             <span
@@ -282,26 +305,73 @@ onMounted(refresh)
             <ErrorMessage class="mt-4" :message="storage.error" />
           </template>
 
-          <template v-else-if="currentStep.id === 'github'">
-            <TextInput v-model="github.username" label="GitHub username" placeholder="octocat" />
+          <template v-else-if="currentStep.id === 'github' && github.viaCentral">
+            <p class="mb-4 text-ink-gray-7 text-p-base">
+              Connected through Frappe Cloud. Pilot can read these repos.
+            </p>
 
-            <TextInput
-              v-model="github.token"
-              class="mt-3.5"
-              label="Personal access token"
-              type="password"
-              placeholder="ghp_…"
-              @keydown.enter="submit"
+            <div class="space-y-4 -mr-4 pr-4 max-h-64 overflow-y-auto">
+              <ul v-for="account in github.centralAccounts" :key="account.account">
+                <li class="mb-1 text-ink-gray-5 text-sm-medium">{{ account.account }}</li>
+
+                <li
+                  v-for="repository in account.repositories"
+                  :key="repository"
+                  class="flex items-center gap-2 py-1.5 text-ink-gray-8 text-base before:size-4 before:text-ink-gray-5 before:lucide-book-marked"
+                >
+                  {{ repository.slice(account.account.length + 1) }}
+                </li>
+              </ul>
+            </div>
+
+            <Button
+              class="self-start mt-auto -ml-2"
+              variant="ghost"
+              icon-left="lucide-settings-2"
+              label="Manage repositories"
+              :loading="github.redirecting"
+              @click="github.connectViaCentral(`${origin}${route.path}?github=connected`)"
+            />
+          </template>
+
+          <template v-else-if="currentStep.id === 'github'">
+            <ol
+              v-if="githubViaCloud"
+              class="space-y-3 pl-5 marker:text-ink-gray-5 text-ink-gray-7 text-p-base list-decimal"
             >
-              <template #description>
-                Needs the <code>repo</code> scope.
-                <a :href="github.tokenHelpUrl" target="_blank" rel="noopener" class="underline">
-                  Generate one
-                </a>
-              </template>
-            </TextInput>
+              <li>Frappe Cloud opens and asks GitHub which repos to share.</li>
+              <li>Pick the repos that hold your Frappe apps. Pilot only gets read access.</li>
+              <li>You land back here to create your first site.</li>
+            </ol>
+
+            <template v-else>
+              <TextInput v-model="github.username" label="GitHub username" placeholder="octocat" />
+
+              <TextInput
+                v-model="github.token"
+                class="mt-3.5"
+                label="Personal access token"
+                type="password"
+                placeholder="ghp_…"
+                @keydown.enter="submit"
+              >
+                <template #description>
+                  Needs the <code>repo</code> scope.
+                  <a :href="github.tokenHelpUrl" target="_blank" rel="noopener" class="underline">
+                    Generate one
+                  </a>
+                </template>
+              </TextInput>
+            </template>
 
             <ErrorMessage class="mt-4" :message="github.error" />
+
+            <Button
+              v-if="github.centralAvailable && !github.connected"
+              class="self-start mt-auto -ml-2"
+              :label="useToken ? 'Use Frappe Cloud instead' : 'Use a token instead'"
+              @click="useToken = !useToken"
+            />
           </template>
 
           <template v-else>
@@ -356,13 +426,14 @@ onMounted(refresh)
 
                 <p
                   v-if="!site.filteredApps.length"
-                  class="py-6 text-ink-gray-5 text-p-sm text-center"
+                  class="place-items-center grid h-72 text-ink-gray-5 text-p-sm"
                 >
                   No apps match "{{ site.appSearch }}"
                 </p>
 
                 <div
-                  class="app-list content-start gap-2 grid sm:grid-cols-2 -mr-4 pr-4 pb-6 max-h-72 overflow-y-auto [scrollbar-color:var(--outline-gray-3)_transparent] [scrollbar-width:thin]"
+                  v-else
+                  class="app-list content-start gap-2 grid sm:grid-cols-2 -mr-4 pr-4 pb-6 h-72 overflow-y-auto [scrollbar-color:var(--outline-gray-3)_transparent] [scrollbar-width:thin]"
                 >
                   <button
                     v-for="app in site.filteredApps"
@@ -448,7 +519,7 @@ onMounted(refresh)
       <template v-for="(step, index) in steps" :key="step.id">
         <p
           v-if="step.done"
-          class="flex items-center gap-2 py-1.5 text-ink-gray-5 text-sm before:size-4 before:text-ink-green-6 before:lucide-circle-check"
+          class="flex items-center gap-2 py-1.5 text-ink-gray-5 text-sm before:size-4 before:text-ink-green-7 before:lucide-circle-check"
         >
           {{ step.label }}
         </p>
