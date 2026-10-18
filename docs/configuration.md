@@ -248,7 +248,7 @@ Settings, Database, Database Configurations exposes `MemoryHigh` and `MemoryMax`
 
 On a host with less than 800 MB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
 
-`mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
+`mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. Selecting a split clears manual service-limit overrides. When the new limits apply, Pilot saves them in both the main unit and its memory drop-in so they survive a reboot with unchanged RAM. A deferred shrink keeps the previous saved limits until it can apply safely. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
 
 The domain provider controls the edge route for each hostname. Its route policy gives Pilot the public scheme, origin scheme, and client IP source.
 

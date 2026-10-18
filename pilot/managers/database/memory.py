@@ -73,7 +73,6 @@ class MariaDBMemory:
                 atomic_write_private_text(manager.managed_cnf_path, manager._render_managed_options(options))
                 sizing = manager._write_config()
                 manager._install_unit(sizing, preserve_swap_limit=True, reload_manager=False)
-                self.write_limits(sizing.memory_high_mb, sizing.memory_max_mb)
                 self.store_overrides(None, None)
                 manager._set_runtime_memory_limits(sizing)
             else:

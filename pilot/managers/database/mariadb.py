@@ -920,6 +920,7 @@ class MariaDBManager(UserOwnedDBManager):
             )
             content = content.replace("MemorySwapMax=0\n", swap_limits)
         atomic_write_private_text(self.unit_path, content)
+        self.memory.write_limits(sizing.memory_high_mb, sizing.memory_max_mb)
         self.memory.install_startup_hook()
         if reload_manager:
             run_command(self._systemctl("daemon-reload"), env=self._systemctl_env())

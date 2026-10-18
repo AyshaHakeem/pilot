@@ -67,6 +67,49 @@ def test_real_manager_reads_live_systemd_memory_in_mib(raw_value, expected) -> N
         assert manager._unit_memory_mb("MemoryMax") == expected
 
 
+@pytest.mark.parametrize(
+    ("old_share", "new_share", "released"), [(0.5, 0.7, True), (0.7, 0.3, True), (0.7, 0.3, False)]
+)
+def test_memory_split_limits_survive_an_unchanged_ram_reboot(
+    tmp_path: Path, old_share: float, new_share: float, released: bool
+) -> None:
+    manager = MariaDBManager(MariaDBConfig(memory_share=new_share))
+    previous = calculate_mariadb_memory(8192, old_share)
+    sizing = calculate_mariadb_memory(8192, new_share)
+    units = tmp_path / "units"
+    units.mkdir()
+    benches = tmp_path / "benches"
+    benches.mkdir()
+    with (
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(type(manager), "user_unit_dir", new_callable=PropertyMock, return_value=units),
+        patch.object(manager, "_require_linux_managed_server"),
+        patch.object(manager, "_total_memory_mb", return_value=8192),
+        patch.object(manager, "_drop_oversized_buffer_pool_override"),
+        patch.object(manager, "_write_config", return_value=sizing),
+        patch.object(manager, "_wait_until_healthy"),
+        patch.object(manager, "_unit_memory_mb", return_value=previous.memory_max_mb),
+        patch.object(manager, "_apply_live_sizing"),
+        patch.object(manager, "_has_released_memory", return_value=released),
+        patch.object(manager, "_set_runtime_memory_limits") as apply_limits,
+        patch.object(MariaDBMemory, "boot_id", new_callable=PropertyMock, return_value="new-boot"),
+        patch("pilot.managers.database.memory.benches_dir", return_value=benches),
+        patch("pilot.managers.database.mariadb.run_command"),
+    ):
+        manager.unit_path.write_text(manager._render_unit(previous))
+        manager.memory.write_limits(previous.memory_high_mb, previous.memory_max_mb)
+        manager.memory.state_path.parent.mkdir(parents=True)
+        manager.memory.state_path.write_text(json.dumps({"boot_id": "old-boot", "total_memory_mb": 8192}))
+        manager.tune_to_host_locked()
+        manager.memory.prepare_boot()
+        expected = sizing if released else previous
+        assert f"MemoryMax={expected.memory_max_mb}M" in manager.unit_path.read_text()
+        assert manager.memory.limits_path.read_text() == (
+            f"[Service]\nMemoryHigh={expected.memory_high_mb}M\nMemoryMax={expected.memory_max_mb}M\n"
+        )
+        assert apply_limits.called is released
+
+
 def test_installation_starts_sizing_outside_the_lock_before_the_first_restart(tmp_path: Path) -> None:
     manager = MariaDBManager(MariaDBConfig())
     units = tmp_path / "units"
@@ -159,7 +202,9 @@ def test_boot_resets_only_on_a_new_boot_with_changed_ram(memory, boot, capacity,
     if reset:
         persisted = json.loads(memory.manager.managed_cnf_path.read_text())
         assert persisted == {"connect-timeout": "30", "innodb-snapshot-isolation": "ON"}
-        assert "MemorySwapMax" not in memory.limits_path.read_text()
+        memory.manager._install_unit.assert_called_once_with(
+            memory.manager._write_config.return_value, preserve_swap_limit=True, reload_manager=False
+        )
     else:
         assert memory.manager.managed_cnf_path.read_text() == "custom overrides"
 
