@@ -70,7 +70,9 @@ def test_small_vm_limits_leave_memory_for_other_pilot_processes() -> None:
     assert sizing.memory_max_mb < sizing.total_memory_mb
 
 
-@pytest.mark.parametrize(("total_memory_mb", "buffer_pool_mb"), [(512, 64), (799, 64), (800, 128), (1024, 128)])
+@pytest.mark.parametrize(
+    ("total_memory_mb", "buffer_pool_mb"), [(512, 64), (799, 64), (800, 128), (1024, 128)]
+)
 def test_a_host_under_800_mb_gets_the_small_buffer_pool(total_memory_mb: int, buffer_pool_mb: int) -> None:
     assert calculate_mariadb_memory(total_memory_mb).innodb_buffer_pool_mb == buffer_pool_mb
 
@@ -191,7 +193,9 @@ def test_provision_initialises_and_installs_unit_when_fresh(tmp_path) -> None:
         patch(f"{BASE_MODULE}.run_command") as base_rc,
     ):
         m.provision()
-        assert m.my_cnf_path.read_text().startswith("# Managed by Pilot.\n# pilot-sized-for-memory-mb = 8192\n[mysqld]\n")
+        assert m.my_cnf_path.read_text().startswith(
+            "# Managed by Pilot.\n# pilot-sized-for-memory-mb = 8192\n[mysqld]\n"
+        )
     install_unit.assert_called_once()
     install_sizing_unit.assert_called_once()
     reset_failed_state.assert_called_once()
@@ -822,7 +826,7 @@ def _tune(manager, tmp_path, current_max_mb):
         sizing = manager.tune_to_host()
         config = manager.my_cnf_path.read_text()
     restart.assert_not_called()
-    install_unit.assert_called_once_with(sizing, preserve_swap_limit=True)
+    install_unit.assert_called_once_with(sizing)
     return sizing, config, [name for name, _args, _kwargs in order.mock_calls]
 
 
@@ -1272,7 +1276,9 @@ def test_a_failed_live_swap_limit_leaves_the_unit_for_the_retry(tmp_path: Path, 
     assert "MemorySwapMax=0\n" in unit.read_text()
 
 
-def test_keep_out_of_swap_applies_the_live_limit_when_the_unit_is_already_zero(tmp_path: Path, monkeypatch) -> None:
+def test_keep_out_of_swap_applies_the_live_limit_when_the_unit_is_already_zero(
+    tmp_path: Path, monkeypatch
+) -> None:
     from pilot.managers.database import mariadb as module
 
     manager = _manager()
@@ -1430,7 +1436,8 @@ def test_the_sizing_unit_runs_before_every_mariadb_start(tmp_path) -> None:
     unit = (tmp_path / "pilot-mariadb-sizing.service").read_text()
     assert "Before=pilot-mariadb.service" in unit
     assert "WantedBy=pilot-mariadb.service" in unit
-    assert unit.split("ExecStart=")[1].split("\n")[0].endswith(" -m pilot.managers.database")
+    assert unit.split("ExecStart=")[1].split("\n")[0].endswith(" -m pilot.internal.mariadb_startup")
+    assert "RemainAfterExit=yes" in unit
     assert any("enable" in call.args[0] for call in run.call_args_list)
 
 
@@ -1441,3 +1448,19 @@ def test_client_command_uses_homebrew_default_socket_on_macos() -> None:
         command = manager._client_command()
 
     assert command == ["mariadb", "--connect-timeout=5", "-u", "root", "--batch"]
+
+
+@pytest.mark.parametrize("macos", [True, False])
+def test_external_client_command_keeps_the_selected_host_and_port(macos: bool) -> None:
+    manager = MariaDBManager(MariaDBConfig(existing=True, host="db.example.test", port=3307))
+    with patch(f"{MODULE}.is_macos", return_value=macos):
+        command = manager._client_command()
+    assert command[-4:] == ["-h", "db.example.test", "-P", "3307"]
+
+
+def test_external_client_command_honors_an_explicit_socket_on_macos() -> None:
+    manager = MariaDBManager(MariaDBConfig(existing=True, socket_path="/tmp/external-mariadb.sock"))
+    with patch(f"{MODULE}.is_macos", return_value=True):
+        command = manager._client_command()
+    assert "--socket=/tmp/external-mariadb.sock" in command
+    assert "-h" not in command

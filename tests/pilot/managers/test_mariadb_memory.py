@@ -11,6 +11,7 @@ from pilot.config.common import CommonConfig
 from pilot.config.mariadb import MariaDBConfig
 from pilot.core.mariadb_memory import calculate_mariadb_memory
 from pilot.exceptions import DatabaseError
+from pilot.internal.atomic_file import exclusive_file_lock
 from pilot.managers.database.mariadb import MariaDBManager
 from pilot.managers.database.memory import MariaDBMemory
 
@@ -43,8 +44,8 @@ def test_real_manager_resizes_at_boot_and_preserves_custom_variables(
         patch.object(manager, "_total_memory_mb", return_value=2048),
         patch.object(MariaDBMemory, "boot_id", new_callable=PropertyMock, return_value="test-boot"),
         patch("pilot.managers.database.memory.benches_dir", return_value=benches),
-        patch("pilot.managers.database.memory.run_command"),
-        patch("pilot.managers.database.mariadb.run_command"),
+        patch("pilot.managers.database.memory.run_command") as memory_commands,
+        patch("pilot.managers.database.mariadb.run_command") as manager_commands,
     ):
         manager.memory.prepare_boot()
         assert "Requires=pilot-mariadb-sizing.service" in unit.read_text()
@@ -54,6 +55,9 @@ def test_real_manager_resizes_at_boot_and_preserves_custom_variables(
         assert "innodb-buffer-pool-size = 400M" not in manager.managed_cnf_path.read_text()
         assert f"MemoryMax={calculate_mariadb_memory(2048).memory_max_mb}M" in unit.read_text()
         assert (unit_dir / "pilot-mariadb-sizing.service").is_file()
+        commands = memory_commands.call_args_list + manager_commands.call_args_list
+        assert not any("daemon-reload" in call.args[0] for call in commands)
+        assert any("set-property" in call.args[0] for call in commands)
 
 
 @pytest.mark.parametrize(("raw_value", "expected"), [(b"2097152\n", 2), (b"infinity\n", None)])
@@ -61,6 +65,41 @@ def test_real_manager_reads_live_systemd_memory_in_mib(raw_value, expected) -> N
     manager = MariaDBManager(MariaDBConfig())
     with patch("pilot.managers.database.mariadb.run_command", return_value=Mock(stdout=raw_value)):
         assert manager._unit_memory_mb("MemoryMax") == expected
+
+
+def test_installation_starts_sizing_outside_the_lock_before_the_first_restart(tmp_path: Path) -> None:
+    manager = MariaDBManager(MariaDBConfig())
+    units = tmp_path / "units"
+    units.mkdir()
+    unit = units / "pilot-mariadb.service"
+    unit.write_text("[Unit]\nDescription=MariaDB\n[Service]\nMemoryMax=6000M\n")
+    active = False
+
+    def run(command, **kwargs):
+        nonlocal active
+        if "start" in command:
+            with exclusive_file_lock(manager.action_lock_path, blocking=False):
+                pass
+            manager.memory.prepare_boot()
+            active = True
+
+    def restart():
+        assert active
+        manager.memory.prepare_boot()
+
+    with (
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(type(manager), "user_unit_dir", new_callable=PropertyMock, return_value=units),
+        patch.object(manager, "_require_linux_managed_server"),
+        patch.object(manager, "_require_managed_server"),
+        patch.object(manager, "_total_memory_mb", return_value=8000),
+        patch.object(MariaDBMemory, "boot_id", new_callable=PropertyMock, return_value="current-boot"),
+        patch("pilot.managers.database.memory.run_command", side_effect=run),
+        patch.object(manager, "_restart_and_wait_healthy", side_effect=restart),
+    ):
+        manager.memory.install_existing()
+        manager.restart_managed_server()
+    assert "MemoryMax=6000M" in unit.read_text()
 
 
 @pytest.fixture
@@ -91,7 +130,12 @@ def memory(tmp_path: Path):
     (tmp_path / "benches").mkdir()
     with (
         patch.object(MariaDBMemory, "boot_id", new_callable=PropertyMock, return_value="boot-two"),
-        patch.object(memory, "host_memory", return_value={"MemTotal": 8000, "MemAvailable": 4500}),
+        patch.object(
+            MariaDBMemory,
+            "host_memory",
+            new_callable=PropertyMock,
+            return_value={"MemTotal": 8000, "MemAvailable": 4500},
+        ),
         patch("pilot.managers.database.memory.run_command"),
         patch("pilot.managers.database.memory.benches_dir", return_value=tmp_path / "benches"),
     ):
@@ -202,8 +246,15 @@ def test_unknown_usage_fails_closed(memory) -> None:
 
 def test_budget_is_rechecked_when_a_prepared_change_runs(memory) -> None:
     memory.validate("MemoryMax", 5000)
-    memory.host_memory.return_value = {"MemTotal": 8000, "MemAvailable": 2000}
-    with pytest.raises(ValueError, match="90%"):
+    with (
+        patch.object(
+            MariaDBMemory,
+            "host_memory",
+            new_callable=PropertyMock,
+            return_value={"MemTotal": 8000, "MemAvailable": 2000},
+        ),
+        pytest.raises(ValueError, match="90%"),
+    ):
         memory.set("MemoryMax", 5000)
     assert not memory.limits_path.exists()
 

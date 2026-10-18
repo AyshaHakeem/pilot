@@ -30,8 +30,8 @@ from pilot.internal.atomic_file import (
     atomic_write_private_text,
     exclusive_file_lock,
 )
-from pilot.managers.database.memory import MariaDBMemory
 from pilot.managers.database.base import UserOwnedDBManager
+from pilot.managers.database.memory import MariaDBMemory
 from pilot.managers.platform import is_macos, which
 from pilot.utils import cli_root, run_command
 
@@ -343,27 +343,9 @@ class MariaDBManager(UserOwnedDBManager):
         return sizing
 
     def install_sizing_unit(self) -> None:
-        """Install the oneshot that runs `size_for_host` before every MariaDB start."""
-        from pilot.managers.environment import AdminEnvManager
-
-        root = cli_root()
-        content = (
-            "[Unit]\n"
-            "Description=Size Pilot's MariaDB for this host's memory\n"
-            "Before=pilot-mariadb.service\n\n"
-            "[Service]\n"
-            "Type=oneshot\n"
-            f"WorkingDirectory={root}\n"
-            f"Environment=PYTHONPATH={root}\n"
-            f"ExecStart={AdminEnvManager(root).python} -m pilot.managers.database\n\n"
-            "[Install]\n"
-            "WantedBy=pilot-mariadb.service\n"
-        )
-        self.user_unit_dir.mkdir(parents=True, exist_ok=True)
-        (self.user_unit_dir / _SIZING_UNIT_NAME).write_text(content)
-        env = self._systemctl_env()
-        run_command(self._systemctl("daemon-reload"), env=env)
-        run_command(self._systemctl("enable", _SIZING_UNIT_NAME), env=env)
+        self.memory.install_startup_hook()
+        run_command(self._systemctl("daemon-reload"), env=self._systemctl_env())
+        run_command(self._systemctl("enable", _SIZING_UNIT_NAME), env=self._systemctl_env())
 
     def _drop_oversized_buffer_pool_override(self) -> None:
         """A buffer pool size saved on a larger host does not fit this one, so the sizing takes over."""
@@ -925,7 +907,9 @@ class MariaDBManager(UserOwnedDBManager):
             raise DatabaseError("Could not detect total system memory for MariaDB sizing.")
         return total_memory_mb
 
-    def _install_unit(self, sizing: MariaDBMemorySizing, *, preserve_swap_limit: bool = False) -> None:
+    def _install_unit(
+        self, sizing: MariaDBMemorySizing, *, preserve_swap_limit: bool = False, reload_manager: bool = True
+    ) -> None:
         self.user_unit_dir.mkdir(parents=True, exist_ok=True)
         content = self._render_unit(sizing)
         if preserve_swap_limit:
@@ -937,7 +921,8 @@ class MariaDBManager(UserOwnedDBManager):
             content = content.replace("MemorySwapMax=0\n", swap_limits)
         atomic_write_private_text(self.unit_path, content)
         self.memory.install_startup_hook()
-        run_command(self._systemctl("daemon-reload"), env=self._systemctl_env())
+        if reload_manager:
+            run_command(self._systemctl("daemon-reload"), env=self._systemctl_env())
 
     def _render_unit(self, sizing: MariaDBMemorySizing) -> str:
         mariadbd = which("mariadbd") or which("mysqld") or "/usr/sbin/mariadbd"
@@ -1014,7 +999,7 @@ class MariaDBManager(UserOwnedDBManager):
         socket_path = self._detect_socket()
         if socket_path:
             cmd.append(f"--socket={socket_path}")
-        elif not is_macos():
+        elif self.config.existing or not is_macos():
             cmd += ["-h", self.config.host, "-P", str(self.config.port)]
         return cmd
 

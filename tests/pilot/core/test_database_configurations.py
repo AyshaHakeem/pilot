@@ -101,7 +101,7 @@ def _manager(values: dict[str, str] | None = None) -> Mock:
 def test_memory_limits_reuse_configuration_change_and_task_execution() -> None:
     manager = _manager()
     manager.memory.validate.return_value = {"MemoryHigh": 2500, "MemoryMax": 4500}
-    manager.memory.get_limits.return_value = {"MemoryHigh": 2500, "MemoryMax": 3000}
+    manager.memory.limits = {"MemoryHigh": 2500, "MemoryMax": 3000}
     configurations = DatabaseConfigurations(_config(), manager)
     with patch(f"{MODULE}.is_linux", return_value=True):
         change = configurations.prepare_change("MemoryMax", 4500)
@@ -116,14 +116,19 @@ def test_memory_limits_reuse_configuration_change_and_task_execution() -> None:
     manager.memory.set.assert_called_once_with("MemoryMax", 4500)
 
 
-@pytest.mark.parametrize(
-    "configuration", [{"existing": True}, {"allow_management": False}, {"db_type": "sqlite"}]
-)
+@pytest.mark.parametrize("configuration", [{"existing": True}, {"db_type": "sqlite"}])
 def test_memory_changes_respect_configuration_permissions(configuration) -> None:
     manager = _manager()
     with patch(f"{MODULE}.is_linux", return_value=True), pytest.raises(DatabaseError):
         DatabaseConfigurations(_config(**configuration), manager).set("MemoryMax", 4500)
     manager.memory.set.assert_not_called()
+
+
+def test_memory_changes_do_not_require_sibling_bench_management() -> None:
+    manager = _manager()
+    with patch(f"{MODULE}.is_linux", return_value=True):
+        DatabaseConfigurations(_config(allow_management=False), manager).set("MemoryMax", 4500)
+    manager.memory.set.assert_called_once_with("MemoryMax", 4500)
 
 
 def test_catalog_covers_press_variables_and_pilot_mariadb_118_controls() -> None:

@@ -156,7 +156,7 @@ class DatabaseConfigurations:
                 raise DatabaseError(reason)
             manager = self._manager()
             limits = manager.memory.validate(name, value)
-            current = manager.memory.get_limits()[name]
+            current = manager.memory.limits[name]
             return {
                 "action": "configuration",
                 "name": name,

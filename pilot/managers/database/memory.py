@@ -58,6 +58,10 @@ class MariaDBMemory:
     def prepare_boot(self) -> None:
         manager = self.manager
         manager._require_linux_managed_server()
+        if self.state_path.exists():
+            state = json.loads(self.state_path.read_text())
+            if state["boot_id"] == self.boot_id:
+                return
         with manager.database_action_lock():
             state = json.loads(self.state_path.read_text()) if self.state_path.exists() else None
             if state is not None and state["boot_id"] == self.boot_id:
@@ -68,10 +72,10 @@ class MariaDBMemory:
                 options = {name: value for name, value in options.items() if name not in _SIZED_OPTIONS}
                 atomic_write_private_text(manager.managed_cnf_path, manager._render_managed_options(options))
                 sizing = manager._write_config()
-                manager._install_unit(sizing, preserve_swap_limit=True)
+                manager._install_unit(sizing, preserve_swap_limit=True, reload_manager=False)
                 self.write_limits(sizing.memory_high_mb, sizing.memory_max_mb)
                 self.store_overrides(None, None)
-                run_command(manager._systemctl("daemon-reload"), env=manager._systemctl_env())
+                manager._set_runtime_memory_limits(sizing)
             else:
                 self.restore_overrides()
             self.record_host()
@@ -85,7 +89,17 @@ class MariaDBMemory:
             raise DatabaseError("Stored MariaDB memory limits must satisfy 0 < MemoryHigh < MemoryMax.")
         self.write_limits(high, maximum)
         manager = self.manager
-        run_command(manager._systemctl("daemon-reload"), env=manager._systemctl_env(), timeout=30)
+        run_command(
+            manager._systemctl(
+                "set-property",
+                "--runtime",
+                manager._UNIT_NAME,
+                f"MemoryHigh={high}M",
+                f"MemoryMax={maximum}M",
+            ),
+            env=manager._systemctl_env(),
+            timeout=30,
+        )
 
     def install_startup_hook(self) -> None:
         path = self.manager.user_unit_dir / "pilot-mariadb-sizing.service"
@@ -96,7 +110,9 @@ class MariaDBMemory:
                 "[Unit]\nDescription=Size MariaDB after host memory changes\n"
                 "Before=pilot-mariadb.service\n\n[Service]\nType=oneshot\nRemainAfterExit=yes\n"
                 f"WorkingDirectory={str(cli_root()).replace('%', '%%')}\n"
+                f"Environment=PYTHONPATH={str(cli_root()).replace('%', '%%')}\n"
                 f"ExecStart={command} -m pilot.internal.mariadb_startup\n"
+                "\n[Install]\nWantedBy=pilot-mariadb.service\n"
             ),
         )
 
@@ -118,27 +134,38 @@ class MariaDBMemory:
                 atomic_write_private_text(manager.unit_path, unit)
             self.install_startup_hook()
             run_command(manager._systemctl("daemon-reload"), env=manager._systemctl_env())
+        run_command(
+            manager._systemctl("start", "pilot-mariadb-sizing.service"),
+            env=manager._systemctl_env(),
+            timeout=30,
+        )
 
+    @property
     def host_memory(self) -> dict[str, int]:
         values = dict(line.split(":", 1) for line in Path("/proc/meminfo").read_text().splitlines())
         return {name: int(values[name].split()[0]) // 1024 for name in ("MemTotal", "MemAvailable")}
 
-    def get_limits(self) -> dict[str, int | None]:
+    @property
+    def limits(self) -> dict[str, int | None]:
         return {name: self.manager._unit_memory_mb(name) for name in MEMORY_LIMIT_NAMES}
 
     def validate(self, name: str, value: object) -> dict[str, int]:
         if name not in MEMORY_LIMIT_NAMES or type(value) is not int or value <= 0:
             raise ValueError("Memory limits must be positive whole numbers of MiB.")
-        limits = self.get_limits()
+        limits = self.limits
         previous_high = limits["MemoryHigh"]
         limits[name] = value
         high, maximum = limits["MemoryHigh"], limits["MemoryMax"]
         if high is None or maximum is None or not 0 < high < maximum:
             raise ValueError("MemoryHigh must be positive and lower than MemoryMax; both must be finite.")
+        self._validate_usage(high, maximum, previous_high)
+        return {"MemoryHigh": high, "MemoryMax": maximum}
+
+    def _validate_usage(self, high: int, maximum: int, previous_high: int | None) -> None:
         usage = self.manager._unit_memory_mb("MemoryCurrent")
         if usage is None:
             raise DatabaseError("Cannot validate memory limits because MariaDB memory use is unavailable.")
-        host = self.host_memory()
+        host = self.host_memory
         other_usage = max(0, host["MemTotal"] - host["MemAvailable"] - usage)
         if other_usage + maximum > host["MemTotal"] * 9 // 10:
             raise ValueError("MariaDB MemoryMax plus other host memory use cannot exceed 90% of host RAM.")
@@ -146,7 +173,6 @@ class MariaDBMemory:
             raise ValueError("MemoryHigh must exceed current MariaDB memory use before lowering limits.")
         if maximum <= self.manager.innodb_buffer_pool_size_mb():
             raise ValueError("MemoryMax must exceed the configured InnoDB Buffer Pool size.")
-        return {"MemoryHigh": high, "MemoryMax": maximum}
 
     def write_limits(self, high: int, maximum: int) -> None:
         self.limits_path.parent.mkdir(parents=True, exist_ok=True)
@@ -162,7 +188,7 @@ class MariaDBMemory:
         manager._require_linux_managed_server()
         with manager.database_action_lock():
             limits = self.validate(name, value)
-            previous = self.get_limits()
+            previous = self.limits
             config = CommonConfig.read(benches_dir()).mariadb
             previous_content = self.limits_path.read_text() if self.limits_path.exists() else "[Service]\n"
             self.write_limits(limits["MemoryHigh"], limits["MemoryMax"])
@@ -192,12 +218,12 @@ class MariaDBMemory:
             env=manager._systemctl_env(),
             timeout=30,
         )
-        if self.get_limits() != limits:
+        if self.limits != limits:
             raise DatabaseError("MariaDB memory limits did not apply.")
 
     def get_variables(self, edit_reason: str) -> list[dict]:
-        limits = self.get_limits()
-        sizing = calculate_mariadb_memory(self.manager._total_memory_mb())
+        limits = self.limits
+        sizing = calculate_mariadb_memory(self.manager._total_memory_mb(), self.manager.config.memory_share)
         recommended = {"MemoryHigh": sizing.memory_high_mb, "MemoryMax": sizing.memory_max_mb}
         variables = []
         for name, value in limits.items():
