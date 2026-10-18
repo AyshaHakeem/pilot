@@ -103,8 +103,12 @@ class DatabaseQuickActions:
         with manager.database_action_lock():
             self.config.mariadb.memory_share = memory_share
             manager.tune_to_host_locked()
+            self.config.mariadb.memory_high_mb = None
+            self.config.mariadb.memory_max_mb = None
             with CommonConfig.open(benches_root) as common:
                 common.mariadb.memory_share = memory_share
+                common.mariadb.memory_high_mb = None
+                common.mariadb.memory_max_mb = None
 
     def require_memory_share(self, memory_share: float) -> dict:
         low, high = MEMORY_SHARE_RANGE
@@ -124,9 +128,7 @@ class DatabaseQuickActions:
         capability = self._innodb_buffer_pool_capability()
         self._require_available(capability)
         if size_mb < capability["min_mb"] or size_mb > capability["max_mb"]:
-            raise ValueError(
-                f"size_mb must be between {capability['min_mb']} and " f"{capability['max_mb']} MB."
-            )
+            raise ValueError(f"size_mb must be between {capability['min_mb']} and {capability['max_mb']} MB.")
         return capability
 
     def require_max_connections(self, max_connections: int) -> dict:
@@ -135,9 +137,7 @@ class DatabaseQuickActions:
         capability = self._max_connections_capability()
         self._require_available(capability)
         if max_connections < capability["min"] or max_connections > capability["max"]:
-            raise ValueError(
-                f"max_connections must be between {capability['min']} and " f"{capability['max']}."
-            )
+            raise ValueError(f"max_connections must be between {capability['min']} and {capability['max']}.")
         return capability
 
     def _performance_schema_capability(
