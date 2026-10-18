@@ -13,6 +13,8 @@ from pilot.internal.atomic_file import atomic_write_private_text
 from pilot.utils import benches_dir, cli_root, run_command
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pilot.managers.database.mariadb import MariaDBManager
 
 
@@ -206,7 +208,7 @@ class MariaDBMemory:
                     ) from rollback_error
                 raise DatabaseError("Memory update failed; previous limits were restored.") from error
 
-    def apply_limits(self, limits: dict[str, int | None]) -> None:
+    def apply_limits(self, limits: Mapping[str, int | None]) -> None:
         manager = self.manager
         run_command(manager._systemctl("daemon-reload"), env=manager._systemctl_env(), timeout=30)
         properties = [

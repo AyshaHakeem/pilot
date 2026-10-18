@@ -246,6 +246,8 @@ Settings, Database, Database Configurations exposes `MemoryHigh` and `MemoryMax`
 
 `innodb_snapshot_isolation` is editable in Database Configurations. Its warning explains that enabling it can reject conflicting updates or deletes and roll back transactions; disabling it removes that conflict protection. The change affects new connections to the shared database. Existing connections retain their session setting. The custom value is saved in `managed.cnf` and survives host RAM changes.
 
+The buffer-pool editor also caps its maximum below the effective MariaDB `MemoryMax`, in addition to the host-based range. The setter reads the hard limit again under the database action lock before writing settings or changing the pool, so a queued resize cannot exceed a newly lowered limit.
+
 On a host with less than 800 MB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
 
 `mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. Selecting a split clears manual service-limit overrides. When the new limits apply, Pilot saves them in both the main unit and its memory drop-in so they survive a reboot with unchanged RAM. A deferred shrink keeps the previous saved limits until it can apply safely. A larger buffer pool than the running server allows takes effect at the next MariaDB start.

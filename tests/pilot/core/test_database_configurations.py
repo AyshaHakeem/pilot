@@ -131,6 +131,14 @@ def test_memory_changes_do_not_require_sibling_bench_management() -> None:
     manager.memory.set.assert_called_once_with("MemoryMax", 4500)
 
 
+def test_memory_change_requires_an_available_current_limit() -> None:
+    manager = _manager()
+    manager.memory.validate.return_value = {"MemoryHigh": 2500, "MemoryMax": 4500}
+    manager.memory.limits = {"MemoryHigh": 2500, "MemoryMax": None}
+    with patch(f"{MODULE}.is_linux", return_value=True), pytest.raises(DatabaseError, match="unavailable"):
+        DatabaseConfigurations(_config(), manager).prepare_change("MemoryMax", 4500)
+
+
 def test_catalog_covers_press_variables_and_pilot_mariadb_118_controls() -> None:
     assert len(MARIADB_VARIABLE_NAMES) == 51
     assert len(MARIADB_VARIABLE_NAMES) == len(MARIADB_VARIABLE_SPECS)
@@ -233,6 +241,30 @@ def test_snapshot_exposes_generic_and_guarded_action_variables_as_editable() -> 
     manager.max_connections.assert_not_called()
     requested = set(manager.global_variable_values.call_args.args[0])
     assert requested == MARIADB_VARIABLE_NAMES
+
+
+def test_buffer_pool_editor_and_submission_use_the_effective_hard_limit() -> None:
+    config = _config()
+    service = MariaDBManager(config.mariadb)
+    manager = _manager(
+        {
+            "innodb_buffer_pool_size": str(768 * 1024 * 1024),
+            "innodb_buffer_pool_size_max": str(2048 * 1024 * 1024),
+        }
+    )
+    manager.variable_limits.side_effect = service.variable_limits
+    configurations = DatabaseConfigurations(config, manager)
+    with (
+        patch(f"{MODULE}.is_linux", return_value=True),
+        patch("pilot.core.database.quick_actions.is_linux", return_value=True),
+        patch("pilot.managers.database.mariadb.is_macos", return_value=False),
+        patch.object(service, "_total_memory_mb", return_value=8192),
+        patch.object(service, "_unit_memory_mb", return_value=1024),
+    ):
+        rows = {row["name"]: row for row in configurations.snapshot()["variables"]}
+        assert rows["innodb_buffer_pool_size"]["edit"]["max"] == 1023
+        with pytest.raises(ValueError, match="1023"):
+            configurations.prepare_change("innodb_buffer_pool_size", 1024)
 
 
 def test_buffer_pool_editor_requires_the_mariadb_118_live_ceiling() -> None:

@@ -151,19 +151,7 @@ class DatabaseConfigurations:
 
     def prepare_change(self, name: str, value: object) -> DatabaseConfigurationChange:
         if name in MEMORY_LIMIT_NAMES:
-            reason = self._edit_reason(require_reachable=True)
-            if reason:
-                raise DatabaseError(reason)
-            manager = self._manager()
-            limits = manager.memory.validate(name, value)
-            current = manager.memory.limits[name]
-            return {
-                "action": "configuration",
-                "name": name,
-                "value": limits[name],
-                "current": current,
-                "changed": current != value,
-            }
+            return self._prepare_memory_change(name, value)
         spec = mariadb_variable_spec(name)
         if not spec.editable:
             spec.validate_input(value)
@@ -189,6 +177,23 @@ class DatabaseConfigurations:
             "value": requested,
             "current": current,
             "changed": current != requested,
+        }
+
+    def _prepare_memory_change(self, name: str, value: object) -> DatabaseConfigurationChange:
+        reason = self._edit_reason(require_reachable=True)
+        if reason:
+            raise DatabaseError(reason)
+        manager = self._manager()
+        limits = manager.memory.validate(name, value)
+        current_limit = manager.memory.limits[name]
+        if current_limit is None:
+            raise DatabaseError("Cannot prepare a memory change because the current limit is unavailable.")
+        return {
+            "action": "configuration",
+            "name": name,
+            "value": limits[name],
+            "current": current_limit,
+            "changed": current_limit != value,
         }
 
     def set(self, name: str, value: object) -> bool:

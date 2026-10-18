@@ -452,6 +452,7 @@ def test_innodb_buffer_pool_change_applies_live_and_persists_limits(tmp_path) ->
         patch.object(manager, "is_provisioned", return_value=True),
         patch.object(manager, "is_healthy", return_value=True),
         patch.object(manager, "_total_memory_mb", return_value=2048),
+        patch.object(manager, "_unit_memory_mb", return_value=1024),
         patch.object(manager, "_read_global_integer", side_effect=lambda variable: state[variable]),
         patch.object(manager, "_set_global_integer", side_effect=set_global) as update,
         patch.object(manager, "_restart_and_wait_healthy") as restart,
@@ -488,6 +489,7 @@ def test_innodb_buffer_pool_increase_restarts_when_live_ceiling_is_too_low(tmp_p
         patch.object(manager, "is_provisioned", return_value=True),
         patch.object(manager, "is_healthy", return_value=True),
         patch.object(manager, "_total_memory_mb", return_value=2048),
+        patch.object(manager, "_unit_memory_mb", return_value=1024),
         patch.object(manager, "_read_global_integer", side_effect=lambda variable: state[variable]),
         patch.object(manager, "_set_global_integer") as update,
         patch.object(manager, "_restart_and_wait_healthy", side_effect=restart) as restart_server,
@@ -519,6 +521,7 @@ def test_max_connections_change_applies_live_and_preserves_other_options(tmp_pat
         patch.object(manager, "is_provisioned", return_value=True),
         patch.object(manager, "is_healthy", return_value=True),
         patch.object(manager, "_total_memory_mb", return_value=2048),
+        patch.object(manager, "_unit_memory_mb", return_value=1024),
         patch.object(manager, "_read_global_integer", side_effect=lambda variable: state[variable]),
         patch.object(manager, "_set_global_integer", side_effect=set_global) as update,
     ):
@@ -545,6 +548,7 @@ def test_failed_dynamic_variable_change_restores_exact_config_and_runtime(tmp_pa
         patch.object(manager, "is_provisioned", return_value=True),
         patch.object(manager, "is_healthy", return_value=True),
         patch.object(manager, "_total_memory_mb", return_value=2048),
+        patch.object(manager, "_unit_memory_mb", return_value=1024),
         patch.object(manager, "_read_global_integer", return_value=50),
         patch.object(manager, "_set_global_integer") as update,
         pytest.raises(DatabaseError, match="previous configuration was restored"),
@@ -1331,6 +1335,7 @@ def test_size_for_host_sizes_again_when_the_memory_moved_by_100_mb(
         patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
         patch.object(type(manager), "unit_path", new_callable=PropertyMock, return_value=unit_path),
         patch.object(manager, "_total_memory_mb", return_value=host_memory_mb),
+        patch.object(manager, "_unit_memory_mb", return_value=None),
         patch.object(manager, "_set_runtime_memory_limits") as set_limits,
     ):
         manager.config_dir.mkdir(parents=True)
@@ -1359,6 +1364,7 @@ def test_size_for_host_applies_unit_limits_that_a_deferred_shrink_left(tmp_path)
         patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
         patch.object(type(manager), "unit_path", new_callable=PropertyMock, return_value=unit_path),
         patch.object(manager, "_total_memory_mb", return_value=4096),
+        patch.object(manager, "_unit_memory_mb", return_value=None),
         patch.object(manager, "_set_runtime_memory_limits") as set_limits,
     ):
         manager.config_dir.mkdir(parents=True)
@@ -1448,6 +1454,42 @@ def test_client_command_uses_homebrew_default_socket_on_macos() -> None:
         command = manager._client_command()
 
     assert command == ["mariadb", "--connect-timeout=5", "-u", "root", "--batch"]
+
+
+@pytest.mark.parametrize("maximum", [256, 512, 4096, None])
+def test_buffer_pool_limits_respect_effective_memory_max(maximum: int | None) -> None:
+    manager = _manager()
+    host_limits = calculate_mariadb_variable_limits(8192)
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(manager, "_total_memory_mb", return_value=8192),
+        patch.object(manager, "_unit_memory_mb", return_value=maximum),
+    ):
+        limits = manager.variable_limits()
+    expected = host_limits.innodb_buffer_pool_max_mb
+    if maximum is not None:
+        expected = min(expected, maximum - 1)
+    assert limits.innodb_buffer_pool_max_mb == expected
+    assert limits.innodb_buffer_pool_recommended_mb <= expected
+    assert limits.max_connections_max == host_limits.max_connections_max
+
+
+@pytest.mark.parametrize("size_mb", [1024, 1025])
+def test_buffer_pool_setter_rechecks_memory_max_before_writing(tmp_path, size_mb: int) -> None:
+    manager = _manager()
+    with (
+        patch(f"{MODULE}.is_macos", return_value=False),
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch.object(manager, "_require_linux_managed_server"),
+        patch.object(manager, "_require_healthy_server"),
+        patch.object(manager, "_total_memory_mb", return_value=8192),
+        patch.object(manager, "_unit_memory_mb", side_effect=[2048, 1024]),
+        patch.object(manager, "ensure_managed_config") as write_config,
+    ):
+        assert manager.variable_limits().innodb_buffer_pool_max_mb >= size_mb
+        with pytest.raises(DatabaseError, match="cannot be greater than 1023"):
+            manager.set_innodb_buffer_pool_size(size_mb)
+    write_config.assert_not_called()
 
 
 @pytest.mark.parametrize("macos", [True, False])

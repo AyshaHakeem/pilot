@@ -6,6 +6,7 @@ import subprocess
 import time
 from collections.abc import Callable, Iterable
 from contextlib import ExitStack, contextmanager
+from dataclasses import replace
 from io import BufferedIOBase
 from pathlib import Path
 from typing import NoReturn
@@ -509,7 +510,20 @@ class MariaDBManager(UserOwnedDBManager):
         return self._total_memory_mb()
 
     def variable_limits(self) -> MariaDBVariableLimits:
-        return calculate_mariadb_variable_limits(self._total_memory_mb(), self.config.memory_share)
+        limits = calculate_mariadb_variable_limits(self._total_memory_mb(), self.config.memory_share)
+        if is_macos() or self.config.existing:
+            return limits
+        maximum = self._unit_memory_mb("MemoryMax")
+        if maximum is None:
+            return limits
+        buffer_pool_maximum = min(limits.innodb_buffer_pool_max_mb, maximum - 1)
+        return replace(
+            limits,
+            innodb_buffer_pool_max_mb=buffer_pool_maximum,
+            innodb_buffer_pool_recommended_mb=min(
+                limits.innodb_buffer_pool_recommended_mb, buffer_pool_maximum
+            ),
+        )
 
     def innodb_buffer_pool_size_mb(self) -> int:
         return self._read_global_integer("innodb_buffer_pool_size") // _MEBIBYTE
