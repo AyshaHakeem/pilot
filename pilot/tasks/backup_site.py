@@ -39,11 +39,20 @@ class BackupSiteTask(Task):
         except (BenchError, OSError) as error:
             print(error)
             self.record(status="failed", timestamp="", files={}, offsite=False, pruned=[])
+            self.notify_if_failing()
             sys.exit(getattr(error, "returncode", None) or 1)
         files = {path.name: path.stat().st_size for path in backup_files}
         offsite = self.upload(timestamp, backup_files)
         pruned = self.prune()
         self.record(status="success", timestamp=timestamp, files=files, offsite=offsite, pruned=pruned)
+
+    def notify_if_failing(self) -> None:
+        from pilot.core.notification.events import backups_failing
+        from pilot.core.site.backups import MAX_DAILY_FAILURES
+
+        failures = self.site_record.backups.get_failures_since_last_success(datetime.now(UTC))
+        if failures == MAX_DAILY_FAILURES:
+            backups_failing(self.bench, self.site, failures)
 
     def upload(self, timestamp: str, backup_files: list[Path]) -> bool:
         if not self.bench.config.s3.is_configured:

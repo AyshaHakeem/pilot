@@ -184,6 +184,14 @@ class SiteBackups:
     def get_recent_backup_history(self, now: datetime) -> list[tuple[datetime, dict]]:
         return self.site.bench.backups.get_recent_history(now).get(self.site.config.name, [])
 
+    def get_failures_since_last_success(self, now: datetime) -> int:
+        failures = 0
+        for _, entry in self.get_recent_backup_history(now):
+            if entry["status"] == "success":
+                break
+            failures += entry["status"] == "failed"
+        return failures
+
     def get_scheduled_backup(
         self, now: datetime, history: list[tuple[datetime, dict]] | None = None
     ) -> dict[str, bool] | None:

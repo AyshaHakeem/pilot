@@ -107,6 +107,34 @@ def test_polls_do_not_overlap_a_queued_site_backup(tmp_path: Path, manual_backup
     assert metadata["resource_keys"] == [f"site:{site.config.name}"]
 
 
+def test_failures_count_only_since_the_last_success(tmp_path: Path) -> None:
+    site = _site(tmp_path)
+    _record(site, _NOW - timedelta(hours=5), status="failed")
+    _record(site, _NOW - timedelta(hours=4))
+    for attempt in range(3):
+        _record(site, _NOW - timedelta(hours=3 - attempt), status="failed")
+
+    assert site.backups.get_failures_since_last_success(_NOW) == 3
+
+
+@pytest.mark.parametrize(("earlier_failures", "notified"), [(4, False), (5, True), (6, False)])
+def test_the_sixth_failure_since_the_last_success_notifies_once(
+    tmp_path: Path, earlier_failures: int, notified: bool
+) -> None:
+    site = _site(tmp_path)
+    now = datetime.now(UTC)
+    for attempt in range(earlier_failures):
+        _record(site, now - timedelta(hours=attempt + 1), status="failed")
+    task = BackupSiteTask(bench=site.bench, bench_root=site.bench.path, site=site.config.name, automatic=True)
+
+    with patch("pilot.core.site.backups.SiteBackups.take", side_effect=OSError("disk full")), pytest.raises(SystemExit):
+        task.backup()
+
+    events = [notification.event for notification in site.bench.notifications.list(50)]
+    assert ("backups_failing" in events) is notified
+
+
+
 def test_the_bench_poll_reads_history_once_and_queues_only_due_sites(tmp_path: Path) -> None:
     site = _site(tmp_path)
     backed_up = site.bench.site("backed-up.localhost")
