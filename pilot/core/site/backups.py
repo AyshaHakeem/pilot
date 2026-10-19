@@ -169,12 +169,13 @@ class SiteBackups:
         return self.schedule()
 
     def enable_default_schedule(self) -> None:
-        """Default backups for a site without a custom schedule. `set_schedule` replaces them."""
+        """Default backups for a site without a custom schedule. `set_schedule` replaces them.
+        The bench job goes in first, so a failed install leaves the site unenrolled for a retry."""
+        self.site.bench.backups.install_schedule()
         write_retention(
             self.site.path / "site_config.json",
             BackupConfig(keep_weekly=4, keep_yearly=10, calendar_rotation=True),
         )
-        self.site.bench.backups.install_schedule()
 
     @property
     def is_default_schedule_enabled(self) -> bool:
@@ -220,7 +221,9 @@ class SiteBackups:
         slot = f"{self.site.config.name}:{now:%Y%m%d%H}"
         try:
             BackupSiteTask.queue(
-                self.site.bench, site=self.site.config.name, automatic=True,
+                self.site.bench,
+                site=self.site.config.name,
+                automatic=True,
                 idempotency_key=f"scheduled-backup:{sha256(slot.encode()).hexdigest()}",
                 resource_key=f"site:{self.site.config.name.lower()}",
             )
