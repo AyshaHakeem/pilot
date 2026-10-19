@@ -74,10 +74,27 @@ def test_logs_output_batches_within_datum_limits(tmp_path: Path) -> None:
     assert "Flush                     30" in conf
     assert "Format        json" in conf
     assert "json_date_key false" in conf
-    assert "Retry_Limit   5" in conf
+    assert "Retry_Limit   3" in conf
     assert "storage.total_limit_size 100M" in conf
     assert "Body_Key" not in conf
     assert "Retry_Limit   False" not in conf
+
+
+def test_logs_output_reads_one_stream(tmp_path: Path) -> None:
+    """Each input chunks on its own, so every line is funneled through one emitter the output reads."""
+    configurator = _configurator(tmp_path)
+    config = TelemetryConfig(endpoint="https://datum.internal", token="secret")
+
+    with (
+        patch("pilot.managers.fluentbit.cli_root", return_value=tmp_path),
+        patch("pilot.managers.fluentbit.shutil.which", return_value="/usr/bin/fluent-bit"),
+    ):
+        conf = configurator._render_files(config)["fluent-bit.conf"]
+
+    output = conf[conf.index("[OUTPUT]") :]
+    assert "Match         datum.logs" in output
+    assert "Rule                  $product ^pilot$ datum.logs false" in conf
+    assert conf.index("Name            lua") < conf.index("Name                  rewrite_tag")
 
 
 def test_python_input_tails_bench_dir_only(tmp_path: Path) -> None:
