@@ -292,10 +292,22 @@ local function add_attribute(attributes, key, value)
 end
 
 
--- Datum caps one message at 8 KiB. Cut on a byte boundary, then drop a
--- trailing partial UTF-8 sequence so the line stays valid.
+-- Datum caps one message at 8 KiB. Cut on a byte boundary, then drop the
+-- last character only if the cut left it short of the bytes its lead byte
+-- announces, so the line stays valid UTF-8 without losing a whole one.
 
 local MAX_MESSAGE = 8192
+
+local function utf8_width(byte)
+    if byte >= 240 then
+        return 4
+    elseif byte >= 224 then
+        return 3
+    elseif byte >= 192 then
+        return 2
+    end
+    return 1
+end
 
 local function cap_message(message)
     if #message <= MAX_MESSAGE then
@@ -304,7 +316,20 @@ local function cap_message(message)
 
     local cut = string.sub(message, 1, MAX_MESSAGE)
 
-    return (string.gsub(cut, "[\192-\255][\128-\191]*$", ""))
+    local lead = MAX_MESSAGE
+    while lead > MAX_MESSAGE - 3 do
+        local byte = string.byte(cut, lead)
+        if byte < 128 or byte >= 192 then
+            break
+        end
+        lead = lead - 1
+    end
+
+    if MAX_MESSAGE - lead + 1 < utf8_width(string.byte(cut, lead)) then
+        return string.sub(cut, 1, lead - 1)
+    end
+
+    return cut
 end
 
 
