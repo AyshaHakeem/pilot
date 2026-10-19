@@ -1,5 +1,7 @@
 [SERVICE]
-    Flush                     1
+    # Every input flushes its own chunk as one request, and Datum allows 12 a
+    # minute per token. Four busy inputs every 30s keep well under that.
+    Flush                     30
     Log_Level                 info
     Parsers_File              {{ conf_dir }}/parsers.conf
 
@@ -210,8 +212,12 @@
 
     Header        Authorization Bearer ${DATUM_LOG_TOKEN}
 
-    Body_Key      body
-    Headers_Key   headers
+    # One JSON array of Datum log lines per chunk.
+    Format        json
+    json_date_key false
 
-    Workers       2
-    Retry_Limit   False
+    Workers       1
+    # A refused chunk is dropped after a few tries rather than retried
+    # forever, and the backlog on disk is bounded.
+    Retry_Limit   5
+    storage.total_limit_size 100M
