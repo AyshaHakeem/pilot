@@ -18,19 +18,25 @@ class BackupSiteTask(Task):
 
     site: str
     with_files: bool = False
+    automatic: bool = False
 
     @cached_property
     def site_record(self) -> Site:
         return self.bench.site(self.site)
 
     def run(self) -> None:
+        if self.automatic:
+            options = self.site_record.backups.get_scheduled_backup(datetime.now(UTC))
+            if options is None:
+                return
+            self.with_files = options["with_files"]
         self.backup()
 
     @step("backup", lambda self: f"Backup site {self.site}")
     def backup(self) -> None:
         try:
             timestamp, backup_files = self.site_record.backups.take(with_files=self.with_files)
-        except BenchError as error:
+        except (BenchError, OSError) as error:
             print(error)
             self.record(status="failed", timestamp="", files={}, offsite=False, pruned=[])
             sys.exit(getattr(error, "returncode", None) or 1)

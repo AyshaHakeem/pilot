@@ -1,10 +1,14 @@
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import pytest
 
-from pilot.config import SiteConfig
+from pilot.config import BackupConfig, SiteConfig
+from pilot.config.site_backup import write_retention
 from pilot.core.bench.audit_log import AuditLog
+from pilot.core.bench.backups import BenchBackups
 from pilot.core.site import Site
 from pilot.exceptions import CommandError
 from pilot.tasks.backup_site import BackupSiteTask
@@ -12,6 +16,7 @@ from pilot.tasks.backup_site import BackupSiteTask
 
 def _task(tmp_path):
     bench = SimpleNamespace(
+        path=tmp_path,
         sites_path=tmp_path / "sites",
         logs_path=tmp_path / "logs",
         frappe_call=["python", "-m", "frappe"],
@@ -19,6 +24,7 @@ def _task(tmp_path):
     )
     bench.site = lambda name: Site(SiteConfig(name=name, apps=[]), bench)
     bench.audit_action = lambda category, fields: AuditLog(bench).append(category, fields)
+    bench.backups = BenchBackups(bench)
     (bench.sites_path / "site1" / "backups").mkdir(parents=True)
     return BackupSiteTask(bench=bench, bench_root=tmp_path, site="site1", with_files=False), bench
 
@@ -55,6 +61,20 @@ def test_nonzero_exit_records_failure(tmp_path, monkeypatch) -> None:
     assert entries[0]["status"] == "failed"
 
 
+def test_a_disk_write_failure_is_recorded_for_the_scheduler_retry_limit(tmp_path, monkeypatch) -> None:
+    task, bench = _task(tmp_path)
+
+    def fail(*args, **kwargs):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("pilot.utils.run_command", fail)
+    with pytest.raises(SystemExit) as failure:
+        task.run()
+
+    assert failure.value.code == 1
+    assert AuditLog(bench).entries()[0]["status"] == "failed"
+
+
 def test_backup_is_written_outside_private_backups(tmp_path, monkeypatch) -> None:
     """Frappe prunes private/backups on its own schedule."""
     task, bench = _task(tmp_path)
@@ -72,3 +92,46 @@ def test_backup_is_written_outside_private_backups(tmp_path, monkeypatch) -> Non
     backup_path = Path(calls[0][calls[0].index("--backup-path") + 1])
     assert backup_path.parent == bench.sites_path / "site1" / "backups"
     assert not backup_path.exists()
+
+
+@pytest.mark.parametrize("s3_configured", [False, True])
+def test_full_backup_stays_on_disk_after_upload_and_calendar_pruning(
+    tmp_path: Path, monkeypatch, s3_configured: bool
+) -> None:
+    task, bench = _task(tmp_path)
+    task.with_files = True
+    bench.config.s3.is_configured = s3_configured
+    site_path = bench.sites_path / "site1"
+    write_retention(
+        site_path / "site_config.json", BackupConfig(keep_weekly=4, keep_yearly=10, calendar_rotation=True)
+    )
+    backups = site_path / "backups"
+    expired = backups / "20261010_000000-site1-database.sql.gz"
+    expired.write_text("expired")
+    monthly = backups / "20261001_000000-site1-database.sql.gz"
+    monthly.write_text("monthly")
+    parts = ["database.sql.gz", "site_config_backup.json", "files.tar", "private-files.tar"]
+
+    def frappe_backup(argv, **kwargs):
+        assert "--with-files" in argv
+        staging = Path(argv[argv.index("--backup-path") + 1])
+        for part in parts:
+            (staging / f"20261018_000000-site1-{part}").write_text("backup")
+
+    monkeypatch.setattr("pilot.utils.run_command", frappe_backup)
+    offsite = Mock()
+    offsite.list_backups.return_value = {}
+    with (
+        patch("pilot.integrations.s3.backups.OffsiteBackup.from_config", return_value=offsite),
+        patch("pilot.core.site.retention.date") as clock,
+    ):
+        clock.today.return_value = date(2026, 10, 18)
+        task.run()
+
+    assert not expired.exists()
+    assert monthly.exists()
+    assert all((backups / f"20261018_000000-site1-{part}").read_text() == "backup" for part in parts)
+    assert offsite.upload.call_count == (4 if s3_configured else 0)
+    entry = AuditLog(bench).entries()[0]
+    assert entry["status"] == "success"
+    assert entry["pruned"] == ["20261010_000000"]
