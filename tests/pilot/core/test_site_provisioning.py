@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shlex
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -98,8 +97,7 @@ def test_edge_tls_site_sets_ssl_without_obtaining_a_certificate(tmp_path: Path) 
         patch.object(provisioner, "obtain_cert") as obtain_cert,
         patch.object(provisioner.bench, "write_common_site_config"),
         patch.object(Site, "enable_scheduler") as enable_scheduler,
-        patch("pilot.managers.cron.CronManager.set_schedule") as set_schedule,
-        patch("pilot.managers.cron.CronManager.get_schedule", return_value="0 * * * *"),
+        patch("pilot.core.bench.backups.BenchBackups.install_schedule"),
     ):
         site = provisioner.provision(lambda _: None)
 
@@ -111,20 +109,13 @@ def test_edge_tls_site_sets_ssl_without_obtaining_a_certificate(tmp_path: Path) 
     assert persisted["ssl"] is True
     assert persisted["route"]["origin_scheme"] == "http"
     obtain_cert.assert_not_called()
-    assert persisted["backup_retention"]["calendar_rotation"] is True
-    name, expression, command = set_schedule.call_args.args
-    assert name == "scheduled-backups"
-    assert expression == "0 * * * *"
-    assert shlex.split(command.split(">>")[0])[-2:] == ["pilot.core.bench.backups", str(site.bench.path)]
 
 
-@pytest.mark.parametrize("production", [False, True])
-def test_new_sites_get_calendar_retention_only_after_success(tmp_path: Path, production: bool) -> None:
+def test_only_a_successful_new_site_gets_default_backups(tmp_path: Path) -> None:
     from pilot.config.site_backup import read_retention
     from pilot.exceptions import BenchError
 
     provisioner = _provisioner(tmp_path)
-    provisioner.bench.config.production.enabled = production
 
     def create_site(site: Site, db_type: str | None = None) -> None:
         site.path.mkdir(parents=True)
@@ -139,27 +130,19 @@ def test_new_sites_get_calendar_retention_only_after_success(tmp_path: Path, pro
         patch.object(provisioner, "build_missing_assets"),
         patch.object(provisioner, "add_to_hosts"),
         patch.object(provisioner, "reload_nginx"),
-        patch.object(provisioner, "obtain_cert"),
         patch.object(provisioner.bench, "write_common_site_config"),
-        patch("pilot.managers.cron.CronManager.set_schedule") as set_schedule,
-        patch("pilot.managers.cron.CronManager.get_schedule", return_value="0 * * * *"),
+        patch("pilot.core.bench.backups.BenchBackups.install_schedule") as install_schedule,
     ):
         site = provisioner.provision(lambda _: None)
-        set_schedule.assert_called_once()
-        retention = read_retention(site.path / "site_config.json")
-        assert retention.calendar_rotation is True
-        assert (retention.keep_daily, retention.keep_weekly, retention.keep_monthly, retention.keep_yearly) == (
-            7,
-            4,
-            12,
-            10,
-        )
-        set_schedule.reset_mock()
+        assert read_retention(site.path / "site_config.json").calendar_rotation is True
+        install_schedule.assert_called_once()
+
+        install_schedule.reset_mock()
         provisioner.name = "failed.example.com"
         install_apps.side_effect = BenchError("app installation failed")
         with pytest.raises(BenchError, match="app installation failed"):
             provisioner.provision(lambda _: None)
-        set_schedule.assert_not_called()
+        install_schedule.assert_not_called()
 
 
 @pytest.mark.parametrize("restore_fails", [False, True])

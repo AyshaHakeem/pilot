@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from pilot.config import BackupConfig
 from pilot.config.site_backup import read_retention, write_retention
 from pilot.patches.enroll_sites_in_scheduled_backups import run
@@ -33,10 +35,20 @@ def test_sites_without_a_policy_are_enrolled_once_and_custom_ones_kept(tmp_path:
     assert read_retention(custom) == BackupConfig(scheme="fifo", keep_last=3)
 
 
-def test_a_bench_without_sites_gets_no_schedule(tmp_path: Path) -> None:
-    _bench(tmp_path)
+def test_a_failed_cron_install_is_retried_on_the_next_run(tmp_path: Path) -> None:
+    bench = _bench(tmp_path, "a.localhost")
+    site_config = bench / "sites" / "a.localhost" / "site_config.json"
+
+    with (
+        patch("pilot.core.bench.backups.BenchBackups.install_schedule", side_effect=OSError("crontab failed")),
+        pytest.raises(OSError),
+    ):
+        run(tmp_path / "benches")
+    assert read_retention(site_config) is None
 
     with patch("pilot.core.bench.backups.BenchBackups.install_schedule") as install:
         run(tmp_path / "benches")
 
-    install.assert_not_called()
+    install.assert_called_once()
+    assert read_retention(site_config).calendar_rotation is True
+

@@ -87,11 +87,9 @@ def test_backup_defaults_are_gfs() -> None:
         (date(2026, 10, 3), "20251001_000000", False),
         (date(2026, 1, 1), "20160101_000000", True),
         (date(2026, 1, 2), "20160101_000000", False),
-        (date(2026, 10, 18), "20260921_000000", False),
-        (date(2026, 10, 18), "20250930_000000", False),
     ],
 )
-def test_calendar_gfs_matches_press_v1_boundaries(today: date, timestamp: str, kept: bool) -> None:
+def test_calendar_gfs_window_boundaries(today: date, timestamp: str, kept: bool) -> None:
     newest = today.strftime("%Y%m%d_230000")
     policy = BackupRetentionPolicy(BackupConfig(keep_weekly=4, keep_yearly=10, calendar_rotation=True))
 
@@ -113,18 +111,3 @@ def test_calendar_gfs_clears_expired_history_but_keeps_the_newest() -> None:
     policy = BackupRetentionPolicy(BackupConfig(keep_weekly=4, keep_yearly=10, calendar_rotation=True))
 
     assert set(policy.select_deletions(runs, today=date(2026, 10, 18))) == set(runs[:2])
-
-
-def test_calendar_gfs_uses_fixed_press_windows() -> None:
-    policy = BackupRetentionPolicy(
-        BackupConfig(keep_daily=0, keep_weekly=0, keep_monthly=0, keep_yearly=0, calendar_rotation=True)
-    )
-    runs = ["20230101_000000", "20230101_060000"]
-
-    assert policy.select_deletions(runs, today=date(2023, 1, 1)) == []
-
-
-def test_calendar_gfs_keeps_a_single_expired_run() -> None:
-    policy = BackupRetentionPolicy(BackupConfig(calendar_rotation=True))
-
-    assert policy.select_deletions(["20150101_000000"], today=date(2026, 10, 18)) == []

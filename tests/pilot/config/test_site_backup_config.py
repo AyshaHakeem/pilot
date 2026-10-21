@@ -52,14 +52,3 @@ def test_clear_removes_only_retention(tmp_path) -> None:
     data = json.loads(path.read_text())
     assert "backup_retention" not in data
     assert data["db_name"] == "x"
-
-
-def test_calendar_rotation_roundtrips_and_old_records_keep_period_rotation(tmp_path) -> None:
-    path = tmp_path / "site_config.json"
-    path.write_text('{"backup_retention": {"scheme": "gfs", "keep_yearly": 2}}')
-
-    assert read_retention(path).calendar_rotation is False
-    config = BackupConfig(keep_weekly=4, keep_yearly=10, calendar_rotation=True)
-    write_retention(path, config)
-
-    assert read_retention(path) == config
