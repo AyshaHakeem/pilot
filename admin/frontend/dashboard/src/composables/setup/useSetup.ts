@@ -280,7 +280,7 @@ export const useSetup = () => {
         admin_user: resolvedDbUser.value,
         existing: true,
         host: dbHost.value,
-        port: Number(dbPort.value) || Number(dbPortPlaceholder.value),
+        port: Number(dbPort.value) || Number(dbPortPlaceholder.value) || undefined,
       })
       if (hasApiError(result)) {
         return apiErrorMessage(result, `Could not validate the ${databaseName} configuration.`)
