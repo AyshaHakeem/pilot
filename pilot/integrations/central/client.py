@@ -71,6 +71,10 @@ class CentralClient:
             },
         )
 
+    def is_server_access_locked(self) -> bool:
+        """Whether Central locks access to this server past its sites, as for an open free trial."""
+        return bool(self.forward("central.api.pilot.get_server_access", "GET")["is_locked"])
+
     def get_github_status(self) -> dict[str, Any]:
         return self.forward("central.api.integrations.github.status", "GET")
 

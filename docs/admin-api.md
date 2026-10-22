@@ -149,6 +149,8 @@ A restore puts the site in maintenance mode, restores only the chosen parts, and
 
 The dashboard sends large backup files in chunks of up to 256 MB, because one request cannot carry them. The routes take a bench session, or a site token for its own site.
 
+On a server that Central locks, such as an open free trial, a site token cannot change the site configuration (`PATCH /sites/<name>/configuration`) or download the site config file of a backup. Pilot asks Central (`central.api.pilot.get_server_access`) on each such request. A locked server answers 403 `upgrade_required`. When Central does not answer, Pilot answers 503 `central_unavailable`. The download links of an offsite backup leave out the config file. A bench session and a server without Central are never locked.
+
 | Route | Purpose |
 |---|---|
 | `POST /sites/<name>/uploads` | Takes `{"files": {part: {"filename", "size"}}}`. Returns `upload_id` and `chunk_size`. Refuses files larger than the free disk space. |

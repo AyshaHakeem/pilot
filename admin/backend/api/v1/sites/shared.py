@@ -48,6 +48,28 @@ def task_failure(error: Exception):
     return internal_error("Could not start the requested task.")
 
 
+def server_access_locked_response():
+    """Refuse a site token that would reach past its site while Central locks the server, as for
+    an open free trial. A bench session and a server without Central are never locked."""
+    from admin.backend.middleware import is_bench_scoped
+    from pilot.integrations.central.client import CentralClient, CentralClientError
+    from pilot.integrations.central.metadata import InstanceMetadata
+
+    if is_bench_scoped() or InstanceMetadata().get_credentials() is None:
+        return None
+
+    try:
+        is_locked = CentralClient().is_server_access_locked()
+    # Without Central's answer the server may be a trial, so the request waits.
+    except CentralClientError:
+        logging.exception("Could not read the server access lock from Central")
+        return error_response("central_unavailable", "Could not check your plan. Try again in a minute.", 503)
+
+    if is_locked:
+        return error_response("upgrade_required", "Not in the free trial. Upgrade to use it.", 403)
+    return None
+
+
 def site_name_failure(message: str):
     if "already" in message or "clashes" in message:
         return error_response("site_name_conflict", "The site name is already in use.", 409)
