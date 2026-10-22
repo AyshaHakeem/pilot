@@ -147,7 +147,6 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
         @add-payment="startPayment"
       />
 
-      <!-- One form for every site, so it stays mounted when a new payment method ends the trial. -->
       <BillingProfileCard
         v-if="flow === 'profile'"
         :store="store"
