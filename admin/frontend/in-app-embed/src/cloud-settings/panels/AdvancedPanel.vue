@@ -41,7 +41,7 @@ watch(
         :description="
           store.isOnTrial()
             ? __('Not in the free trial. Upgrade to use it.')
-            : __('Deploys, scaling, SSH, backups, sites — the full server controls.')
+            : __('Deploys, scaling, SSH, backups and sites. The full server controls.')
         "
       >
         <Button
