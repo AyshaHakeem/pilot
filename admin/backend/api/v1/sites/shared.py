@@ -50,12 +50,15 @@ def task_failure(error: Exception):
 
 def server_access_locked_response():
     """Refuse a site token that would reach past its site while Central locks the server, as for
-    an open free trial. A bench session and a server without Central are never locked."""
-    from admin.backend.middleware import is_bench_scoped
-    from pilot.integrations.central.client import CentralClient, CentralClientError
-    from pilot.integrations.central.metadata import InstanceMetadata
+    an open free trial. A bench session and a server without Central are never locked. A
+    Central server that cannot read its credential waits, like one that cannot reach Central."""
+    from flask import current_app
 
-    if is_bench_scoped() or InstanceMetadata().get_credentials() is None:
+    from admin.backend.middleware import is_bench_scoped
+    from pilot.core.bench import Bench
+    from pilot.integrations.central.client import CentralClient, CentralClientError
+
+    if is_bench_scoped() or not Bench(Path(current_app.config["BENCH_ROOT"])).config.central.enabled:
         return None
 
     try:

@@ -18,12 +18,14 @@ def site_request(tmp_path):
     with (
         client.application.test_request_context(),
         patch("admin.backend.middleware.is_bench_scoped", return_value=False),
+        patch("pilot.core.bench.Bench") as bench,
         patch(
             "pilot.integrations.central.metadata.InstanceMetadata.get_credentials",
             return_value=CREDENTIALS,
         ),
     ):
-        yield
+        bench.return_value.config.central.enabled = True
+        yield bench
 
 
 def _locked(value):
@@ -59,11 +61,17 @@ def test_a_bench_session_is_never_locked(site_request) -> None:
 
 
 def test_a_server_without_central_is_never_locked(site_request) -> None:
-    with (
-        patch("pilot.integrations.central.metadata.InstanceMetadata.get_credentials", return_value=None),
-        _locked(True),
-    ):
+    site_request.return_value.config.central.enabled = False
+
+    with _locked(True):
         assert server_access_locked_response() is None
+
+
+def test_a_central_server_that_cannot_read_its_credential_keeps_the_request_waiting(site_request) -> None:
+    with patch("pilot.integrations.central.metadata.InstanceMetadata.get_credentials", return_value=None):
+        _, status = server_access_locked_response()
+
+    assert status == 503
 
 
 def _refused():
