@@ -257,6 +257,9 @@ const updateCount = computed(() => store.value.state.marketplace?.update_count |
         </SettingsSidebar>
 
         <SettingsContent class="min-w-0 bg-surface-base">
+          <p v-if="!visibleTabs.length" class="p-8 text-p-base text-ink-gray-6">
+            {{ __('Not in the free trial. Upgrade to use it.') }}
+          </p>
           <SettingsPanel v-for="item in visibleTabs" :key="item.value" :value="item.value" class="min-w-0">
             <component :is="item.component" :store="store" :active="tab === item.value" />
           </SettingsPanel>
