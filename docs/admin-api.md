@@ -195,6 +195,12 @@ The first three sections come from MariaDB's Performance Schema, so they are emp
 
 `?site=<name>` narrows every section to that site's schema; without it the report covers every user schema on the server, system schemas excluded. Only MariaDB implements it - other engines raise, and the route answers 422.
 
+### Live Metrics
+
+`GET /metrics` returns the host's current CPU, load, memory, and root disk readings from `psutil`, plus network and disk I/O rates measured as the delta since the previous call. The Analytics live view polls it every 10 seconds for its top bar and live charts, so it must stay cheap: no `du`, no database queries, nothing that can fail on file permissions. Directory and database sizes belong to `GET /storage` and `GET /sites/storage`.
+
+The live view loads `/metrics` and `/monitor/history` independently. If `/metrics` fails, the top bar shows the error and the application charts still refresh from `/monitor/history`.
+
 ### Setup
 
 Every `/setup/*` route needs a session, like the rest of the API. The Admin password is set when the bench is created (`pilot new`), so there is no unauthenticated window: a browser reaches the wizard through the `?sid=` link that `pilot start` prints, or by signing in with that password. `POST /benches` returns a `setup_link` token for the same purpose.
