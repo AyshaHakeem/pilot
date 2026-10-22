@@ -120,6 +120,12 @@ Direct API calls and errors before the dialog opens belong to your app. Catch `C
 
 Desk loads `/embed/cloud-settings/cloud-settings.js` from Pilot. It exposes `window.FrappeCloudSettings` with the same availability, open, and close methods. The existing Desk entry is `frappe.cloudSettings.show(context, options)`. An npm consumer uses the packaged UI instead.
 
+## Release
+
+Raise `version` in `package.json` and `package-lock.json` in a pull request. When it merges into `develop`, the `Publish Cloud SDK` workflow tests, builds and publishes that version to npm. It skips a version that npm already has. Run the workflow by hand to publish the current version again after a failed run.
+
+npm trusts the workflow through trusted publishing, so the repository holds no npm token. A package maintainer sets this once on npmjs.com: in the `@frappe/cloud-sdk` settings, add a GitHub Actions trusted publisher for the repository `frappe/pilot` and the workflow `cloud-sdk-publish.yml`.
+
 ## Build and test
 
 Run `npm test` and `npm run build` in this package. Run `npm run build` in `admin/frontend/in-app-embed` to build the Pilot browser bundle. Build both outputs after a UI change. Refresh local file dependencies before you rebuild a consumer such as Raven.
