@@ -182,8 +182,12 @@ export const createStore = (context?: CloudContext, translator: CloudSettingsTra
     }
   }
 
+  // A free trial gives the site, not the server, so tools that reach past the site wait for an upgrade.
+  const isOnTrial = () => Boolean(state.billing?.trial)
+
   return {
     state,
+    isOnTrial,
     loadAccountLinks,
     loadBilling,
     loadMarketplace,
