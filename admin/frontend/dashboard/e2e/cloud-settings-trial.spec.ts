@@ -7,8 +7,6 @@ const trial = {
   ends_on: '2026-10-29',
   days_left: 7,
   deletes_on: null,
-  credit: null,
-  sleeps_after_minutes: 10,
 }
 
 const billing = (onTrial: boolean) => ({
