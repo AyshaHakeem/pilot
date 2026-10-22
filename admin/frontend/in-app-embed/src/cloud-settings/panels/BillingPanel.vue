@@ -147,23 +147,22 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
         @add-payment="startPayment"
       />
 
-      <template v-if="trial">
-        <BillingProfileCard
-          v-if="flow === 'profile'"
-          :store="store"
-          :step="__('Step 1 of 2')"
-          @close="flow = ''"
-          @saved="flow = 'payment'"
-        />
+      <!-- One form for every site, so it stays mounted when a new payment method ends the trial. -->
+      <BillingProfileCard
+        v-if="flow === 'profile'"
+        :store="store"
+        :step="__('Step 1 of 2')"
+        @close="flow = ''"
+        @saved="flow = 'payment'"
+      />
 
-        <AddPaymentCard
-          v-else-if="flow === 'payment'"
-          :store="store"
-          :step="stepCount > 1 ? __('Step 2 of 2') : ''"
-          @close="flow = ''"
-          @added="finishPayment"
-        />
-      </template>
+      <AddPaymentCard
+        v-else-if="flow === 'payment'"
+        :store="store"
+        :step="stepCount > 1 ? __('Step 2 of 2') : ''"
+        @close="flow = ''"
+        @added="finishPayment"
+      />
 
       <ChangePlanCard
         v-if="flow === 'plan'"
@@ -224,24 +223,8 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
           </section>
         </div>
 
-        <BillingProfileCard
-          v-if="flow === 'profile'"
-          :store="store"
-          :step="__('Step 1 of 2')"
-          @close="flow = ''"
-          @saved="flow = 'payment'"
-        />
-
-        <AddPaymentCard
-          v-else-if="flow === 'payment'"
-          :store="store"
-          :step="stepCount > 1 ? __('Step 2 of 2') : ''"
-          @close="flow = ''"
-          @added="finishPayment"
-        />
-
         <section
-          v-else
+          v-if="!isAddingPayment"
           class="grid grid-cols-1 items-center gap-x-4 rounded-6 border border-outline-gray-2 p-5 sm:grid-cols-[minmax(0,1fr)_auto]"
         >
           <p class="flex items-center gap-2 text-base-medium text-ink-gray-8">
