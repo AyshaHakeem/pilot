@@ -1,5 +1,5 @@
 import json
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -93,3 +93,33 @@ def test_a_locked_server_refuses_the_config_backup_file(tmp_path) -> None:
         )
 
     assert response.status_code == 403
+
+
+def test_a_central_that_stalls_keeps_the_request_waiting(site_request) -> None:
+    with patch("urllib.request.urlopen", side_effect=TimeoutError("read timed out")):
+        _, status = server_access_locked_response()
+
+    assert status == 503
+
+
+def test_a_locked_server_leaves_the_config_out_of_offsite_download_links(tmp_path) -> None:
+    from tests.admin.backend.api.test_site_backups_view import _make_site
+
+    bench_root = tmp_path / "benches" / "current"
+    _make_site(bench_root, "site.localhost")
+    client = _client(bench_root)
+    offsite = Mock()
+    offsite.get_backup.return_value = {
+        "database": "20261022_000000-site-database.sql.gz",
+        "site_config": "20261022_000000-site-site_config_backup.json",
+    }
+    offsite.presigned_url.return_value = "https://bucket.example/signed"
+
+    with (
+        patch("pilot.integrations.s3.backups.OffsiteBackup.from_config", return_value=offsite),
+        patch("admin.backend.api.v1.sites.backups.server_access_locked_response", _refused),
+    ):
+        response = client.get("/api/v1/sites/site.localhost/backups/20261022_000000/download-links")
+
+    assert response.status_code == 200
+    assert response.get_json() == {"database": "https://bucket.example/signed"}

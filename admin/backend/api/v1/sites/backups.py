@@ -150,8 +150,8 @@ def backup_download_links(name: str, timestamp: str):
     except Exception:
         return internal_error("Could not create offsite backup URLs.")
     # The config file holds the site's secrets, which reach past the site.
-    if "config" in links and server_access_locked_response():
-        links.pop("config")
+    if "site_config" in links and server_access_locked_response():
+        links.pop("site_config")
 
     bench.audit_action("backup", {"site": name, "event": "download", "timestamp": timestamp, "via": "s3"})
     return jsonify(links)
