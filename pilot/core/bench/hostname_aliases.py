@@ -41,8 +41,16 @@ class HostnameAliases:
         central = self.bench.config.central
         central.hostname_aliases = _replacing(central.hostname_aliases, alias)
 
-    def retarget(self, alias_type: str, old_target: str, new_target: str) -> bool:
-        """Retarget Central aliases under the shared config lock."""
+    def is_redirecting(self, alias_type: str, target: str) -> bool:
+        return any(
+            alias.redirect
+            for alias in _matching(self.bench.config.central.hostname_aliases, alias_type, target)
+        )
+
+    def retarget(
+        self, alias_type: str, old_target: str, new_target: str, redirect: bool | None = None
+    ) -> bool:
+        """Retarget Central aliases under the shared config lock. A `redirect` value replaces theirs."""
         from pilot.config.common import CommonConfig
 
         if normalize_host(old_target) == normalize_host(new_target):
@@ -54,7 +62,11 @@ class HostnameAliases:
                 return False
             for alias in saved:
                 alias.target = new_target
+                if redirect is not None:
+                    alias.redirect = redirect
 
         for alias in _matching(self.bench.config.central.hostname_aliases, alias_type, old_target):
             alias.target = new_target
+            if redirect is not None:
+                alias.redirect = redirect
         return True

@@ -31,6 +31,7 @@ class SiteRename:
         self._original_site_config: str | None = None
         self._old_pilot_auth_token = ""
         self._new_route: RoutePolicy | None = None
+        self._was_alias_redirecting = self.bench.hostname_aliases.is_redirecting("site", self.old_name)
 
     @property
     def new_path(self) -> Path:
@@ -54,7 +55,10 @@ class SiteRename:
             self._rename_email_sender_name()
             self._update_default_site(self.old_name, self.new_name)
             self._rename_in_bench_toml(self.old_name, self.new_name)
-            self._retarget_hostname_aliases(self.old_name, self.new_name)
+            # A new primary name takes the VM hostname's visitors with it.
+            self._retarget_hostname_aliases(
+                self.old_name, self.new_name, redirect=True if self.make_primary else None
+            )
             self._add_to_hosts()
             # Reload only after both names resolve on disk.
             self._reload_nginx()
@@ -157,7 +161,12 @@ class SiteRename:
             ("the site config", self._restore_site_config),
             ("common_site_config.json", lambda: self._update_default_site(self.new_name, self.old_name)),
             ("bench.toml", lambda: self._rename_in_bench_toml(self.new_name, self.old_name)),
-            ("the hostname aliases", lambda: self._retarget_hostname_aliases(self.new_name, self.old_name)),
+            (
+                "the hostname aliases",
+                lambda: self._retarget_hostname_aliases(
+                    self.new_name, self.old_name, redirect=self._was_alias_redirecting
+                ),
+            ),
             ("the site directory", self._move_site_directory_back),
             ("the provider route", lambda: self._release_route(self.new_name)),
             ("nginx", self._reload_nginx),
@@ -337,8 +346,8 @@ class SiteRename:
                 if site.get("name") == current:
                     site["name"] = target
 
-    def _retarget_hostname_aliases(self, current: str, target: str) -> None:
-        self.bench.hostname_aliases.retarget("site", current, target)
+    def _retarget_hostname_aliases(self, current: str, target: str, redirect: bool | None = None) -> None:
+        self.bench.hostname_aliases.retarget("site", current, target, redirect)
 
     def _add_to_hosts(self) -> None:
         if self.bench.config.production.process_manager != "none":
