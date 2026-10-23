@@ -223,6 +223,14 @@ class App:
         return any((self.path / self.config.name).glob("*/page/*/*.island.js"))
 
     @property
+    def has_studio_apps(self) -> bool:
+        """Whether the app exports Studio apps: `studio/<name>/<scrubbed name>.json`."""
+        return any(
+            path.stem == path.parent.name.replace(" ", "_").replace("-", "_").lower()
+            for path in (self.path / "studio").glob("*/*.json")
+        )
+
+    @property
     def current_branch(self) -> str:
         """The branch checked out on disk, empty when HEAD is detached."""
         return self._repository.repo.branch

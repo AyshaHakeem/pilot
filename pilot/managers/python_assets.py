@@ -99,6 +99,8 @@ class PythonAssetBuilder:
                 )
                 if app.has_page_islands and not prebuilt.has_page_islands:
                     self.build_page_islands()
+                if app.has_studio_apps and not prebuilt.has_studio_apps:
+                    self.build_studio_apps(app)
                 return
 
         with app.record_lockfiles_on_failure():
@@ -109,6 +111,9 @@ class PythonAssetBuilder:
         # their node_modules must be installed before it.
         for packages in get_app_packages(app.path, self.frontend_dirs(app)):
             packages.ensure_installed()
+        # Frappe's `after_app_build` hook builds them with its Studio editor, which a prebuilt Frappe lacks.
+        if app.has_studio_apps:
+            self.studio_editor.ensure_installed()
 
         print(f"  Building assets for {app.config.name}...")
         sys.stdout.flush()
@@ -187,6 +192,26 @@ class PythonAssetBuilder:
         print("  Building Frappe UI page islands...")
         sys.stdout.flush()
         self.run_compiler(["node", str(script), "--production"], cwd=frappe_path, stream_output=True)
+
+    def build_studio_apps(self, app: "App") -> None:
+        """Build the app's exported Studio apps into `public/app_builds`, as Frappe's
+        `after_app_build` hook does. Frappe without a Studio editor (version-16) cannot."""
+        if not self.studio_editor.has_package_json:
+            return
+        self.studio_editor.ensure_installed()
+        print(f"  Building Studio apps for {app.config.name}...")
+        sys.stdout.flush()
+        build = f"from frappe.studio.build import build_standard_apps; build_standard_apps([{app.config.name!r}])"
+        self.run_compiler(
+            [str(self.bench.python), "-c", build],
+            cwd=self.bench.sites_path,
+            env=self.manager._build_env(),
+            stream_output=True,
+        )
+
+    @property
+    def studio_editor(self) -> NodePackages:
+        return NodePackages(self.bench.apps_path / "frappe" / "studio" / "frontend")
 
     def write_assets_json(self, app_name: str, dist_dir: Path, assets_dir: Path) -> None:
         assets = {
