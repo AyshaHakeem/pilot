@@ -23,6 +23,7 @@ import { useObjectStorage } from '@/composables/settings/useObjectStorage'
 import { useNewSite } from '@/composables/sites/useNewSite'
 import { useSites } from '@/composables/sites/useSites'
 import { errorMessage } from '@/utils/error'
+import { openTaskDetailPage } from '@/utils/taskRoute'
 
 const route = useRoute()
 const router = useRouter()
@@ -96,7 +97,7 @@ const steps = computed(() => [
     action: 'Create site',
     savingLabel: undefined,
     done: siteStarted.value || sites.value.length > 0,
-    saving: false,
+    saving: site.creating,
     canSave: !site.nameError,
     save: createSite,
   },
@@ -170,18 +171,13 @@ const submit = async () => {
 }
 
 const createSite = async () => {
+  const taskId = await site.create()
+
+  if (!taskId) return false
+
   siteStarted.value = true
-
-  site.create().then((taskId) => {
-    if (!taskId) {
-      siteStarted.value = false
-      current.value = steps.value.findIndex((step) => step.id === 'site')
-
-      return
-    }
-
-    loadSites()
-  })
+  loadSites()
+  openTaskDetailPage(router, taskId)
 
   return true
 }
@@ -225,8 +221,9 @@ const refresh = async () => {
     }
 
     if ((returnedFromGithub || !onboarding.value) && isVisible.value && !isOpen.value) open()
-  } catch {
+  } catch (caught) {
     loaded.value = false
+    toast.error(errorMessage(caught, 'Could not load onboarding progress.'))
   }
 }
 
