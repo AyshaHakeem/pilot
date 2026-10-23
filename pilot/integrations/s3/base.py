@@ -23,9 +23,13 @@ class EndpointConnectionError(Exception):
     """Replaced when boto3 loads."""
 
 
+class BotoCoreError(Exception):
+    """Replaced when boto3 loads."""
+
+
 def load_boto3() -> None:
     """Import boto3 on first S3 use; importing it eagerly costs ~9 MB of RSS."""
-    global boto3, TransferConfig, Config, ClientError, EndpointConnectionError
+    global boto3, TransferConfig, Config, ClientError, EndpointConnectionError, BotoCoreError
     global _STREAM_TRANSFER, _BACKUP_STREAM_TRANSFER
     if boto3 is not None:
         return
@@ -33,7 +37,7 @@ def load_boto3() -> None:
     import boto3
     from boto3.s3.transfer import TransferConfig
     from botocore.client import Config
-    from botocore.exceptions import ClientError, EndpointConnectionError
+    from botocore.exceptions import BotoCoreError, ClientError, EndpointConnectionError
 
     # s3transfer buffers out-of-order parts, so non-seekable streams still get parallel range GETs.
     _STREAM_TRANSFER = TransferConfig(multipart_chunksize=64 * 1024 * 1024, max_concurrency=8)
@@ -182,6 +186,9 @@ class S3:
             raise S3IntegrationError(
                 f"Failed to upload stream to '{bucket_name}/{remote_key}': {error.response['Error'].get('Message', error)}",
             ) from error
+        except BotoCoreError as error:
+            # Connection and timeout errors. The reader's own errors pass through unwrapped.
+            raise S3IntegrationError(f"Failed to upload stream to '{bucket_name}/{remote_key}': {error}") from error
 
     def download_stream(self, bucket_name: str, remote_key: str, fileobj) -> None:
         """Stream an S3 object into a writable file-like object."""

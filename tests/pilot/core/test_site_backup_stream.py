@@ -8,10 +8,10 @@ import pytest
 
 from pilot.config import SiteConfig
 from pilot.core.site import Site
-from pilot.core.site.backup_stream import SiteBackupStream
+from pilot.core.site.backup_stream import IncompleteBackupError, SiteBackupStream
 from pilot.exceptions import CommandError
 from pilot.integrations.s3.backups import OffsiteBackup
-from pilot.integrations.s3.base import S3IntegrationError
+from pilot.integrations.s3.base import S3, S3IntegrationError
 
 DUMP = b"CREATE TABLE tabUser;\n" * 50_000
 
@@ -45,11 +45,11 @@ def fake_frappe_backup(fail: bool = False):
         with gzip.open(paths["--backup-path-db"], "wt") as header:
             header.write("-- begin frappe metadata\n")
         with open(paths["--backup-path-db"], "ab") as dump:
-            dump.write(gzip.compress(DUMP[: len(DUMP) // 2] if fail else DUMP))
-        if fail:
-            raise CommandError("frappe backup failed", returncode=1)
+            dump.write(gzip.compress(DUMP))
         with open(paths["--backup-path-conf"], "w") as config:
             config.write("{}")
+        if fail:
+            raise CommandError("frappe backup failed", returncode=1)
         for flag in ("--backup-path-files", "--backup-path-private-files"):
             with open(paths[flag], "wb") as tar:
                 tar.write(b"tar" * 1000)
@@ -94,7 +94,7 @@ def fail_second_holder(monkeypatch) -> None:
 
 @pytest.mark.parametrize("failure", ["backup", "upload", "holder"])
 def test_a_failed_run_fails_loudly_and_leaves_nothing_offsite(tmp_path, monkeypatch, failure) -> None:
-    """A cut-short backup never completes an upload. A failed upload drains its pipe and
+    """A backup that fails after writing its database and config completes no upload. A failed upload drains its pipe and
     deletes every file that did upload, even when one of those deletes fails."""
     monkeypatch.setattr("pilot.utils.run_command", fake_frappe_backup(fail=failure == "backup"))
     if failure == "holder":
@@ -109,6 +109,8 @@ def test_a_failed_run_fails_loudly_and_leaves_nothing_offsite(tmp_path, monkeypa
         SiteBackupStream(site(tmp_path), offsite).run(with_files=True)
 
     assert sorted(offsite.deleted) == sorted(offsite.uploaded)
+    if failure == "backup":
+        assert offsite.uploaded == {}
     if failure == "upload":
         assert len(offsite.deleted) == 2
         assert "Could not delete" in raised.value.__notes__[0]
@@ -125,3 +127,23 @@ def test_an_object_whose_index_write_fails_is_deleted() -> None:
         offsite.upload_stream("site1.local", "20261022_114241", "db.sql.gz", MagicMock())
 
     s3.delete_object.assert_called_once_with("bucket", s3.upload_stream.call_args.args[1])
+
+
+@pytest.mark.parametrize(
+    ("raised", "expected"),
+    [("connection", S3IntegrationError), ("reader", IncompleteBackupError)],
+)
+def test_stream_upload_wraps_network_errors_but_not_reader_errors(raised, expected) -> None:
+    """The task records only BenchErrors; the reader's error must stay unwrapped for check_uploads."""
+    from botocore.exceptions import EndpointConnectionError
+
+    s3 = S3("key", "secret", "us-east-1", "custom", "bucket", endpoint_url="http://127.0.0.1:9")
+    error = (
+        EndpointConnectionError(endpoint_url="http://127.0.0.1:9")
+        if raised == "connection"
+        else IncompleteBackupError("cut short")
+    )
+    s3.client = MagicMock(upload_fileobj=MagicMock(side_effect=error))
+
+    with pytest.raises(expected):
+        s3.upload_stream("bucket", "key", MagicMock(), low_memory=True)
