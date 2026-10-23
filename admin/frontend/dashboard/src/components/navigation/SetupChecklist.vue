@@ -38,6 +38,9 @@ const useToken = ref(false)
 const origin = window.location.origin
 
 const githubViaCloud = computed(() => github.centralAvailable && !useToken.value)
+const githubRepositories = computed(() =>
+  github.centralAccounts.flatMap((account) => account.repositories),
+)
 
 const loaded = ref(false)
 
@@ -64,8 +67,10 @@ const steps = computed(() => [
     id: 'github',
     name: 'GitHub',
     label: 'Connect GitHub',
-    title: 'Connect your GitHub',
-    description: 'Pilot installs your Frappe apps straight from private repos. Takes about a minute.',
+    title: github.viaCentral ? 'GitHub connected' : 'Connect your GitHub',
+    description: github.viaCentral
+      ? 'Pilot can read these repos through Frappe Cloud.'
+      : 'Pilot installs your Frappe apps straight from private repos. Takes about a minute.',
     action: githubViaCloud.value ? 'Connect GitHub' : 'Connect',
     savingLabel: githubViaCloud.value ? 'Opening Frappe Cloud' : 'Verifying token',
     done: github.connected,
@@ -324,27 +329,20 @@ onMounted(refresh)
           </template>
 
           <template v-else-if="currentStep.id === 'github' && github.viaCentral">
-            <p class="mb-4 text-ink-gray-7 text-p-base">
-              Connected through Frappe Cloud. Pilot can read these repos.
-            </p>
-
-            <div class="space-y-4 -mr-4 pr-4 max-h-64 overflow-y-auto">
-              <ul v-for="account in github.centralAccounts" :key="account.account">
-                <li class="mb-1 text-ink-gray-5 text-sm-medium">{{ account.account }}</li>
-
-                <li
-                  v-for="repository in account.repositories"
-                  :key="repository"
-                  class="flex items-center gap-2 py-1.5 text-ink-gray-8 text-base before:size-4 before:text-ink-gray-5 before:lucide-book-marked"
-                >
-                  {{ repository.slice(account.account.length + 1) }}
-                </li>
-              </ul>
-            </div>
+            <ul class="-mt-4 max-h-64 overflow-y-auto">
+              <li
+                v-for="repository in githubRepositories"
+                :key="repository"
+                class="flex items-center gap-2.5 h-8 text-ink-gray-8 text-base before:size-4 before:text-ink-gray-5 before:lucide-package"
+              >
+                <span class="truncate">
+                  <span class="text-ink-gray-5">{{ repository.split('/')[0] }}/</span>{{ repository.split('/')[1] }}
+                </span>
+              </li>
+            </ul>
 
             <Button
-              class="self-start mt-auto -ml-2"
-              variant="ghost"
+              class="self-start mt-2"
               icon-left="lucide-settings-2"
               label="Manage repositories"
               :loading="github.redirecting"
