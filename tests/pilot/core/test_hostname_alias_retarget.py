@@ -120,13 +120,10 @@ def test_a_shared_file_edit_keeps_the_rest_of_the_file(tmp_path: Path) -> None:
     assert _targets(bench) == ["new.example.com"]
 
 
-def _rename_with_site_alias(
-    tmp_path: Path, make_primary: bool, nginx_error: Exception | None = None
+def _rename_with_site_aliases(
+    tmp_path: Path, *aliases: HostnameAlias, make_primary: bool, nginx_error: Exception | None = None
 ) -> Bench:
-    bench = _with_aliases(
-        tmp_path,
-        HostnameAlias(type="site", pattern="site-*.zone.test", target="old.example.com", redirect=False),
-    )
+    bench = _with_aliases(tmp_path, *aliases)
     site_dir = bench.sites_path / "old.example.com"
     site_dir.mkdir(parents=True)
     (site_dir / "site_config.json").write_text(json.dumps({}))
@@ -145,22 +142,37 @@ def _redirects(bench: Bench) -> list[bool]:
     return [alias.redirect for alias in CommonConfig.read(bench.path.parent).central.hostname_aliases]
 
 
+SERVING_ALIAS = HostnameAlias(
+    type="site", pattern="site-*.zone.test", target="old.example.com", redirect=False
+)
+REDIRECTING_ALIAS = HostnameAlias(
+    type="site", pattern="alt-*.zone.test", target="old.example.com", redirect=True
+)
+
+
 def test_a_new_primary_name_takes_the_site_alias_redirect(tmp_path: Path) -> None:
-    bench = _rename_with_site_alias(tmp_path, make_primary=True)
+    bench = _rename_with_site_aliases(tmp_path, SERVING_ALIAS, make_primary=True)
 
     assert _targets(bench) == ["new.example.com"]
     assert _redirects(bench) == [True]
-    assert bench.hostname_aliases.is_redirecting("site", "new.example.com")
+    # nginx renders from the in-memory config, so that must change too.
+    assert [alias.redirect for alias in bench.config.central.hostname_aliases] == [True]
 
 
 def test_a_rename_without_a_new_primary_keeps_serving_the_site_alias(tmp_path: Path) -> None:
-    bench = _rename_with_site_alias(tmp_path, make_primary=False)
+    bench = _rename_with_site_aliases(tmp_path, SERVING_ALIAS, make_primary=False)
 
     assert _redirects(bench) == [False]
 
 
-def test_a_rolled_back_rename_stops_the_site_alias_redirect(tmp_path: Path) -> None:
-    bench = _rename_with_site_alias(tmp_path, make_primary=True, nginx_error=RuntimeError("nginx is unhappy"))
+def test_a_rolled_back_rename_restores_each_alias_redirect(tmp_path: Path) -> None:
+    bench = _rename_with_site_aliases(
+        tmp_path,
+        SERVING_ALIAS,
+        REDIRECTING_ALIAS,
+        make_primary=True,
+        nginx_error=RuntimeError("nginx is unhappy"),
+    )
 
-    assert _targets(bench) == ["old.example.com"]
-    assert _redirects(bench) == [False]
+    assert _targets(bench) == ["old.example.com", "old.example.com"]
+    assert _redirects(bench) == [False, True]
