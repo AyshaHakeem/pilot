@@ -1,9 +1,10 @@
+import contextlib
 import os
 import tempfile
 from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from pilot.exceptions import BenchError
 from pilot.integrations.s3.backups import OffsiteBackup
@@ -31,7 +32,7 @@ class FifoReader:
         self.path = path
         self.size = 0
         self.is_complete = False
-        self.file = None
+        self.file: BinaryIO
 
     def read(self, size: int = -1) -> bytes:
         data = self.file.read(size)
@@ -84,19 +85,26 @@ class SiteBackupStream:
         a writer on every FIFO until the backup exits; readers see one EOF at the end."""
         from pilot.utils import run_command
 
-        holders = [os.open(reader.path, os.O_WRONLY) for reader in readers.values()]
         argv = [*self.site.bench.frappe_call, "frappe", "--site", self.site.config.name, "backup"]
         if "--backup-path-files" in readers:
             argv.append("--with-files")
         for flag, reader in readers.items():
             argv += [flag, str(reader.path)]
+        holders = []
         try:
+            for reader in readers.values():
+                holders.append(os.open(reader.path, os.O_WRONLY))
             run_command(argv, cwd=self.site.bench.sites_path, stream_output=True)
             for reader in readers.values():
                 reader.is_complete = True
         finally:
+            unopened = list(readers.values())[len(holders) :]
             for holder in holders:
                 os.close(holder)
+            # A reader with no writer waits in open() for ever; a brief writer releases it.
+            for reader in unopened:
+                with contextlib.suppress(OSError):
+                    os.close(os.open(reader.path, os.O_WRONLY))
 
     def check_uploads(self, timestamp: str, uploads: dict[FifoReader, Future]) -> None:
         """Raise the first upload error. Incomplete reads only echo the backup's own failure.
@@ -108,6 +116,10 @@ class SiteBackupStream:
         if not errors:
             return
         for reader, error in results.items():
-            if error is None:
+            if error is not None:
+                continue
+            try:
                 self.offsite.delete(self.site.config.name, timestamp, reader.path.name)
+            except Exception as cleanup_error:
+                errors[0].add_note(f"Could not delete {reader.path.name} from S3: {cleanup_error}")
         raise errors[0]

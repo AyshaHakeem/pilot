@@ -106,9 +106,15 @@ class OffsiteBackup:
             backup_path.unlink(missing_ok=True)
 
     def upload_stream(self, site_name: str, timestamp: str, filename: str, fileobj) -> None:
+        """An object whose index entry fails to write is deleted, since retention only sees indexed files."""
         keys = BackupKeys(site_name)
-        self.s3.upload_stream(self.bucket, keys.get_file_key(timestamp, filename), fileobj, low_memory=True)
-        self._metadata(keys).add(timestamp, filename)
+        key = keys.get_file_key(timestamp, filename)
+        self.s3.upload_stream(self.bucket, key, fileobj, low_memory=True)
+        try:
+            self._metadata(keys).add(timestamp, filename)
+        except Exception:
+            self.s3.delete_object(self.bucket, key)
+            raise
 
     def download(self, site_name: str, timestamp: str, filename: str, destination: Path) -> None:
         self.s3.download_file(self.bucket, BackupKeys(site_name).get_file_key(timestamp, filename), destination)

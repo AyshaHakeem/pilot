@@ -1,5 +1,8 @@
+import errno
 import gzip
+import os
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -7,14 +10,16 @@ from pilot.config import SiteConfig
 from pilot.core.site import Site
 from pilot.core.site.backup_stream import SiteBackupStream
 from pilot.exceptions import CommandError
+from pilot.integrations.s3.backups import OffsiteBackup
 from pilot.integrations.s3.base import S3IntegrationError
 
 DUMP = b"CREATE TABLE tabUser;\n" * 50_000
 
 
 class FakeOffsite:
-    def __init__(self, failing: str = "") -> None:
+    def __init__(self, failing: str = "", failing_delete: str = "") -> None:
         self.failing = failing
+        self.failing_delete = failing_delete
         self.uploaded: dict[str, bytes] = {}
         self.deleted: list[str] = []
 
@@ -28,6 +33,8 @@ class FakeOffsite:
 
     def delete(self, site_name, timestamp, filename) -> None:
         self.deleted.append(filename)
+        if self.failing_delete and filename.endswith(self.failing_delete):
+            raise S3IntegrationError(f"Failed to delete {filename}")
 
 
 def fake_frappe_backup(fail: bool = False):
@@ -70,19 +77,51 @@ def test_stream_uploads_every_file_whole_and_leaves_nothing_on_disk(tmp_path, mo
     assert list((tmp_path / "sites" / "site1.local" / "backups").iterdir()) == []
 
 
-@pytest.mark.parametrize(
-    ("failing_backup", "failing_upload", "error"),
-    [(True, "", CommandError), (False, "-files.tar", S3IntegrationError)],
-)
-def test_a_failed_run_leaves_nothing_offsite(
-    tmp_path, monkeypatch, failing_backup, failing_upload, error
-) -> None:
-    """A cut-short backup never completes an upload; a failed upload drains its pipe and
-    deletes the files that did upload."""
-    monkeypatch.setattr("pilot.utils.run_command", fake_frappe_backup(fail=failing_backup))
-    offsite = FakeOffsite(failing=failing_upload)
+def fail_second_holder(monkeypatch) -> None:
+    """The second FIFO writer pilot opens fails as if the process ran out of file handles."""
+    real_open = os.open
+    calls = []
 
-    with pytest.raises(error):
+    def open_fifo(path, flags, *args, **kwargs):
+        if flags == os.O_WRONLY:
+            calls.append(path)
+            if len(calls) == 2:
+                raise OSError(errno.EMFILE, "Too many open files")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr("pilot.core.site.backup_stream.os.open", open_fifo)
+
+
+@pytest.mark.parametrize("failure", ["backup", "upload", "holder"])
+def test_a_failed_run_fails_loudly_and_leaves_nothing_offsite(tmp_path, monkeypatch, failure) -> None:
+    """A cut-short backup never completes an upload. A failed upload drains its pipe and
+    deletes every file that did upload, even when one of those deletes fails."""
+    monkeypatch.setattr("pilot.utils.run_command", fake_frappe_backup(fail=failure == "backup"))
+    if failure == "holder":
+        fail_second_holder(monkeypatch)
+    offsite = FakeOffsite(
+        failing="-files.tar" if failure == "upload" else "",
+        failing_delete="-site_config_backup.json" if failure == "upload" else "",
+    )
+    expected = {"backup": CommandError, "upload": S3IntegrationError, "holder": OSError}[failure]
+
+    with pytest.raises(expected) as raised:
         SiteBackupStream(site(tmp_path), offsite).run(with_files=True)
 
     assert sorted(offsite.deleted) == sorted(offsite.uploaded)
+    if failure == "upload":
+        assert len(offsite.deleted) == 2
+        assert "Could not delete" in raised.value.__notes__[0]
+
+
+def test_an_object_whose_index_write_fails_is_deleted() -> None:
+    s3 = MagicMock()
+    offsite = OffsiteBackup(s3, "bucket", "/bench")
+    offsite._metadata = MagicMock(
+        return_value=MagicMock(add=MagicMock(side_effect=S3IntegrationError("index")))
+    )
+
+    with pytest.raises(S3IntegrationError):
+        offsite.upload_stream("site1.local", "20261022_114241", "db.sql.gz", MagicMock())
+
+    s3.delete_object.assert_called_once_with("bucket", s3.upload_stream.call_args.args[1])
