@@ -168,7 +168,7 @@ class App:
         from pilot.core.app.prebuilt_assets import build_output_paths
 
         repo = self._repository.repo
-        outputs = build_output_paths(self)
+        outputs = [*build_output_paths(self), f"{self.config.name}/public/app_builds"]
         build_lockfiles = self.failed_build_lockfiles
         return any(
             Path(path).name != "components.d.ts"

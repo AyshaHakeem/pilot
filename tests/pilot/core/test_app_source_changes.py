@@ -107,6 +107,14 @@ def test_an_app_with_an_exported_studio_app_has_studio_apps(app: App) -> None:
     assert app.has_studio_apps is True
 
 
+def test_a_studio_build_does_not_count_even_when_git_does_not_ignore_it(app: App) -> None:
+    build = app.path / "crm" / "public" / "app_builds" / "portal" / "index.js"
+    build.parent.mkdir(parents=True)
+    build.write_text("built")
+
+    assert app.has_source_changes is False
+
+
 def test_a_failed_build_leaves_its_lockfiles_and_they_do_not_count(app: App) -> None:
     with pytest.raises(RuntimeError), app.record_lockfiles_on_failure():
         (app.path / "yarn.lock").write_text("rewritten by yarn install")

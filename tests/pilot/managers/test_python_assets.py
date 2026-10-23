@@ -176,6 +176,27 @@ def test_studio_apps_are_built_with_frappe_s_own_builder(tmp_path: Path) -> None
     ]
 
 
+@pytest.mark.parametrize(("archive_has_studio_apps", "builds"), [(False, 1), (True, 0)])
+def test_studio_apps_are_built_after_a_download_only_when_the_archive_lacks_them(
+    tmp_path: Path, archive_has_studio_apps: bool, builds: int
+) -> None:
+    builder = make_builder()
+    app = make_app(tmp_path / "helpdesk", "helpdesk")
+    app.has_page_islands = False
+    app.has_studio_apps = True
+    prebuilt = MagicMock(has_studio_apps=archive_has_studio_apps, has_page_islands=False)
+    prebuilt.install.return_value = True
+
+    with (
+        patch("pilot.core.app.prebuilt_assets.PrebuiltAssets", return_value=prebuilt),
+        patch.object(builder, "setup_prebuilt_assets"),
+        patch.object(builder, "build_studio_apps") as build_studio_apps,
+    ):
+        assert builder.install_prebuilt_assets(app) is True
+
+    assert build_studio_apps.call_count == builds
+
+
 def test_a_declared_build_dir_gets_its_dependencies_when_only_the_root_has_them(tmp_path: Path) -> None:
     """Helpdesk installs `desk` from a root postinstall, so an installed root hides a missing `desk`."""
     app_path = tmp_path / "helpdesk"

@@ -82,36 +82,39 @@ class PythonAssetBuilder:
         )
 
     def build_assets_for_app(self, app: "App", force: bool = False) -> None:
-        app_public_dir = app.path / app.config.name / "public"
-        dist_dir = app_public_dir / "dist"
-
         # Desk serves /assets/frappe/node_modules, and every server build runs Frappe's esbuild.
         if app.config.name == "frappe":
             NodePackages(app.path).ensure_installed()
 
-        if not force and not app.has_source_changes:
-            from pilot.core.app.prebuilt_assets import PrebuiltAssets
-
-            prebuilt = PrebuiltAssets(app)
-            if prebuilt.install():
-                self.setup_prebuilt_assets(
-                    app.config.name, app_public_dir, dist_dir, prebuilt.asset_maps, prebuilt.has_page_islands
-                )
-                if app.has_page_islands and not prebuilt.has_page_islands:
-                    self.build_page_islands()
-                if app.has_studio_apps and not prebuilt.has_studio_apps:
-                    self.build_studio_apps(app)
-                return
+        if not force and not app.has_source_changes and self.install_prebuilt_assets(app):
+            return
 
         with app.record_lockfiles_on_failure():
             self.build_app_from_source(app)
+
+    def install_prebuilt_assets(self, app: "App") -> bool:
+        """Install the app's published assets and build what the archive lacks. False when none are published."""
+        from pilot.core.app.prebuilt_assets import PrebuiltAssets
+
+        prebuilt = PrebuiltAssets(app)
+        if not prebuilt.install():
+            return False
+        app_public_dir = app.path / app.config.name / "public"
+        self.setup_prebuilt_assets(
+            app.config.name, app_public_dir, app_public_dir / "dist", prebuilt.asset_maps, prebuilt.has_page_islands
+        )
+        if app.has_page_islands and not prebuilt.has_page_islands:
+            self.build_page_islands()
+        if app.has_studio_apps and not prebuilt.has_studio_apps:
+            self.build_studio_apps(app)
+        return True
 
     def build_app_from_source(self, app: "App") -> None:
         # Frappe's build runs the app's build script, which can build `frontend`/`roster`, so
         # their node_modules must be installed before it.
         for packages in get_app_packages(app.path, self.frontend_dirs(app)):
             packages.ensure_installed()
-        # Frappe's `after_app_build` hook builds them with its Studio editor, which a prebuilt Frappe lacks.
+        # Frappe's `after_app_build` hook builds the app's Studio apps with this editor.
         if app.has_studio_apps:
             self.studio_editor.ensure_installed()
 

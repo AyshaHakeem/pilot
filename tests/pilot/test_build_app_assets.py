@@ -164,3 +164,30 @@ def test_script_builds_and_publishes_exported_studio_apps(tmp_path: Path, enviro
     with tarfile.open(archive) as tar:
         manifest = json.load(tar.extractfile("manifest.json"))
     assert "frappe/public/app_builds" in manifest["paths"]
+
+
+def test_script_builds_frappe_s_framework_and_page_islands(tmp_path: Path, environment: dict[str, str]) -> None:
+    app = tmp_path / "checkout"
+    (app / "frappe").mkdir(parents=True)
+    (app / "frappe" / "hooks.py").write_text("")
+    for script in ("build-framework.js", "build-pages.js"):
+        write_executable(app / "ui" / "vite" / "island" / script, "")
+    write_executable(tmp_path / "bin" / "node", STUB)
+    subprocess.run(["git", "init", "-q", str(app)], check=True)
+    subprocess.run(["git", "-C", str(app), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(app), "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "c"],
+        check=True,
+    )
+
+    subprocess.run(
+        ["bash", str(SCRIPT), str(app), "develop", str(tmp_path / "out")],
+        env=environment,
+        check=True,
+        capture_output=True,
+    )
+
+    assert [call for call in read_calls(environment) if call.startswith("node ")] == [
+        "node ui/vite/island/build-framework.js --production @ frappe",
+        "node ui/vite/island/build-pages.js --production @ frappe",
+    ]
