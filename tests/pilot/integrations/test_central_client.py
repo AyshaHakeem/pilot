@@ -232,7 +232,14 @@ def test_proxy_forwards_a_team_identity_token_request(tmp_path: Path) -> None:
     forward.assert_called_once_with(method, "POST", body)
 
 
-@pytest.mark.parametrize("method", ["central.api.email_oauth.start", "central.api.email_oauth.relay_token"])
+@pytest.mark.parametrize(
+    "method",
+    [
+        "central.api.email_oauth.get_active_providers",
+        "central.api.email_oauth.start",
+        "central.api.email_oauth.relay_token",
+    ],
+)
 def test_proxy_forwards_the_mailbox_connect_calls(tmp_path: Path, method: str) -> None:
     client = _app_client(tmp_path / "bench")
     body = {"provider": "microsoft", "state": "s1"}
