@@ -252,6 +252,20 @@ def test_proxy_forwards_the_mailbox_connect_calls(tmp_path: Path, method: str) -
     forward.assert_called_once_with(method, "POST", body)
 
 
+@pytest.mark.parametrize("providers", [["microsoft", "yandex"], []])
+def test_proxy_returns_the_active_providers_list(tmp_path: Path, providers: list[str]) -> None:
+    client = _app_client(tmp_path / "bench")
+    method = "central.api.email_oauth.get_active_providers"
+    with patch(
+        "admin.backend.api.v1.sites.central.CentralClient.forward", return_value=providers
+    ) as forward:
+        response = client.post(f"/api/v1/sites/s1.localhost/central/{method}", json={})
+
+    assert response.status_code == 200
+    assert response.get_json() == providers
+    forward.assert_called_once_with(method, "POST", {})
+
+
 def test_proxy_rejects_the_mailbox_callback(tmp_path: Path) -> None:
     # the browser goes to Central's callback directly; a site never calls it
     client = _app_client(tmp_path / "bench")
