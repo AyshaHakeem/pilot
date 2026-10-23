@@ -32,6 +32,7 @@ export const useNewSite = () => {
   const hasSingleDomain = computed(() => wildcardDomains.value.length === 1)
   const nameError = computed(() => validate(name.value.trim()))
   const availableApps = computed(() => buildSiteAppChoices(registry.value, benchApps.value))
+  const frappe = computed(() => benchApps.value.find((app) => app.name === 'frappe'))
   const filteredApps = computed(() => {
     const query = appSearch.value.trim().toLowerCase()
 
@@ -128,6 +129,7 @@ export const useNewSite = () => {
     nameError,
     availableApps,
     filteredApps,
+    frappe,
     reset,
     toggleApp,
     create,

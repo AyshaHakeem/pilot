@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
   Button,
   Checkbox,
@@ -10,11 +12,12 @@ import {
   TextInput,
   toast,
 } from 'frappe-ui'
-import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { settingsApi } from '@/api/settings'
+
 import AppIcon from '@/components/apps/AppIcon.vue'
 import CircularProgress from '@/components/common/CircularProgress.vue'
+import SetupIllustration from '@/components/navigation/SetupIllustration.vue'
+
+import { settingsApi } from '@/api/settings'
 import { useGithubConnection } from '@/composables/settings/useGithubConnection'
 import { useObjectStorage } from '@/composables/settings/useObjectStorage'
 import { useNewSite } from '@/composables/sites/useNewSite'
@@ -37,15 +40,32 @@ const githubViaCloud = computed(() => github.centralAvailable && !useToken.value
 
 const loaded = ref(false)
 
+const githubSteps = [
+  {
+    icon: 'lucide-key-round',
+    title: 'Authorize on GitHub',
+    description: 'A GitHub window asks which repos to share.',
+  },
+  {
+    icon: 'lucide-folder-git-2',
+    title: 'Pick your app repos',
+    description: 'Only the repos that hold your Frappe apps.',
+  },
+  {
+    icon: 'lucide-undo-2',
+    title: 'Land back here',
+    description: 'Straight on to storage and your first site.',
+  },
+]
+
 const steps = computed(() => [
   {
     id: 'github',
     name: 'GitHub',
     label: 'Connect GitHub',
-    icon: 'lucide-git-branch',
-    title: 'Connect your GitHub account',
-    description: 'Lets Pilot install apps from private repos.',
-    action: githubViaCloud.value ? 'Connect GitHub' : 'Next',
+    title: 'Connect your GitHub',
+    description: 'Pilot installs your Frappe apps straight from private repos. Takes about a minute.',
+    action: githubViaCloud.value ? 'Connect GitHub' : 'Connect',
     savingLabel: githubViaCloud.value ? 'Opening Frappe Cloud' : 'Verifying token',
     done: github.connected,
     saving: github.connecting || github.redirecting,
@@ -55,10 +75,22 @@ const steps = computed(() => [
       : github.connect,
   },
   {
+    id: 'storage',
+    name: 'Storage',
+    label: 'Connect object storage',
+    title: 'Where should backups go?',
+    description: 'Pick an S3-compatible bucket for offsite backups.',
+    action: 'Continue',
+    savingLabel: 'Connecting storage',
+    done: storage.connected,
+    saving: storage.saving,
+    canSave: storage.canSave,
+    save: storage.save,
+  },
+  {
     id: 'site',
     name: 'First site',
     label: 'Create your first site',
-    icon: 'lucide-rocket',
     title: 'Launch your first site',
     description: 'Pick a name and apps. Pilot handles the rest.',
     action: 'Create site',
@@ -67,20 +99,6 @@ const steps = computed(() => [
     saving: false,
     canSave: !site.nameError,
     save: createSite,
-  },
-  {
-    id: 'storage',
-    name: 'Storage',
-    label: 'Connect object storage',
-    icon: 'lucide-database',
-    title: 'Where should backups go?',
-    description: 'Pick an S3-compatible bucket for offsite backups.',
-    action: 'Next',
-    savingLabel: 'Connecting storage',
-    done: storage.connected,
-    saving: storage.saving,
-    canSave: storage.canSave,
-    save: storage.save,
   },
 ])
 
@@ -100,21 +118,22 @@ const nodeState = (index: number) => {
   if (steps.value[index].done) return 'done'
   if (index === current.value) return 'current'
 
-  return index < current.value ? 'skipped' : 'upcoming'
+  return 'upcoming'
 }
 
-const railClasses = {
-  done: 'border-outline-green-5 text-ink-green-7',
-  current: 'bg-surface-base border-dashed border-outline-gray-9 text-ink-gray-9',
-  skipped: 'border-dashed border-outline-gray-4 text-ink-gray-5',
-  upcoming: 'border-dashed border-outline-gray-4 text-ink-gray-5',
-}
-
-const statusLabels = {
-  done: 'Done',
-  current: 'In progress',
-  skipped: 'Skipped',
-  upcoming: 'Up next',
+const nodeStyles = {
+  done: {
+    classes: 'bg-surface-green-2 border-outline-green-3 text-ink-green-6',
+    icon: 'lucide-check',
+  },
+  current: {
+    classes: 'border-outline-gray-7 text-ink-gray-8',
+    icon: '',
+  },
+  upcoming: {
+    classes: 'border-dashed border-outline-gray-4 text-ink-gray-5',
+    icon: '',
+  },
 }
 
 const dialogOpen = computed({
@@ -151,8 +170,6 @@ const submit = async () => {
 }
 
 const createSite = async () => {
-  const name = site.name
-
   siteStarted.value = true
 
   site.create().then((taskId) => {
@@ -163,7 +180,6 @@ const createSite = async () => {
       return
     }
 
-    toast.success(`Creating ${name} in the background`)
     loadSites()
   })
 
@@ -229,52 +245,50 @@ onMounted(refresh)
 </script>
 
 <template>
-  <Dialog v-model:open="dialogOpen" bare size="3xl">
-    <div class="flex sm:flex-row flex-col">
+  <Dialog v-model:open="dialogOpen" bare size="4xl">
+    <div class="flex">
       <aside
-        class="bg-surface-gray-1 px-7 pt-7 pb-6 border-b sm:border-r sm:border-b-0 sm:w-56 shrink-0"
+        class="max-sm:hidden flex flex-col bg-[color-mix(in_oklab,var(--surface-base)_97%,var(--ink-gray-9))] p-8 border-r w-96 shrink-0"
       >
-        <h2 class="text-ink-gray-8 text-base-semibold">Get started</h2>
-        <p class="flex items-center gap-1.5 mt-1 text-ink-gray-5 text-sm">
-          <CircularProgress :value="progress" />
-          {{ doneCount }}
-          of {{ steps.length }} done
-        </p>
-
-        <ol aria-hidden="true" class="mt-6">
+        <ol aria-hidden="true" class="flex items-center gap-2">
           <li
             v-for="(step, index) in steps"
             :key="step.id"
-            class="relative gap-x-3 gap-y-0.5 grid grid-flow-col grid-rows-2 justify-start pb-5 last:pb-0 after:absolute after:top-9 after:bottom-1 after:left-4 last:after:hidden"
+            class="flex items-center gap-2 before:w-4 before:border-t before:transition-colors before:duration-300 first:before:hidden"
             :class="
-              step.done
-                ? 'after:w-px after:bg-surface-green-7'
-                : 'after:border-l after:border-outline-gray-4 after:border-dashed'
+              steps[index - 1]?.done
+                ? 'before:border-outline-green-5'
+                : 'before:border-dashed before:border-outline-gray-4'
             "
           >
             <span
-              class="place-items-center grid row-span-2 border rounded-4 size-8"
-              :class="railClasses[nodeState(index)]"
+              class="place-items-center grid border rounded-3 size-6 text-xs tabular-nums leading-none transition-colors duration-300 shrink-0"
+              :class="nodeStyles[nodeState(index)].classes"
             >
-              <span class="size-4" :class="step.icon" />
+              <span
+                v-if="nodeStyles[nodeState(index)].icon"
+                class="size-3.5"
+                :class="nodeStyles[nodeState(index)].icon"
+              />
+              <template v-else>{{ index + 1 }}</template>
             </span>
 
             <span
-              class="text-sm"
-              :class="index === current ? 'text-ink-gray-9 text-sm-medium' : 'text-ink-gray-7'"
+              class="whitespace-nowrap"
+              :class="index === current ? 'text-ink-gray-8 text-sm-medium' : 'text-ink-gray-6 text-sm'"
             >
               {{ step.name }}
             </span>
-
-            <span class="text-ink-gray-5 text-xs">{{ statusLabels[nodeState(index)] }}</span>
           </li>
         </ol>
+
+        <SetupIllustration class="my-auto pt-4" :step="currentStep.id" />
       </aside>
 
       <div class="flex flex-col flex-1 min-w-0">
-        <section class="flex flex-col sm:min-h-80 px-7 pt-7 pb-2">
+        <section class="flex flex-col flex-1 px-7 sm:px-8 pt-8 pb-2">
           <h2 class="text-ink-gray-8 text-2xl-semibold">{{ currentStep.title }}</h2>
-          <p class="mt-1.5 mb-5 text-ink-gray-6 text-p-base">{{ currentStep.description }}</p>
+          <p class="mt-2 mb-6 text-ink-gray-6 text-p-base">{{ currentStep.description }}</p>
 
           <template v-if="currentStep.id === 'storage'">
             <div class="gap-3 grid sm:grid-cols-2">
@@ -293,11 +307,18 @@ onMounted(refresh)
                 placeholder="Optional for AWS, DigitalOcean, and Hetzner"
               />
 
-              <TextInput v-model="storage.accessKey" label="Access key" placeholder="AKIA…" />
+              <TextInput
+                v-model="storage.accessKey"
+                label="Access key"
+                placeholder="AKIA…"
+                autocomplete="off"
+              />
+
               <TextInput
                 v-model="storage.secretKey"
                 label="Secret key"
                 type="password"
+                autocomplete="new-password"
                 :placeholder="storage.secretKeySet ? 'Saved, leave blank to keep' : undefined"
               />
             </div>
@@ -335,13 +356,21 @@ onMounted(refresh)
           </template>
 
           <template v-else-if="currentStep.id === 'github'">
-            <ol
-              v-if="githubViaCloud"
-              class="space-y-3 pl-5 marker:text-ink-gray-5 text-ink-gray-7 text-p-base list-decimal"
-            >
-              <li>Frappe Cloud opens and asks GitHub which repos to share.</li>
-              <li>Pick the repos that hold your Frappe apps. Pilot only gets read access.</li>
-              <li>You land back here to create your first site.</li>
+            <ol v-if="githubViaCloud">
+              <li
+                v-for="item in githubSteps"
+                :key="item.title"
+                class="relative gap-x-3.5 gap-y-1 grid grid-flow-col grid-rows-[auto_auto] justify-start pb-5 last:pb-0 after:absolute after:top-9 after:-bottom-px after:left-3.5 after:w-px after:bg-surface-gray-3 last:after:hidden"
+              >
+                <span
+                  class="place-items-center grid row-span-2 self-center bg-surface-gray-1 border border-outline-gray-2 rounded-full size-7 text-ink-gray-6"
+                >
+                  <span class="size-3.5" :class="item.icon" />
+                </span>
+
+                <span class="text-ink-gray-8 text-base-medium">{{ item.title }}</span>
+                <span class="text-ink-gray-5 text-sm">{{ item.description }}</span>
+              </li>
             </ol>
 
             <template v-else>
@@ -368,7 +397,7 @@ onMounted(refresh)
 
             <Button
               v-if="github.centralAvailable && !github.connected"
-              class="self-start mt-auto -ml-2"
+              class="self-start mt-6"
               :label="useToken ? 'Use Frappe Cloud instead' : 'Use a token instead'"
               @click="useToken = !useToken"
             />
@@ -426,14 +455,14 @@ onMounted(refresh)
 
                 <p
                   v-if="!site.filteredApps.length"
-                  class="place-items-center grid h-72 text-ink-gray-5 text-p-sm"
+                  class="place-items-center grid h-56 text-ink-gray-5 text-p-sm"
                 >
                   No apps match "{{ site.appSearch }}"
                 </p>
 
                 <div
                   v-else
-                  class="app-list content-start gap-2 grid sm:grid-cols-2 -mr-4 pr-4 pb-6 h-72 overflow-y-auto [scrollbar-color:var(--outline-gray-3)_transparent] [scrollbar-width:thin]"
+                  class="app-list content-start gap-2 grid sm:grid-cols-2 pb-6 h-56 overflow-y-auto [scrollbar-width:none]"
                 >
                   <button
                     v-for="app in site.filteredApps"
@@ -462,10 +491,10 @@ onMounted(refresh)
           </template>
         </section>
 
-        <footer class="flex items-center gap-2 px-7 pt-4.5 pb-5">
+        <footer class="flex items-center gap-2 px-7 sm:px-8 pt-4.5 pb-8">
           <Button
             v-if="current > 0"
-            class="mr-auto -ml-2"
+            class="mr-auto"
             variant="ghost"
             icon-left="lucide-arrow-left"
             label="Back"
@@ -473,7 +502,7 @@ onMounted(refresh)
           />
           <Button
             v-else
-            class="mr-auto -ml-2"
+            class="mr-auto"
             variant="ghost"
             label="Finish later"
             @click="minimize"

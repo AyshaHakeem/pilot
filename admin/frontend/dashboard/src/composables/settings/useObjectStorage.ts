@@ -1,6 +1,7 @@
 import { computed, ref, watch } from 'vue'
 import { toast } from 'frappe-ui'
 
+import { apiErrorMessage, hasApiError } from '@/api/client'
 import { settingsApi } from '@/api/settings'
 import type { S3ProviderOption } from '@/types/settings'
 import { errorMessage } from '@/utils/error'
@@ -42,7 +43,18 @@ export const useObjectStorage = () => {
     loadingRegions.value = true
 
     try {
-      frappe.regions = await settingsApi.frappeStorageRegions()
+      const regions = await settingsApi.frappeStorageRegions()
+
+      if (hasApiError(regions)) {
+        error.value = apiErrorMessage(
+          regions,
+          'Could not read Frappe storage regions from Central.',
+        )
+
+        return
+      }
+
+      frappe.regions = regions
     } catch (e) {
       error.value = errorMessage(e, 'Could not read Frappe storage regions from Central.')
     } finally {
