@@ -353,7 +353,7 @@ class ProcessDefinitionBuilder:
         )
 
     def admin_frontend_dev_definition(self) -> ProcessDefinition:
-        frontend_dir = cli_root() / "admin" / "frontend"
+        frontend_dir = cli_root() / "admin" / "frontend" / "dashboard"
         cfg = self.bench.config.admin
         return ProcessDefinition(
             name="admin-ui",

@@ -329,11 +329,15 @@ class Site:
         admin_password: str,
         db_type: str | None = None,
         on_progress: Callable[[str], None] = lambda message: None,
+        *,
+        schedule_backups: bool = True,
     ) -> "Site":
         """Create a site, install apps, reload nginx, and issue TLS if needed."""
         from pilot.core.site.provisioning import SiteProvisioner
 
-        return SiteProvisioner(bench, name, apps, admin_password, db_type).provision(on_progress)
+        return SiteProvisioner(bench, name, apps, admin_password, db_type).provision(
+            on_progress, schedule_backups=schedule_backups
+        )
 
     def set_ssl(self, enabled: bool) -> None:
         set_site_ssl_flag(self.bench.sites_path, self.config.name, enabled)

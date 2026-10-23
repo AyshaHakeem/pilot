@@ -18,26 +18,49 @@ class BackupSiteTask(Task):
 
     site: str
     with_files: bool = False
+    automatic: bool = False
 
     @cached_property
     def site_record(self) -> Site:
         return self.bench.site(self.site)
 
     def run(self) -> None:
+        if self.automatic:
+            options = self.site_record.backups.get_scheduled_backup(datetime.now(UTC))
+            if options is None:
+                return
+            self.with_files = options["with_files"]
         self.backup()
 
     @step("backup", lambda self: f"Backup site {self.site}")
     def backup(self) -> None:
         try:
-            timestamp, backup_files = self.site_record.backups.take(with_files=self.with_files)
-        except BenchError as error:
+            timestamp, files, offsite = self.take()
+        except (BenchError, OSError) as error:
             print(error)
             self.record(status="failed", timestamp="", files={}, offsite=False, pruned=[])
+            self.notify_if_failing()
             sys.exit(getattr(error, "returncode", None) or 1)
-        files = {path.name: path.stat().st_size for path in backup_files}
-        offsite = self.upload(timestamp, backup_files)
         pruned = self.prune()
         self.record(status="success", timestamp=timestamp, files=files, offsite=offsite, pruned=pruned)
+
+    def take(self) -> tuple[str, dict[str, int], bool]:
+        """Stream into S3 when the site supports it, otherwise back up to disk and upload."""
+        backups = self.site_record.backups
+        if backups.is_streaming_supported:
+            timestamp, files = backups.stream(with_files=self.with_files)
+            return timestamp, files, True
+        timestamp, backup_files = backups.take(with_files=self.with_files)
+        files = {path.name: path.stat().st_size for path in backup_files}
+        return timestamp, files, self.upload(timestamp, backup_files)
+
+    def notify_if_failing(self) -> None:
+        from pilot.core.notification.events import backups_failing
+        from pilot.core.site.backups import MAX_DAILY_FAILURES
+
+        failures = self.site_record.backups.get_failures_since_last_success(datetime.now(UTC))
+        if failures == MAX_DAILY_FAILURES:
+            backups_failing(self.bench, self.site, failures)
 
     def upload(self, timestamp: str, backup_files: list[Path]) -> bool:
         if not self.bench.config.s3.is_configured:

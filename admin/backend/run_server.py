@@ -72,7 +72,7 @@ def main() -> None:
 
 
 def _start_vite_watch() -> None:
-    frontend_dir = Path(__file__).parent.parent / "frontend"
+    frontend_dir = Path(__file__).parent.parent / "frontend" / "dashboard"
     if not frontend_dir.exists():
         return
 
