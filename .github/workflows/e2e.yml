@@ -39,19 +39,14 @@ jobs:
         with:
           node-version: "24"
 
-      - name: Drop flaky apt repos
-        # Runners preconfigure Microsoft apt repos that intermittently 403;
-        # they aren't needed here and otherwise fail the whole apt-get update.
-        run: sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/azure*.list
-
       - name: Install common system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: redis-server git nginx openssl
-          execute_install_scripts: true
-
-      - name: Start Redis
-        run: sudo systemctl start redis-server
+        run: |
+          # Runners preconfigure Microsoft apt repos that intermittently 403;
+          # they aren't needed here and otherwise fail the whole apt-get update.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list /etc/apt/sources.list.d/azure*.list
+          sudo apt-get update -y
+          sudo apt-get install -y redis-server git nginx openssl
+          sudo systemctl start redis-server
 
       - name: Install MariaDB
         if: matrix.db_type == 'mariadb'
@@ -106,21 +101,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml', 'admin/frontend/dashboard/package-lock.json') }}
 
-      - name: List Playwright system dependencies
-        id: playwright-deps
-        run: |
-          packages=$(playwright install-deps --dry-run chromium | grep -oP 'apt-get install -y --no-install-recommends \K[^"]+')
-          test -n "$packages"
-          echo "packages=$packages" >> "$GITHUB_OUTPUT"
-
-      - name: Install Playwright system dependencies
-        uses: awalsh128/cache-apt-pkgs-action@v1
-        with:
-          packages: ${{ steps.playwright-deps.outputs.packages }}
-          execute_install_scripts: true
-
       - name: Install Playwright browser
-        run: playwright install chromium
+        run: playwright install --with-deps chromium
 
       - name: Install dashboard Playwright browser
         working-directory: admin/frontend/dashboard
