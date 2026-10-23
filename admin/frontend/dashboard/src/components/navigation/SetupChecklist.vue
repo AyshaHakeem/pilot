@@ -284,7 +284,11 @@ onMounted(refresh)
           </li>
         </ol>
 
-        <SetupIllustration class="my-auto pt-4" :step="currentStep.id" />
+        <SetupIllustration
+          :key="currentStep.id"
+          class="my-auto pt-4 fade-in"
+          :step="currentStep.id"
+        />
       </aside>
 
       <div class="flex flex-col flex-1 min-w-0">
@@ -321,7 +325,7 @@ onMounted(refresh)
                 label="Secret key"
                 type="password"
                 autocomplete="new-password"
-                :placeholder="storage.secretKeySet ? 'Saved, leave blank to keep' : undefined"
+                :placeholder="storage.secretKeySet ? 'Saved, leave blank to keep' : '••••••••'"
               />
             </div>
 
@@ -336,7 +340,8 @@ onMounted(refresh)
                 class="flex items-center gap-2.5 h-8 text-ink-gray-8 text-base before:size-4 before:text-ink-gray-5 before:lucide-package"
               >
                 <span class="truncate">
-                  <span class="text-ink-gray-5">{{ repository.split('/')[0] }}/</span>{{ repository.split('/')[1] }}
+                  <span class="text-ink-gray-5">{{ repository.split('/')[0] }}/</span>
+                  {{ repository.split('/')[1] }}
                 </span>
               </li>
             </ul>
@@ -495,13 +500,7 @@ onMounted(refresh)
             label="Back"
             @click="current--"
           />
-          <Button
-            v-else
-            class="mr-auto"
-            variant="ghost"
-            label="Finish later"
-            @click="minimize"
-          />
+          <Button v-else class="mr-auto" variant="ghost" label="Finish later" @click="minimize" />
 
           <Button
             v-if="!currentStep.done && current < steps.length - 1"
