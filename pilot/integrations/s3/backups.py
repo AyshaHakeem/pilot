@@ -105,6 +105,11 @@ class OffsiteBackup:
         if remove_local:
             backup_path.unlink(missing_ok=True)
 
+    def upload_stream(self, site_name: str, timestamp: str, filename: str, fileobj) -> None:
+        keys = BackupKeys(site_name)
+        self.s3.upload_stream(self.bucket, keys.get_file_key(timestamp, filename), fileobj, low_memory=True)
+        self._metadata(keys).add(timestamp, filename)
+
     def download(self, site_name: str, timestamp: str, filename: str, destination: Path) -> None:
         self.s3.download_file(self.bucket, BackupKeys(site_name).get_file_key(timestamp, filename), destination)
 
