@@ -19,21 +19,15 @@ defineProps<{ step: string }>()
 
       <g
         v-for="repo in [
-          { x: 226, y: 96, active: true },
-          { x: 230, y: 240, active: false },
-          { x: 18, y: 258, active: true },
-          { x: 20, y: 104, active: false },
+          { x: 226, y: 96 },
+          { x: 230, y: 240 },
+          { x: 18, y: 258 },
+          { x: 20, y: 104 },
         ]"
         :key="`${repo.x}-${repo.y}`"
         :transform="`translate(${repo.x} ${repo.y})`"
       >
-        <rect
-          width="76"
-          height="40"
-          rx="8"
-          class="fill-surface-elevation-1"
-          :class="repo.active ? 'stroke-ink-gray-3' : 'stroke-ink-gray-3'"
-        />
+        <rect width="76" height="40" rx="8" class="fill-surface-elevation-1 stroke-ink-gray-3" />
 
         <rect x="8" y="9" width="22" height="22" rx="5" class="fill-surface-gray-2" />
         <g
@@ -42,7 +36,7 @@ defineProps<{ step: string }>()
           stroke-linecap="round"
           stroke-linejoin="round"
           transform="translate(19 20) scale(0.6) translate(-12 -12)"
-          :class="repo.active ? 'stroke-ink-gray-5' : 'stroke-ink-gray-5'"
+          class="stroke-ink-gray-5"
         >
           <path d="M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73z" />
           <path d="M12 22V12" />
