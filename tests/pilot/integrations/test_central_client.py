@@ -275,7 +275,7 @@ def test_account_url_returns_the_endpoint_from_metadata(tmp_path: Path) -> None:
         "url": "https://central.test",
         "billing": "https://central.test/dashboard/billing",
         "change_plan": "https://central.test/dashboard/servers?pilot=vm-1&action=resize",
-        "server": "https://central.test/dashboard/servers?pilot=vm-1&action=open-bench",
+        "server": "https://central.test/api/method/central.api.sso.open_bench?pilot=vm-1",
     }
 
 
