@@ -24,20 +24,23 @@ def test_monitor_install_is_idempotent(tmp_path: Path) -> None:
     assert not (unit_dir / "pilot-monitor.timer").exists()
 
 
-def test_monitor_install_rewrites_an_outdated_unit(tmp_path: Path) -> None:
+def test_monitor_install_rewrites_and_restarts_an_outdated_unit(tmp_path: Path) -> None:
     unit_dir = tmp_path / "user_units"
     with (
         patch("pilot.core.server.monitoring_config.cli_root", return_value=tmp_path),
         patch("pilot.managers.systemd_user.user_unit_dir", return_value=unit_dir),
         patch("pilot.managers.systemd_user.run_command"),
+        patch("pilot.core.server.monitoring_config.run_command") as run_command,
         patch("pilot.managers.environment.AdminEnvManager"),
     ):
         configurator = MonitorConfigurator()
         configurator.install()
+        run_command.assert_not_called()
         (tmp_path / "system" / "monitor" / "pilot-monitor.service").write_text("[Service]\nType=oneshot\n")
         configurator.install()
 
     assert "Type=simple" in (unit_dir / "pilot-monitor.service").read_text()
+    assert run_command.call_args.args[0][-2:] == ["restart", "pilot-monitor.service"]
 
 
 def test_site_storage_install_is_idempotent(tmp_path: Path) -> None:

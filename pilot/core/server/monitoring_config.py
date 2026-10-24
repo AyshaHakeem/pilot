@@ -49,14 +49,17 @@ class MonitorConfigurator(SystemdUserMixin):
         self.monitor_dir = cli_root() / "system" / "monitor"
 
     def install(self) -> None:
-        """Write, enable and start the service. A no-op when the installed unit is current."""
+        """Write, enable and start the service. A no-op when the installed unit is current. A running
+        service is restarted, as `enable --now` would not."""
         unit_text = self._render_unit()
-        unit_path = self.monitor_dir / self.unit_name
-        if user_service_installed(self.unit_name) and unit_path.read_text() == unit_text:
+        was_installed = user_service_installed(self.unit_name)
+        if was_installed and (self.monitor_dir / self.unit_name).read_text() == unit_text:
             return
         # systemd cannot open the unit's append: targets if this is missing.
         monitor_log_dir().mkdir(parents=True, exist_ok=True)
         install_user_service(unit_dir=self.monitor_dir, unit_name=self.unit_name, unit_text=unit_text)
+        if was_installed:
+            self.restart()
 
     def restart(self) -> None:
         """Restart the service, so it runs the Pilot code on disk."""

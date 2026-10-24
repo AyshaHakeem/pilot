@@ -80,4 +80,4 @@ def test_a_service_that_does_not_start_is_not_marked_applied(host: SimpleNamespa
     with pytest.raises(BenchError, match="did not start"):
         run(host.root)
 
-    assert run_monitor_as_service._needs_replacement()
+    assert run_monitor_as_service._is_replacement_needed()

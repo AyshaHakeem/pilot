@@ -19,13 +19,13 @@ def run(benches_root: Path) -> None:
             continue
         if is_applied(bench_dir, PATCH_NAME):
             continue
-        if _needs_replacement():
+        if _is_replacement_needed():
             _replace_timers()
             print("Replaced the monitor and uptime timers with the pilot-monitor service.")
         mark_applied(bench_dir, PATCH_NAME)
 
 
-def _needs_replacement() -> bool:
+def _is_replacement_needed() -> bool:
     """A host still on the timers, or one where an earlier replacement stopped before the service ran."""
     from pilot.managers.systemd_user import user_service_installed, user_timer_installed
 
@@ -61,6 +61,7 @@ def _replace_timers() -> None:
 
     monitor = MonitorConfigurator()
     monitor.install()
+    # A run that failed after writing the unit leaves install() a no-op and the service stopped.
     monitor.restart()
     # systemd keeps the removed uptime units in memory as failed until reset.
     subprocess.run(
