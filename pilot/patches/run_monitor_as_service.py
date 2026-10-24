@@ -26,12 +26,13 @@ def run(benches_root: Path) -> None:
 
 
 def _is_replacement_needed() -> bool:
-    """A host still on the timers, or one where an earlier replacement stopped before the service ran."""
+    """A host still on the timers, or one where an earlier replacement stopped before the service
+    was enabled and running."""
     from pilot.managers.systemd_user import user_service_installed, user_timer_installed
 
     if any(user_timer_installed(timer) for timer in LEGACY_TIMERS):
         return True
-    return user_service_installed(MONITOR_SERVICE) and not _is_active(MONITOR_SERVICE)
+    return user_service_installed(MONITOR_SERVICE) and not _is_running_at_boot()
 
 
 def _replace_timers() -> None:
@@ -61,7 +62,9 @@ def _replace_timers() -> None:
 
     monitor = MonitorConfigurator()
     monitor.install()
-    # A run that failed after writing the unit leaves install() a no-op and the service stopped.
+    # A run that failed after writing the unit leaves install() a no-op, and the service stopped
+    # and not enabled.
+    subprocess.run(systemctl("enable", MONITOR_SERVICE), capture_output=True, env=env, check=False)
     monitor.restart()
     # systemd keeps the removed uptime units in memory as failed until reset.
     subprocess.run(
@@ -70,17 +73,21 @@ def _replace_timers() -> None:
         env=env,
         check=False,
     )
-    if not _is_active(MONITOR_SERVICE):
-        raise BenchError(f"{MONITOR_SERVICE} did not start. See system/logs/monitor.error.log.")
+    if not _is_running_at_boot():
+        raise BenchError(f"{MONITOR_SERVICE} is not enabled and running. See system/logs/monitor.error.log.")
 
 
-def _is_active(unit_name: str) -> bool:
+def _is_running_at_boot() -> bool:
+    """True when the monitor service runs now and starts again after a reboot."""
     import subprocess
 
     from pilot.managers.systemd_user import systemctl, systemctl_env
 
-    result = subprocess.run(systemctl("is-active", "--quiet", unit_name), env=systemctl_env(), check=False)
-    return result.returncode == 0
+    env = systemctl_env()
+    return all(
+        subprocess.run(systemctl(check, "--quiet", MONITOR_SERVICE), env=env, check=False).returncode == 0
+        for check in ("is-enabled", "is-active")
+    )
 
 
 if __name__ == "__main__":

@@ -20,27 +20,30 @@ def _bench(root: Path, name: str) -> None:
 
 @pytest.fixture
 def host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
-    """A host on the timers. pilot-monitor.service is active once an install succeeds."""
+    """A host on the timers. pilot-monitor.service is enabled and active once an install succeeds."""
     unit_dir = tmp_path / "user_units"
     unit_dir.mkdir()
     for name in (*LEGACY_UNITS, "pilot-monitor.service"):
         (unit_dir / name).write_text("")
     state = SimpleNamespace(
-        unit_dir=unit_dir, root=tmp_path / "benches", installs=[], starts=True, active=False
+        unit_dir=unit_dir, root=tmp_path / "benches", installs=[], starts=True, active=False, enabled=False
     )
 
     def install(self) -> None:
         state.installs.append("install")
-        state.active = state.starts
+        state.active, state.enabled = state.starts, True
+
+    def systemctl(command: list[str], **kwargs) -> SimpleNamespace:
+        if "enable" in command:
+            state.enabled = True
+        checks = {"is-enabled": state.enabled, "is-active": state.active}
+        return SimpleNamespace(
+            returncode=next((0 if ok else 3 for check, ok in checks.items() if check in command), 0)
+        )
 
     monkeypatch.setattr("pilot.managers.systemd_user.user_unit_dir", lambda: unit_dir)
     monkeypatch.setattr("pilot.utils.cli_root", lambda: tmp_path)
-    monkeypatch.setattr(
-        "subprocess.run",
-        lambda command, **kwargs: SimpleNamespace(
-            returncode=0 if state.active or "is-active" not in command else 3
-        ),
-    )
+    monkeypatch.setattr("subprocess.run", systemctl)
     monkeypatch.setattr(MonitorConfigurator, "install", install)
     monkeypatch.setattr(MonitorConfigurator, "restart", lambda self: None)
     _bench(state.root, "one")
@@ -77,7 +80,21 @@ def test_a_failed_install_is_retried_on_the_next_run(
 def test_a_service_that_does_not_start_is_not_marked_applied(host: SimpleNamespace) -> None:
     host.starts = False
 
-    with pytest.raises(BenchError, match="did not start"):
+    with pytest.raises(BenchError, match="is not enabled and running"):
         run(host.root)
 
     assert run_monitor_as_service._is_replacement_needed()
+
+
+def test_a_running_service_that_was_never_enabled_is_enabled(
+    host: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for name in LEGACY_UNITS:
+        (host.unit_dir / name).unlink()
+    host.active = True
+    # An earlier run wrote the current unit, so install() has nothing to do.
+    monkeypatch.setattr(MonitorConfigurator, "install", lambda self: None)
+
+    run(host.root)
+
+    assert host.enabled
