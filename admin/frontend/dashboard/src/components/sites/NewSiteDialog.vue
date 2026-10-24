@@ -180,6 +180,7 @@ const submit = async () => {
 
           <!-- Multiple wildcards available -->
           <Select
+            side="bottom"
             v-if="!hasSingleDomain"
             v-model="selectedSuffix"
             class="w-48 shrink-0"

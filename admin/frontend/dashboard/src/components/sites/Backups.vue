@@ -266,6 +266,7 @@ onMounted(() => {
 
     <div v-if="backupsHasMore || backups.length > 20" class="flex items-center gap-3 mt-2 px-1">
       <Select
+        side="bottom"
         size="sm"
         :model-value="backupsLimit"
         :options="pageLengths"
