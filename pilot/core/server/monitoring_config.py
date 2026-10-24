@@ -13,7 +13,7 @@ from pilot.config.monitor import (
 from pilot.exceptions import BenchError
 from pilot.managers.platform import is_linux
 from pilot.managers.systemd_user import SystemdUserMixin, install_user_service, user_service_installed
-from pilot.utils import cli_root
+from pilot.utils import cli_root, run_command
 
 if typing.TYPE_CHECKING:
     from pilot.core.bench import Bench
@@ -41,9 +41,7 @@ WantedBy=default.target
 
 class MonitorConfigurator(SystemdUserMixin):
     """Installs the shared host-wide monitor service and configures per-bench
-    log files. One long-running service runs host metrics and site uptime pings
-    for every bench, so a tick does not pay for a new interpreter and its imports.
-    install() is a no-op once it's already set up."""
+    log files. One service runs host metrics and site uptime pings for every bench."""
 
     def __init__(self, bench: "Bench | None" = None):
         self.bench = bench
@@ -51,13 +49,19 @@ class MonitorConfigurator(SystemdUserMixin):
         self.monitor_dir = cli_root() / "system" / "monitor"
 
     def install(self) -> None:
-        if user_service_installed(self.unit_name):
+        """Write, enable and start the service. A no-op when the installed unit is current."""
+        unit_text = self._render_unit()
+        unit_path = self.monitor_dir / self.unit_name
+        if user_service_installed(self.unit_name) and unit_path.read_text() == unit_text:
             return
         # systemd cannot open the unit's append: targets if this is missing.
         monitor_log_dir().mkdir(parents=True, exist_ok=True)
-        install_user_service(
-            unit_dir=self.monitor_dir, unit_name=self.unit_name, unit_text=self._render_unit()
-        )
+        install_user_service(unit_dir=self.monitor_dir, unit_name=self.unit_name, unit_text=unit_text)
+
+    def restart(self) -> None:
+        """Restart the service, so it runs the Pilot code on disk."""
+        if user_service_installed(self.unit_name):
+            run_command(self._systemctl("restart", self.unit_name), env=self._systemctl_env())
 
     @property
     def log_path(self) -> Path:

@@ -28,7 +28,7 @@ if typing.TYPE_CHECKING:
 
 # Gap between the two samples used to turn cumulative counters into a rate.
 CPU_SAMPLE_INTERVAL = 1.0
-# Pause after each tick, as the old OnUnitInactiveSec timers did.
+# Seconds from the end of one tick to the start of the next.
 METRICS_INTERVAL = 10.0
 UPTIME_INTERVAL = 5.0
 
