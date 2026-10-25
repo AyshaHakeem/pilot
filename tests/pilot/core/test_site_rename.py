@@ -146,6 +146,35 @@ def test_failed_atomic_exchange_leaves_the_original_site_available(tmp_path: Pat
     assert not (bench.sites_path / NEW).exists()
 
 
+@pytest.mark.parametrize("write_completed", [False, True])
+def test_failed_alias_record_leaves_the_original_site_available(tmp_path: Path, write_completed: bool) -> None:
+    from pilot.core.bench.site_aliases import SiteAliases
+
+    bench = _bench(tmp_path)
+    _site(bench, OLD, db_password="original-password")
+    original = (bench.sites_path / OLD / "site_config.json").read_bytes()
+    write = SiteAliases._write
+
+    def fail_write(aliases, renamed):
+        if write_completed:
+            write(aliases, renamed)
+        raise OSError("alias registry write failed")
+
+    with (
+        patch.object(SiteAliases, "_write", fail_write),
+        patch.object(SiteRename, "_release_route") as release,
+        pytest.raises(OSError, match="alias registry write failed"),
+    ):
+        SiteRename(bench.site(OLD), NEW).run(lambda message: None)
+
+    old = bench.sites_path / OLD
+    assert old.is_dir() and not old.is_symlink()
+    assert (old / "site_config.json").read_bytes() == original
+    assert not (bench.sites_path / NEW).exists()
+    assert not (bench.sites_path / NEW).is_symlink()
+    release.assert_called_once_with(NEW)
+
+
 def test_a_rolled_back_rename_can_simply_be_run_again(tmp_path: Path) -> None:
     bench = _bench(tmp_path)
     _site(bench, OLD)

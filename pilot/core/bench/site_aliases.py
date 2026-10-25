@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
     from pilot.core.bench import Bench
 
-# Longer than nginx's proxy_read_timeout, so requests that still use a renamed site's old path finish.
 HOLD_SECONDS = 150
 
 

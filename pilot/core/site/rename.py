@@ -135,8 +135,8 @@ class SiteRename:
         old_path = self.site.path
         self.new_path.symlink_to(self.new_name)
         try:
-            exchange_paths(old_path, self.new_path)
             self.bench.site_aliases.record(self.old_name)
+            exchange_paths(old_path, self.new_path)
         except BaseException as error:
             self.new_path.unlink()
             if isinstance(error, OSError) and error.errno in (errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
