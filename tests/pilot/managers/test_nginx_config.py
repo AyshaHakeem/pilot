@@ -831,6 +831,19 @@ def test_vm_hostnames_serve_site_and_admin(tmp_path: Path) -> None:
     assert "return 301 http://admin.example.com$request_uri;" in config
 
 
+def test_the_admin_alias_comes_before_a_zone_wide_site_alias(tmp_path: Path) -> None:
+    """nginx tries regex server names in order, and `*.zone` also matches the admin hostname."""
+    zone_glob = f"*.{_VM_DOMAIN}"
+    config = _cloud_config(
+        tmp_path,
+        [(_PLACEHOLDER_SITE, False)],
+        hostname_mappings={zone_glob: _PLACEHOLDER_SITE.name, _ADMIN_GLOB: "admin.example.com"},
+    )
+
+    zone_block = config.index(f"server_name {vm_hostname_pattern(zone_glob)};")
+    assert config.index(f"server_name {_ADMIN_PATTERN};") < zone_block
+
+
 def test_vm_hostname_redirects_to_renamed_site(tmp_path: Path) -> None:
     renamed = SiteConfig(name="shop.example.com", apps=["frappe"])
     config = _cloud_config(tmp_path, [(renamed, False)], hostname_mappings={_SITE_GLOB: renamed.name})

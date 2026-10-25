@@ -13,6 +13,7 @@ import { useRoute } from 'vue-router'
 import Collapsable from '@/components/common/Collapsable.vue'
 import PilotLogo from '@/components/icons/Pilot.vue'
 import { sidebarSections } from '@/components/navigation/list'
+import SetupChecklist from '@/components/navigation/SetupChecklist.vue'
 import { useAppMenu } from '@/components/navigation/useAppMenu'
 import NotificationsPanel from '@/components/notifications/NotificationsPanel.vue'
 import { openSearch } from '@/composables/common/useSearch'
@@ -49,7 +50,7 @@ const isActive = (to: string) => route.path === to || route.path.startsWith(`${t
   <Sidebar
     v-model:collapsed="isSidebarCollapsed"
     :collapsible="!isMobile"
-    class="border-r"
+    class="group border-r"
     :class="isMobile ? '!w-full !border-r-0 mobile-sidebar bg-transparent' : ''"
   >
     <SidebarHeader
@@ -131,6 +132,8 @@ const isActive = (to: string) => route.path === to || route.path.startsWith(`${t
         </template>
       </template>
     </nav>
+
+    <SetupChecklist />
 
     <SidebarCollapseToggle v-if="!isMobile" class="mt-auto mx-2 mb-2" />
   </Sidebar>

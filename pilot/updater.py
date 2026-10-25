@@ -49,7 +49,9 @@ def update_available() -> tuple[bool, str | None]:
 
 
 def perform_upgrade(on_progress: Progress = lambda message: None) -> None:
-    """Update the Pilot code in place. Restarting the admin service is the caller's job."""
+    """Update the Pilot code in place and restart the monitor. Restarting the admin service is
+    the caller's job."""
+    from pilot.core.server.monitoring_config import MonitorConfigurator
     from pilot.internal.patch_runner import run_patches
 
     run_patches("pre_update", on_progress=on_progress)
@@ -58,6 +60,8 @@ def perform_upgrade(on_progress: Progress = lambda message: None) -> None:
     else:
         _upgrade_release(on_progress)
     run_patches("post_update", on_progress=on_progress)
+    # The monitor runs for the life of the host, so it keeps the old modules until restarted.
+    MonitorConfigurator().restart()
 
 
 def restart_admin_with_new_code(bench_path: Path) -> None:

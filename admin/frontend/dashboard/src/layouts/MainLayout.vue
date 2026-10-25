@@ -111,7 +111,12 @@ const breadcrumbsFromRouteMeta = ({ title = '' }) => {
 
     <template #nav>
       <MobileNav class="!bg-surface-base">
-        <MobileNavItem label="Home" icon="lucide-house" route="/home" :active="route.name == 'Home'" />
+        <MobileNavItem
+          label="Home"
+          icon="lucide-house"
+          route="/home"
+          :active="route.name == 'Home'"
+        />
         <MobileNavItem label="Search" icon="lucide-search" @click="openSearch" />
         <NotificationsPanel mobile />
         <MobileNavItem

@@ -144,7 +144,10 @@ class NginxConfigRenderer:
             return []
 
         aliases = []
-        for mapping in central.hostname_aliases:
+        # nginx tries regex server names in order, so the pattern with the most literal text wins.
+        for mapping in sorted(
+            central.hostname_aliases, key=lambda alias: len(alias.pattern.replace("*", "")), reverse=True
+        ):
             if mapping.type == "admin":
                 alias = self._admin_alias(mapping, admin_ssl)
             elif mapping.type == "site":
