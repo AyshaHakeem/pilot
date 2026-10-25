@@ -8,10 +8,9 @@
   font-family: InterVar, InterVariable, Inter, ui-sans-serif, system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  color: var(--ink-gray-8);
 }
 
-.cloud-settings-root { color-scheme: light; }
+.cloud-settings-root { color-scheme: light; color: var(--ink-gray-8); }
 .cloud-settings-root[data-theme="dark"] { color-scheme: dark; }
 
 /* Keep wide tables inside their own scroll region. */
