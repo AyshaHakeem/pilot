@@ -257,13 +257,11 @@ const tileClass = (isSelected: boolean) => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-6 border border-outline-gray-2 p-5">
+  <section class="space-y-4">
     <div>
       <p v-if="step" class="text-p-sm text-ink-gray-5">{{ step }}</p>
 
-      <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">
-        {{ __("Payment method") }}
-      </h3>
+      <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">{{ __("Payment method") }}</h3>
     </div>
 
     <ErrorMessage :message="error" />
