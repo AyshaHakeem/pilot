@@ -50,6 +50,7 @@ const ACTION = {
 
 const query = ref('')
 const category = ref('')
+const sortBy = ref('stars')
 const pending = reactive<Record<string, string>>({})
 const errors = reactive<Record<string, string>>({})
 const showUpdates = ref(false)
@@ -76,6 +77,10 @@ watch(
 )
 
 const marketplace = computed(() => store.state.marketplace)
+
+const appTitles = computed(() =>
+  Object.fromEntries((marketplace.value?.apps || []).map((app) => [app.name, app.title])),
+)
 const error = computed(() => store.state.marketplaceError)
 const loadFailed = computed(() => Boolean(error.value) && !marketplace.value)
 const updateCount = computed(() => marketplace.value?.update_count || 0)
@@ -102,10 +107,21 @@ const filteredApps = computed(() => {
   })
 })
 
+const sortOptions = computed(() => [
+  { label: __('Most stars'), value: 'stars' },
+  { label: __('Name'), value: 'name' },
+])
+
+const sortedApps = computed(() =>
+  [...filteredApps.value].sort((a, b) =>
+    sortBy.value === 'name' ? a.title.localeCompare(b.title) : (b.stars || 0) - (a.stars || 0),
+  ),
+)
+
 const sections = computed(() =>
   [
-    { label: __('Installed'), apps: filteredApps.value.filter((app) => app.installed) },
-    { label: __('Available'), apps: filteredApps.value.filter((app) => !app.installed) },
+    { label: __('Installed'), apps: sortedApps.value.filter((app) => app.installed) },
+    { label: __('Available'), apps: sortedApps.value.filter((app) => !app.installed) },
   ].filter((section) => section.apps.length),
 )
 
@@ -274,9 +290,15 @@ const settle = async (taskId: string, action: { verb: string; progress: string }
     </template>
 
     <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <TextInput v-model="query" class="flex-1" :aria-label="__('Search apps')" :placeholder="__('Search apps')" />
+      <TextInput v-model="query" class="flex-1" :aria-label="__('Search apps')" :placeholder="__('Search apps')">
+        <template #prefix><span class="lucide-search size-4 text-ink-gray-5" /></template>
+      </TextInput>
 
-      <Select v-model="category" :aria-label="__('Category')" class="sm:w-44" :options="categoryOptions" />
+      <Select v-model="category" :aria-label="__('Category')" class="sm:w-44" :options="categoryOptions" side="bottom" />
+
+      <Select v-model="sortBy" :aria-label="__('Sort by')" class="sm:w-36" :options="sortOptions" side="bottom">
+        <template #prefix><span class="lucide-arrow-down-up size-4 text-ink-gray-5" /></template>
+      </Select>
     </div>
 
     <ErrorMessage :message="loadFailed ? '' : error" class="mt-2" />
@@ -300,11 +322,12 @@ const settle = async (taskId: string, action: { verb: string; progress: string }
         {{ section.label }}
       </h3>
 
-      <div class="grid gap-x-6 gap-y-4 sm:grid-cols-2">
+      <div class="grid gap-x-2 gap-y-1 sm:grid-cols-2 -mx-3">
         <AppRow
           v-for="app in section.apps"
           :key="app.name"
           :app="app"
+          :app-titles="appTitles"
           :pending="pending[app.name] || ''"
           :error="errors[app.name] || ''"
           @install="install"
