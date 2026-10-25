@@ -120,6 +120,15 @@ def _verify_existing_file(path: Path, expected: os.stat_result | None) -> None:
         raise OSError(f"File changed during atomic write: {path}")
 
 
+def fsync_directory_files(path: Path) -> None:
+    """Flush every file in a directory, then the directory entries, to disk."""
+    for child in Path(path).iterdir():
+        if child.is_file() and not child.is_symlink():
+            with child.open("rb") as file:
+                os.fsync(file.fileno())
+    _fsync_directory(path)
+
+
 def _fsync_directory(path: Path) -> None:
     directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
     directory_descriptor = os.open(path, directory_flags)

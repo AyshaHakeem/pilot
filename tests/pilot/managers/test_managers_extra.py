@@ -526,6 +526,33 @@ def test_systemd_generate_config_writes_unit_files(tmp_path: Path) -> None:
     assert (mgr.systemd_conf_dir / "test-bench.target").exists()
 
 
+def test_systemd_write_config_flushes_units_to_disk(tmp_path: Path) -> None:
+    from pilot.managers.processes.local import ProcessDefinition
+
+    mgr = _make_systemd_manager(tmp_path)
+    mgr.systemd_conf_dir.mkdir(parents=True, exist_ok=True)
+    fake_defs = [ProcessDefinition("web", ["/env/bin/python", "serve"], tmp_path / "logs" / "web.log")]
+    flushed = []
+    with (
+        patch("pilot.managers.environment.AdminEnvManager"),
+        patch.object(mgr, "_prod_process_definitions", return_value=fake_defs),
+        patch("pilot.managers.processes.systemd.fsync_directory_files", side_effect=flushed.append),
+    ):
+        mgr.write_config()
+    assert flushed == [mgr.systemd_conf_dir]
+
+
+def test_fsync_directory_files_flushes_each_file(tmp_path: Path) -> None:
+    from pilot.internal.atomic_file import fsync_directory_files
+
+    (tmp_path / "a.service").write_text("a")
+    (tmp_path / "b.target").write_text("b")
+    (tmp_path / "link.service").symlink_to(tmp_path / "a.service")
+    with patch("pilot.internal.atomic_file.os.fsync") as fsync:
+        fsync_directory_files(tmp_path)
+    assert fsync.call_count == 3
+
+
 def test_systemd_write_config_keeps_units_when_a_declaration_is_broken(tmp_path: Path) -> None:
     import pytest
 

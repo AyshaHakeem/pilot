@@ -5,6 +5,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from pilot.internal.atomic_file import fsync_directory_files
 from pilot.managers.environment import AdminEnvManager
 from pilot.managers.gunicorn import GunicornManager
 from pilot.managers.platform import _privileged
@@ -87,6 +88,8 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
                     str(self.bench.logs_path / "central-bootstrap.log"),
                 )
             )
+        # A crash or VM snapshot soon after a rewrite must not leave empty units behind.
+        fsync_directory_files(self.systemd_conf_dir)
         service_after, socket_after = self._admin_unit_text()
         self.admin_service_changed = service_after != service_before
         self.admin_socket_changed = socket_after != socket_before
