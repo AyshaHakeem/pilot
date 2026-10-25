@@ -97,6 +97,7 @@ onMounted(() => {
 
     <div v-else-if="!options" class="mt-5 space-y-3" aria-busy="true" :aria-label="__('Loading plans')">
       <Skeleton v-for="index in 3" :key="index" class="h-14 rounded-6" />
+      <Button :label="__('Cancel')" @click="emit('close')" />
     </div>
 
     <form v-else class="flex flex-col gap-5 mt-5" @submit.prevent="submit">
