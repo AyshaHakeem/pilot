@@ -140,7 +140,7 @@ export const useMarketplace = (initialSiteName = '') => {
     return !worksWith.value || Object.hasOwn(app.dependencies || {}, worksWith.value)
   }
 
-  const matchesSearch = (app: MarketplaceApp, query: string) => {
+  const matchesSearch = (app: { title?: string; description?: string }, query: string) => {
     return (
       !query ||
       app.title?.toLowerCase().includes(query) ||
@@ -185,7 +185,8 @@ export const useMarketplace = (initialSiteName = '') => {
         description: app.description,
         compatible: true,
         inBench: true,
-      })),
+      }))
+      .filter((app) => matchesSearch(app, search.value.toLowerCase().trim())),
   )
 
   return {

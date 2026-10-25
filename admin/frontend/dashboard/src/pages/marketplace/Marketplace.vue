@@ -44,7 +44,7 @@ const pillOptions = PILLS.map((pill) => ({ label: pill, value: pill, iconLeft: p
 
 const isBrowsing = computed(() => !isFiltered.value && !search.value.trim())
 
-const privateApps = computed(() => (isBrowsing.value ? otherBenchApps.value : []))
+const privateApps = computed(() => (isFiltered.value ? [] : otherBenchApps.value))
 
 const sortBy = ref('stars')
 
