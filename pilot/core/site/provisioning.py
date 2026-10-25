@@ -50,6 +50,7 @@ class SiteProvisioner:
             self.bench,
         )
         on_progress(f"Creating site '{self.name}'...")
+        self.bench.release_site_alias(self.name)
         site.create(db_type=self.db_type)
         self.write_email_sender_name(site)
         self.write_route_policy(site)
@@ -160,7 +161,8 @@ def validate_new_site(bench: "Bench", name: str, apps: list[str]) -> bool:
     from pilot.core.adapters.domain_provider import DomainRouteProvider
     from pilot.utils import host_owner, matches_wildcard, normalize_host
 
-    if (bench.sites_path / name / "site_config.json").exists():
+    path = bench.sites_path / name
+    if not path.is_symlink() and (path / "site_config.json").exists():
         raise BenchError(f"Site '{name}' already exists.")
     owner = host_owner(bench.path, name)
     if owner:

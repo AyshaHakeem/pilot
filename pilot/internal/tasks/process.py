@@ -221,7 +221,7 @@ class TaskProcess:
         """Fail a task whose process died without finalizing."""
         try:
             record = self.read(task_id)
-        except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError):
+        except (KeyError, TypeError, ValueError, OSError, json.JSONDecodeError, TaskNotFoundError):
             record = None
         if record is not None:
             ownership = self._inspector.inspect(record.identity, record.argv)

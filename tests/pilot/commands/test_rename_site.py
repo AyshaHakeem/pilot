@@ -132,3 +132,45 @@ def test_rename_followup_advises_on_failure(
     out = capsys.readouterr().out
     assert "did not complete" in out
     assert "pilot setup letsencrypt -b b1" in out
+
+
+def test_rename_back_reclaims_the_old_name(tmp_path: Path) -> None:
+    bench = _bench(tmp_path, "b1")
+    _make_site(bench, "old.localhost")
+
+    RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
+    RenameSiteCommand(bench, old_name="new.localhost", new_name="old.localhost").run()
+
+    old_path = bench.sites_path / "old.localhost"
+    assert old_path.is_dir() and not old_path.is_symlink()
+    assert (bench.sites_path / "new.localhost").readlink() == Path("old.localhost")
+
+
+def test_a_new_site_may_take_a_renamed_sites_old_name(tmp_path: Path) -> None:
+    from pilot.core.site.provisioning import validate_new_site
+
+    bench = _bench(tmp_path, "b1")
+    _make_site(bench, "new.localhost")
+    (bench.sites_path / "old.localhost").symlink_to("new.localhost")
+
+    validate_new_site(bench, "old.localhost", [])
+    bench.release_site_alias("old.localhost")
+
+    assert not (bench.sites_path / "old.localhost").is_symlink()
+    assert (bench.sites_path / "new.localhost").is_dir()
+
+
+def test_rename_falls_back_to_a_move_without_atomic_exchange(tmp_path: Path, monkeypatch) -> None:
+    import errno
+
+    def unsupported(first: Path, second: Path) -> None:
+        raise OSError(errno.ENOTSUP, "unsupported")
+
+    monkeypatch.setattr("pilot.core.site.rename.exchange_paths", unsupported)
+    bench = _bench(tmp_path, "b1")
+    _make_site(bench, "old.localhost")
+
+    RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
+
+    assert (bench.sites_path / "old.localhost").readlink() == Path("new.localhost")
+    assert (bench.sites_path / "new.localhost" / "site_config.json").exists()

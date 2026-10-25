@@ -31,7 +31,7 @@ class BenchRuntime:
         from pilot.managers.database import MariaDBManager, PostgresManager
 
         config = self.bench.config
-        if config.db_type == "sqlite":
+        if not config.production.enabled or config.db_type == "sqlite":
             return
         manager = (
             PostgresManager(config.postgres)

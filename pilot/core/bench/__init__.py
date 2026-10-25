@@ -235,6 +235,12 @@ class Bench:
 
         return BenchInventory(self).sites()
 
+    def release_site_alias(self, name: str) -> None:
+        """Remove the symlink a rename leaves at a site's old path, so the name can be used again."""
+        path = self.sites_path / name
+        if path.is_symlink():
+            path.unlink()
+
     def site(self, name: str) -> "Site":
         from pilot.config import SiteConfig
         from pilot.core.site import Site

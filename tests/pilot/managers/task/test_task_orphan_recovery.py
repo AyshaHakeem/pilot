@@ -259,3 +259,17 @@ def test_dead_orphan_is_failed_before_next_task_runs(
 
     assert store.read_status(RUNNING_TASK) == TaskStatus.FAILED
     assert store.read_metadata(RUNNING_TASK)["failure"] == {"code": "task_interrupted"}
+
+
+def test_interrupt_fails_a_task_whose_process_record_is_gone(tmp_path: Path, monkeypatch) -> None:
+    from pilot.exceptions import TaskNotFoundError
+
+    processes = TaskProcess(tmp_path)
+    transitions = []
+    monkeypatch.setattr(processes, "read", lambda task_id: (_ for _ in ()).throw(TaskNotFoundError(task_id)))
+    monkeypatch.setattr(processes._store, "transition", lambda *args: transitions.append(args[2]))
+    monkeypatch.setattr(processes._store, "remove_private_files", lambda *args: None)
+
+    processes.interrupt(RUNNING_TASK)
+
+    assert transitions == [TaskStatus.FAILED]

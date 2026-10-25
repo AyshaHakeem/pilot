@@ -88,7 +88,6 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
                     str(self.bench.logs_path / "central-bootstrap.log"),
                 )
             )
-        # A crash or VM snapshot soon after a rewrite must not leave empty units behind.
         fsync_directory_files(self.systemd_conf_dir)
         service_after, socket_after = self._admin_unit_text()
         self.admin_service_changed = service_after != service_before

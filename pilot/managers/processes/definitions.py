@@ -107,7 +107,7 @@ class ProcessDefinitionBuilder:
             ]
         defs.append(self.redis_definition("redis_cache", "redis_cache.conf"))
         defs.append(self.redis_definition("redis_queue", "redis_queue.conf"))
-        if self.bench.config.production.process_manager:
+        if self.bench.config.production.process_manager == "systemd":
             for definition in defs:
                 if definition.name == "web":
                     definition.pre_run = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -91,7 +92,7 @@ class SiteRename:
         if self.old_name not in sites:
             raise BenchError(f"Site '{self.old_name}' does not exist in this bench.")
 
-        if self.new_name in sites or self.new_path.exists() or self.new_path.is_symlink():
+        if self.new_name in sites or (self.new_path.exists() and not self.new_path.is_symlink()):
             raise BenchError(f"Site '{self.new_name}' already exists in this bench.")
 
         # Read and retain the config before any write so rollback is lossless.
@@ -131,9 +132,10 @@ class SiteRename:
     def _move_site_directory(self) -> None:
         """Move the site while keeping its old path as a symlink."""
         old_path = self.site.path
+        self.bench.release_site_alias(self.new_name)
         self.new_path.symlink_to(self.new_name)
         try:
-            exchange_paths(old_path, self.new_path)
+            _swap_site_paths(old_path, self.new_path)
         except BaseException:
             self.new_path.unlink()
             raise
@@ -177,7 +179,7 @@ class SiteRename:
     def _move_site_directory_back(self) -> None:
         """Restore the real directory at the old path."""
         old_path = self.site.path
-        exchange_paths(old_path, self.new_path)
+        _swap_site_paths(old_path, self.new_path)
         self.new_path.unlink()
 
     def _pin_certificate_name(self) -> None:
@@ -371,3 +373,17 @@ def _load_site_config(path: Path) -> dict:
     if not isinstance(raw, dict):
         raise BenchError(f"{path} must hold a JSON object.")
     return raw
+
+
+def _swap_site_paths(first: Path, second: Path) -> None:
+    """Swap a site directory with its symlink, without a gap where the filesystem allows it."""
+    try:
+        exchange_paths(first, second)
+    except OSError as error:
+        if error.errno not in (errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
+            raise
+        link, directory = (first, second) if first.is_symlink() else (second, first)
+        target = link.readlink()
+        link.unlink()
+        directory.rename(link)
+        directory.symlink_to(target)
