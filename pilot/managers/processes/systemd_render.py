@@ -34,6 +34,10 @@ def _render_env(env: dict) -> str:
 class SystemdRenderer(ServiceRenderer):
     """Builds systemd --user unit/socket/target text for a bench."""
 
+    def __init__(self, bench_name: str, database_service: str = "") -> None:
+        super().__init__(bench_name)
+        self.database_service = database_service
+
     @override
     def render(self, pd: ProcessDefinition) -> str:
         working_dir = f"WorkingDirectory={pd.working_dir}\n" if pd.working_dir else ""
@@ -51,11 +55,16 @@ class SystemdRenderer(ServiceRenderer):
         )
         socket = self.get_socket_name(pd)
         requires_socket = f"Requires={socket}\nAfter={socket}\n" if socket else ""
+        database = (
+            f"Requires={self.database_service}\nAfter={self.database_service}\nPartOf={self.database_service}\n"
+            if pd.name == "web" and self.database_service
+            else ""
+        )
         return (
             f"[Unit]\n"
             f"Description={self.bench_name} {pd.name}\n"
             f"PartOf={self.bench_name}.target\n"
-            f"{after_redis}{requires_socket}\n"
+            f"{after_redis}{requires_socket}{database}\n"
             f"[Service]\n"
             f"Type=simple\n"
             f"{working_dir}{env}"
@@ -107,9 +116,7 @@ class SystemdRenderer(ServiceRenderer):
             f"WantedBy=default.target\n"
         )
 
-    def render_central_bootstrap(
-        self, python: str, cli_root: str, bench_root: str, log_file: str
-    ) -> str:
+    def render_central_bootstrap(self, python: str, cli_root: str, bench_root: str, log_file: str) -> str:
         """Render the boot-time Central credential service."""
         return (
             f"[Unit]\n"

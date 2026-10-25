@@ -107,6 +107,16 @@ class ProcessDefinitionBuilder:
             ]
         defs.append(self.redis_definition("redis_cache", "redis_cache.conf"))
         defs.append(self.redis_definition("redis_queue", "redis_queue.conf"))
+        if self.bench.config.production.process_manager:
+            for definition in defs:
+                if definition.name == "web":
+                    definition.pre_run = [
+                        str(AdminEnvManager(cli_root()).python),
+                        str(cli_root() / "bin" / "pilot"),
+                        "-b",
+                        str(self.bench.path),
+                        "wait-for-database",
+                    ]
         defs.extend(self.bench.processes.get_app_definitions())
         check_unique_names(defs)
         return defs

@@ -173,7 +173,7 @@ class Bench:
 
     @property
     def is_initialized(self) -> bool:
-        return self.python.exists()
+        return self.python.exists() and not (self.path / ".initializing").exists()
 
     @property
     def frappe_call(self) -> list[str]:

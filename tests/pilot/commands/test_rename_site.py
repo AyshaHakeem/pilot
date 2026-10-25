@@ -74,7 +74,8 @@ def test_rename_moves_dir_and_updates_default_site(tmp_path: Path) -> None:
 
     RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
 
-    assert not (bench.sites_path / "old.localhost").exists()
+    old_path = bench.sites_path / "old.localhost"
+    assert old_path.is_symlink() and old_path.readlink() == Path("new.localhost")
     assert (bench.sites_path / "new.localhost" / "site_config.json").exists()
     csc = json.loads((bench.sites_path / "common_site_config.json").read_text())
     assert csc["default_site"] == "new.localhost"

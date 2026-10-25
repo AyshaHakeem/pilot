@@ -31,6 +31,16 @@ pilot setup letsencrypt
 
 `pilot remove production` removes production deployment files and services while keeping logs, certificates, and admin domain config.
 
+## Startup pages
+
+A configured cloud site alias shows a waiting page while its target site is absent. The page refreshes every five seconds. `/api/method/ping` returns 503 until the target exists, so readiness checks do not treat the waiting page as a working site. Unknown hostnames still return 404.
+
+Production web processes wait up to 60 seconds for the managed database before they start. systemd keeps the web socket open during this wait. Existing external databases keep their current startup behavior.
+
+If nginx cannot reach a backend, browser GET requests receive a reconnecting page that refreshes every five seconds. API requests and form submissions retain their gateway error status.
+
+Pilot builds Admin frontends in a separate directory and publishes index.html after the assets. Existing hashed assets remain available to open tabs. If index.html is missing, Admin serves a preparing page until the build is restored.
+
 ## Process Managers
 
 Supported managers are `systemd` and `supervisor`.

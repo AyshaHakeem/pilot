@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.exceptions import BenchError, CronError
-from pilot.internal.atomic_file import exclusive_file_lock, replace_private_text_locked
+from pilot.internal.atomic_file import exchange_paths, exclusive_file_lock, replace_private_text_locked
 from pilot.utils import normalize_host
 
 if TYPE_CHECKING:
@@ -27,7 +27,6 @@ class SiteRename:
         self.new_name = new_name
         self.keep_old_hostname = keep_old_hostname
         self.make_primary = make_primary
-        self._compatibility_link: Path | None = None
         self._original_site_config: str | None = None
         self._old_pilot_auth_token = ""
         self._new_route: RoutePolicy | None = None
@@ -63,7 +62,6 @@ class SiteRename:
             self._add_to_hosts()
             # Reload only after both names resolve on disk.
             self._reload_nginx()
-            self._drop_compatibility_link()
         except BaseException:
             # nginx still names the old site, so restore that state.
             self._roll_back(on_progress)
@@ -133,28 +131,12 @@ class SiteRename:
     def _move_site_directory(self) -> None:
         """Move the site while keeping its old path as a symlink."""
         old_path = self.site.path
-        staged = self.bench.sites_path / f".renaming-{self.new_name}"
-        staged.unlink(missing_ok=True)
-        staged.symlink_to(self.new_name)  # dangling until the move below lands
+        self.new_path.symlink_to(self.new_name)
         try:
-            old_path.rename(self.new_path)
+            exchange_paths(old_path, self.new_path)
         except BaseException:
-            staged.unlink(missing_ok=True)
+            self.new_path.unlink()
             raise
-        try:
-            staged.rename(old_path)
-        except BaseException:
-            self.new_path.rename(old_path)
-            staged.unlink(missing_ok=True)
-            raise
-        self._compatibility_link = old_path
-
-    def _drop_compatibility_link(self) -> None:
-        """Once nginx names the new site, nothing asks for the old path again."""
-        link = self._compatibility_link
-        if link is not None and link.is_symlink():
-            link.unlink()
-        self._compatibility_link = None
 
     def _roll_back(self, on_progress: Callable[[str], None]) -> None:
         """Restore the old name, attempting every rollback step."""
@@ -195,10 +177,8 @@ class SiteRename:
     def _move_site_directory_back(self) -> None:
         """Restore the real directory at the old path."""
         old_path = self.site.path
-        if old_path.is_symlink():
-            old_path.unlink()
-        self.new_path.rename(old_path)
-        self._compatibility_link = None
+        exchange_paths(old_path, self.new_path)
+        self.new_path.unlink()
 
     def _pin_certificate_name(self) -> None:
         """Keep an existing certificate lineage across a rename."""

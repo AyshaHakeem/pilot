@@ -57,7 +57,13 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
             if path.is_file() and (path.suffix in (".service", ".socket") or path.name == target_file):
                 path.unlink()
 
-        renderer = SystemdRenderer(self.bench.config.name)
+        database = self.bench.config.db_type
+        database_service = (
+            f"pilot-{database}.service"
+            if database in {"mariadb", "postgres"} and not getattr(self.bench.config, database).existing
+            else ""
+        )
+        renderer = SystemdRenderer(self.bench.config.name, database_service)
         workload_units: list[str] = []
         for pd in defs:
             if pd.name == "admin":
