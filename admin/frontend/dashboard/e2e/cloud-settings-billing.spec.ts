@@ -126,11 +126,11 @@ test('India asks for the state and offers GSTIN', async ({ page }) => {
   })
 
   await page.getByRole('button', { name: 'Add payment method' }).click()
-  await expect(page.getByLabel('GSTIN (optional)')).toHaveCount(0)
+  await expect(page.getByLabel('GSTIN', { exact: true })).toHaveCount(0)
 
   await page.getByLabel('Country').fill('India')
-  await expect(page.getByLabel('GSTIN (optional)')).toBeVisible()
-  await expect(page.getByLabel('State', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('GSTIN', { exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'State (required)', exact: true })).toBeVisible()
 })
 
 test('a paid site moves to a bigger plan and opens the progress page', async ({ page }) => {
@@ -201,7 +201,7 @@ test('a spending limit blocks a bigger plan and says why', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Move to Pro' })).toBeDisabled()
 })
 
-test('a failed plan list offers a retry, and See more plans opens Central', async ({ page }) => {
+test('a failed plan list offers a retry, and Check more plans opens Central', async ({ page }) => {
   let attempts = 0
   await openBilling(page, {
     get_billing: () => ({ message: billing({ onTrial: null, hasCard: true }) }),
@@ -217,7 +217,7 @@ test('a failed plan list offers a retry, and See more plans opens Central', asyn
   await page.evaluate(() => {
     window.open = (url) => ((window as unknown as { opened: unknown }).opened = String(url)) && null
   })
-  await page.getByRole('button', { name: 'See more plans in Frappe Cloud' }).click()
+  await page.getByRole('button', { name: 'Check more plans', exact: true }).click()
   expect(await page.evaluate(() => (window as unknown as { opened: string }).opened)).toBe('https://cloud.example.test/plans')
 })
 
