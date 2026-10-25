@@ -11,6 +11,11 @@ interface TileApp {
   description?: string
   logo_url?: string | null
   repo?: string
+  documentation?: string
+  website?: string
+  category?: string
+  categories?: string[]
+  frappe_version?: string
   label?: string
   stars?: number | null
   nightly?: boolean
@@ -25,13 +30,18 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const emit = defineEmits(['install'])
+defineEmits(['install'])
 
 const compactNumber = new Intl.NumberFormat('en', { notation: 'compact' })
 const isOpen = ref(false)
 
 const hasMeta = computed(() => props.app.stars || props.app.label || props.app.requires?.length)
-const isUnavailable = computed(() => props.app.installed || props.app.compatible === false)
+
+const categories = computed(() =>
+  (props.app.categories?.length ? props.app.categories : [props.app.category])
+    .filter(Boolean)
+    .join(', '),
+)
 
 const status = computed(() => {
   if (props.app.installed) return 'Installed'
@@ -40,10 +50,12 @@ const status = computed(() => {
   return 'Ready to install'
 })
 
-const install = () => {
-  isOpen.value = false
-  emit('install', props.app)
-}
+const statusTheme = computed(() => {
+  if (props.app.installed) return 'gray'
+  if (props.app.compatible === false) return 'amber'
+
+  return 'blue'
+})
 </script>
 
 <template>
@@ -124,64 +136,108 @@ const install = () => {
     </template>
 
     <template #default>
-      <div class="flex flex-col gap-4 p-4 w-96">
-        <div class="min-w-0">
-          <p class="text-lg-semibold text-ink-gray-8 truncate">{{ app.title }}</p>
-          <p v-if="app.label" class="mt-1 text-ink-gray-5 text-sm">{{ app.label }}</p>
+      <div class="flex flex-col gap-3 p-4 w-96">
+        <div class="flex justify-between items-start gap-3">
+          <p class="flex items-center gap-2 text-base-semibold text-ink-gray-8">
+            {{ app.title }}
+            <Badge v-if="app.nightly" label="Nightly" theme="amber" size="sm" />
+          </p>
+
+          <Badge :label="status" :theme="statusTheme" size="sm" class="shrink-0" />
         </div>
 
-        <p class="text-ink-gray-7 text-p-sm">{{ app.description || 'No description yet.' }}</p>
+        <p class="-mt-1.5 text-sm text-ink-gray-7">
+          {{ app.description || 'No description yet.' }}
+        </p>
 
-        <dl class="flex flex-col gap-2 pt-4 border-t border-outline-gray-2 text-sm">
-          <div v-if="app.stars" class="flex justify-between gap-4">
-            <dt class="text-ink-gray-5">Stars</dt>
-            <dd class="text-ink-gray-8">{{ compactNumber.format(app.stars) }}</dd>
-          </div>
-
-          <div v-if="app.requires?.length" class="flex justify-between items-center gap-4">
-            <dt class="text-ink-gray-5">Requires</dt>
-            <dd class="flex flex-wrap justify-end gap-1">
-              <Badge
-                v-for="dependency in app.requires"
-                :key="dependency.name"
-                :label="dependency.title"
-              />
-            </dd>
-          </div>
-
-          <div v-if="app.nightly" class="flex justify-between gap-4">
-            <dt class="text-ink-gray-5">Channel</dt>
-            <dd class="text-ink-gray-8">Nightly</dd>
-          </div>
-
-          <div class="flex justify-between gap-4">
-            <dt class="text-ink-gray-5">Status</dt>
-            <dd
-              :class="{
-                'text-ink-green-7': app.installed,
-                'text-ink-amber-6': app.compatible === false && !app.installed,
-                'text-ink-gray-8': !isUnavailable,
-              }"
+        <dl class="gap-x-4 gap-y-3 grid grid-cols-2 pt-3 border-t border-outline-gray-2">
+          <div v-if="categories" class="flex items-center gap-2.5">
+            <span
+              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
-              {{ status }}
-            </dd>
+              <span class="lucide-shapes size-4" aria-hidden="true" />
+            </span>
+
+            <div class="flex flex-col gap-1 min-w-0">
+              <dt class="text-xs text-ink-gray-5">Category</dt>
+              <dd class="text-sm text-ink-gray-8 truncate">{{ categories }}</dd>
+            </div>
+          </div>
+
+          <div v-if="app.stars" class="flex items-center gap-2.5">
+            <span
+              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+            >
+              <span class="lucide-star size-4" aria-hidden="true" />
+            </span>
+
+            <div class="flex flex-col gap-1 min-w-0">
+              <dt class="text-xs text-ink-gray-5">Stars</dt>
+              <dd class="text-sm text-ink-gray-8 truncate">
+                {{ compactNumber.format(app.stars) }}
+              </dd>
+            </div>
+          </div>
+
+          <div v-if="app.label" class="flex items-center gap-2.5">
+            <span
+              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+            >
+              <span class="lucide-git-branch size-4" aria-hidden="true" />
+            </span>
+
+            <div class="flex flex-col gap-1 min-w-0">
+              <dt class="text-xs text-ink-gray-5">Version</dt>
+              <dd class="text-sm text-ink-gray-8 truncate">{{ app.label }}</dd>
+            </div>
+          </div>
+
+          <div v-if="app.frappe_version" class="flex items-center gap-2.5">
+            <span
+              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+            >
+              <span class="lucide-layers size-4" aria-hidden="true" />
+            </span>
+
+            <div class="flex flex-col gap-1 min-w-0">
+              <dt class="text-xs text-ink-gray-5">Frappe</dt>
+              <dd class="text-sm text-ink-gray-8 truncate">{{ app.frappe_version }}</dd>
+            </div>
+          </div>
+
+          <div v-if="app.requires?.length" class="flex items-center gap-2.5 col-span-2">
+            <span
+              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+            >
+              <span class="lucide-package size-4" aria-hidden="true" />
+            </span>
+
+            <div class="flex flex-col gap-1 min-w-0">
+              <dt class="text-xs text-ink-gray-5">Dependencies</dt>
+
+              <dd class="flex flex-wrap gap-1">
+                <Badge
+                  v-for="dependency in app.requires"
+                  :key="dependency.name"
+                  :label="dependency.title"
+                />
+              </dd>
+            </div>
           </div>
         </dl>
 
-        <div class="flex gap-2">
+        <div v-if="app.repo || app.documentation || app.website" class="flex gap-2">
           <Button v-if="app.repo" :href="app.repo" class="flex-1" label="GitHub">
             <template #prefix><GithubMark class="size-4" /></template>
           </Button>
 
           <Button
-            variant="solid"
+            v-if="app.documentation || app.website"
+            :href="app.documentation || app.website"
             class="flex-1"
-            :label="app.installed ? 'Installed' : 'Install'"
-            :disabled="isUnavailable"
-            @click="install"
-          >
-            <template #prefix><span class="size-4 lucide-download" /></template>
-          </Button>
+            icon-left="lucide-external-link"
+            label="Docs"
+          />
         </div>
       </div>
     </template>

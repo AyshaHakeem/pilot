@@ -194,7 +194,7 @@ const statusTheme = computed(() => {
       <dl class="gap-x-4 gap-y-3 grid grid-cols-2 pt-3 border-t border-outline-gray-2">
         <div v-if="app.categories?.length || app.category" class="flex items-center gap-2.5">
           <span
-            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-4"
+            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
           >
             <span class="lucide-shapes size-4" aria-hidden="true" />
           </span>
@@ -210,7 +210,7 @@ const statusTheme = computed(() => {
 
         <div v-if="app.stars" class="flex items-center gap-2.5">
           <span
-            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-4"
+            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
           >
             <span class="lucide-star size-4" aria-hidden="true" />
           </span>
@@ -226,7 +226,7 @@ const statusTheme = computed(() => {
 
         <div class="flex items-center gap-2.5">
           <span
-            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-4"
+            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
           >
             <span class="lucide-git-branch size-4" aria-hidden="true" />
           </span>
@@ -247,7 +247,7 @@ const statusTheme = computed(() => {
 
         <div v-if="app.frappe_version" class="flex items-center gap-2.5">
           <span
-            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-4"
+            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
           >
             <span class="lucide-layers size-4" aria-hidden="true" />
           </span>
@@ -260,7 +260,7 @@ const statusTheme = computed(() => {
 
         <div v-if="app.dependencies?.length" class="flex items-center gap-2.5 col-span-2">
           <span
-            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-4"
+            class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
           >
             <span class="lucide-package size-4" aria-hidden="true" />
           </span>
@@ -292,7 +292,7 @@ const statusTheme = computed(() => {
         <Button
           v-if="app.documentation || app.website"
           class="flex-1"
-          icon-left="lucide-book-open"
+          icon-left="lucide-external-link"
           :label="__('Docs')"
           @click="openExternal(app.documentation || app.website)"
         />
