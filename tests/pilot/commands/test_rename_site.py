@@ -134,11 +134,25 @@ def test_rename_followup_advises_on_failure(
     assert "pilot setup letsencrypt -b b1" in out
 
 
-def test_rename_back_reclaims_the_old_name(tmp_path: Path) -> None:
+
+def _age_alias(path: Path) -> None:
+    import os
+    import time
+
+    then = time.time() - 600
+    os.utime(path, (then, then), follow_symlinks=False)
+
+
+def test_rename_back_reclaims_the_old_name_once_requests_are_done(tmp_path: Path) -> None:
     bench = _bench(tmp_path, "b1")
     _make_site(bench, "old.localhost")
-
     RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
+
+    with pytest.raises(BenchError, match="renamed moments ago"):
+        RenameSiteCommand(bench, old_name="new.localhost", new_name="old.localhost").run()
+    assert (bench.sites_path / "new.localhost").is_dir()
+
+    _age_alias(bench.sites_path / "old.localhost")
     RenameSiteCommand(bench, old_name="new.localhost", new_name="old.localhost").run()
 
     old_path = bench.sites_path / "old.localhost"
@@ -151,16 +165,18 @@ def test_a_new_site_may_take_a_renamed_sites_old_name(tmp_path: Path) -> None:
 
     bench = _bench(tmp_path, "b1")
     _make_site(bench, "new.localhost")
-    (bench.sites_path / "old.localhost").symlink_to("new.localhost")
+    alias = bench.sites_path / "old.localhost"
+    alias.symlink_to("new.localhost")
+    _age_alias(alias)
 
     validate_new_site(bench, "old.localhost", [])
     bench.release_site_alias("old.localhost")
 
-    assert not (bench.sites_path / "old.localhost").is_symlink()
+    assert not alias.is_symlink()
     assert (bench.sites_path / "new.localhost").is_dir()
 
 
-def test_rename_falls_back_to_a_move_without_atomic_exchange(tmp_path: Path, monkeypatch) -> None:
+def test_rename_stops_before_moving_without_atomic_exchange(tmp_path: Path, monkeypatch) -> None:
     import errno
 
     def unsupported(first: Path, second: Path) -> None:
@@ -170,7 +186,19 @@ def test_rename_falls_back_to_a_move_without_atomic_exchange(tmp_path: Path, mon
     bench = _bench(tmp_path, "b1")
     _make_site(bench, "old.localhost")
 
-    RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
+    with pytest.raises(BenchError, match="cannot swap the site directory"):
+        RenameSiteCommand(bench, old_name="old.localhost", new_name="new.localhost").run()
 
-    assert (bench.sites_path / "old.localhost").readlink() == Path("new.localhost")
-    assert (bench.sites_path / "new.localhost" / "site_config.json").exists()
+    assert (bench.sites_path / "old.localhost" / "site_config.json").exists()
+    assert not (bench.sites_path / "new.localhost").exists()
+    assert not (bench.sites_path / "new.localhost").is_symlink()
+
+
+def test_bench_list_does_not_count_a_rename_alias(tmp_path: Path) -> None:
+    from pilot.commands.bench.list import ListCommand
+
+    bench = _bench(tmp_path, "b1")
+    _make_site(bench, "new.localhost")
+    (bench.sites_path / "old.localhost").symlink_to("new.localhost")
+
+    assert ListCommand()._site_count(bench.path) == 1

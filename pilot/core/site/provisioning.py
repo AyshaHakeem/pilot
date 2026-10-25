@@ -33,6 +33,7 @@ class SiteProvisioner:
         from pilot.core.site import Site
 
         via_wildcard = validate_new_site(self.bench, self.name, self.apps)
+        self.bench.release_site_alias(self.name)
         route = None
         if via_wildcard:
             route = register_with_provider(self.bench, self.name)
@@ -50,7 +51,6 @@ class SiteProvisioner:
             self.bench,
         )
         on_progress(f"Creating site '{self.name}'...")
-        self.bench.release_site_alias(self.name)
         site.create(db_type=self.db_type)
         self.write_email_sender_name(site)
         self.write_route_policy(site)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
@@ -8,6 +9,9 @@ from typing import TYPE_CHECKING
 
 from pilot.config import BenchConfig
 from pilot.exceptions import BenchError
+
+# Longer than nginx's proxy_read_timeout, so requests that still use a renamed site's old path finish.
+SITE_ALIAS_HOLD_SECONDS = 150
 
 if TYPE_CHECKING:
     from pilot.config import S3Config, SiteConfig
@@ -238,8 +242,11 @@ class Bench:
     def release_site_alias(self, name: str) -> None:
         """Remove the symlink a rename leaves at a site's old path, so the name can be used again."""
         path = self.sites_path / name
-        if path.is_symlink():
-            path.unlink()
+        if not path.is_symlink():
+            return
+        if time.time() - path.lstat().st_mtime < SITE_ALIAS_HOLD_SECONDS:
+            raise BenchError(f"Site '{name}' was renamed moments ago. Try again in a few minutes.")
+        path.unlink()
 
     def site(self, name: str) -> "Site":
         from pilot.config import SiteConfig
