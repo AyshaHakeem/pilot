@@ -60,7 +60,7 @@ const apps = computed(() => {
 
   if (sortBy.value === 'name') return [...listed].sort((a, b) => a.title.localeCompare(b.title))
 
-  return listed
+  return [...listed].sort((a, b) => (b.stars ?? -1) - (a.stars ?? -1))
 })
 
 const worksWithSelectOptions = computed(() => [
