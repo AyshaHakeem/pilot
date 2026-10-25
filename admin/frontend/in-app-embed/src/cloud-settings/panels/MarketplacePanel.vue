@@ -89,11 +89,22 @@ const appsWithUpdates = computed(() =>
   (marketplace.value?.apps || []).filter((app) => app.has_update),
 )
 
+const categoryIcons: Record<string, string> = {
+  Applications: 'lucide-app-window',
+  Compliance: 'lucide-shield-check',
+  'Developer Tools': 'lucide-code',
+  Extensions: 'lucide-puzzle',
+  Integrations: 'lucide-plug',
+  Utilities: 'lucide-wrench',
+}
+
 const categoryOptions = computed(() => [
-  { label: __('All categories'), value: '' },
-  ...(marketplace.value?.categories || []).map((c) =>
-    typeof c === 'string' ? { label: c, value: c } : c,
-  ),
+  { label: __('All categories'), value: '', icon: 'lucide-layout-grid' },
+  ...(marketplace.value?.categories || []).map((c) => {
+    const option = typeof c === 'string' ? { label: c, value: c } : c
+
+    return { ...option, icon: categoryIcons[option.value] || 'lucide-tag' }
+  }),
 ])
 
 const filteredApps = computed(() => {
@@ -322,7 +333,7 @@ const settle = async (taskId: string, action: { verb: string; progress: string }
         {{ section.label }}
       </h3>
 
-      <div class="grid gap-x-2 gap-y-1 sm:grid-cols-2 -mx-3">
+      <div class="grid gap-1 sm:grid-cols-2 -mx-3">
         <AppRow
           v-for="app in section.apps"
           :key="app.name"

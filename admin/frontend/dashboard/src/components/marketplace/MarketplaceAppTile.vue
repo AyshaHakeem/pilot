@@ -62,7 +62,8 @@ const statusTheme = computed(() => {
   <Popover v-model:open="isOpen" trigger="manual" side="bottom" align="start" :offset="8">
     <template #trigger>
       <article
-        class="relative flex flex-col dark:bg-surface-gray-0 p-4 border rounded-6 border-outline-gray-1.5"
+        class="relative flex flex-col dark:bg-surface-gray-0 p-4 border rounded-6 transition-colors"
+        :class="isOpen ? 'border-outline-gray-5' : 'border-outline-gray-1.5'"
       >
         <div class="flex items-center gap-3">
           <AppIcon
@@ -136,7 +137,7 @@ const statusTheme = computed(() => {
     </template>
 
     <template #default>
-      <div class="flex flex-col gap-3 p-4 w-96">
+      <div class="flex flex-col gap-3 p-4 w-80 sm:w-96">
         <div class="flex justify-between items-start gap-3">
           <p class="flex items-center gap-2 text-base-semibold text-ink-gray-8">
             {{ app.title }}
@@ -146,7 +147,7 @@ const statusTheme = computed(() => {
           <Badge :label="status" :theme="statusTheme" size="sm" class="shrink-0" />
         </div>
 
-        <p class="-mt-1.5 text-sm text-ink-gray-7">
+        <p class="-mt-1.5 text-p-sm text-ink-gray-6">
           {{ app.description || 'No description yet.' }}
         </p>
 

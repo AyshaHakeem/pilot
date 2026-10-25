@@ -66,12 +66,15 @@ const statusTheme = computed(() => {
     :open="isDetailsOpen"
     side="bottom"
     align="start"
-    :offset="0"
+    :offset="4"
     :portal-to="overlayTarget"
     @update:open="(value) => (isDetailsOpen = value && !isOverActions)"
   >
     <template #trigger>
-      <article class="flex flex-col px-3 py-2 rounded-6">
+      <article
+        class="flex flex-col px-3 py-2 rounded-6 hover:bg-surface-gray-1 transition-colors"
+        :class="{ 'bg-surface-gray-1': isDetailsOpen }"
+      >
         <div class="flex items-center gap-3">
           <img
             v-if="logoUrl"
@@ -179,7 +182,7 @@ const statusTheme = computed(() => {
       </article>
     </template>
 
-    <div class="flex flex-col gap-3 p-4 w-96">
+    <div class="flex flex-col gap-3 p-4 w-80 sm:w-96">
       <div class="flex justify-between items-start gap-3">
         <p class="flex items-center gap-2 text-base-semibold text-ink-gray-8">
           {{ app.title }}
@@ -189,7 +192,7 @@ const statusTheme = computed(() => {
         <Badge :label="status" :theme="statusTheme" size="sm" class="shrink-0" />
       </div>
 
-      <p class="-mt-1.5 text-sm text-ink-gray-7">{{ app.description }}</p>
+      <p class="-mt-1.5 text-p-sm text-ink-gray-6">{{ app.description }}</p>
 
       <dl class="gap-x-4 gap-y-3 grid grid-cols-2 pt-3 border-t border-outline-gray-2">
         <div v-if="app.categories?.length || app.category" class="flex items-center gap-2.5">

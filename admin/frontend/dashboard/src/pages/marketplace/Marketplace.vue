@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Button, Dropdown, ErrorMessage, Select, Skeleton, TabButtons, TextInput } from 'frappe-ui'
+import { Button, ErrorMessage, Select, Skeleton, TabButtons, TextInput } from 'frappe-ui'
 import { computed, h, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -63,23 +63,15 @@ const apps = computed(() => {
   return listed
 })
 
-const worksWithMenu = computed(() => [
-  {
-    label: 'Any app',
-    icon: () => h('span', { class: 'size-4 text-ink-gray-6 lucide-layout-grid' }),
-    onClick: () => (worksWith.value = ''),
-  },
+const worksWithSelectOptions = computed(() => [
+  { label: 'Any app', value: '', icon: 'lucide-blocks' },
   ...worksWithOptions.value.map((option) => ({
     label: option.title,
+    value: option.name,
     icon: () =>
       h(AppIcon, { name: option.name, label: option.title, logo: option.logo_url, size: 'xs' }),
-    onClick: () => (worksWith.value = option.name),
   })),
 ])
-
-const selectedWorksWith = computed(() =>
-  worksWithOptions.value.find((option) => option.name === worksWith.value),
-)
 
 const showInstallApp = ref(false)
 const showAddFromGithub = ref(false)
@@ -123,13 +115,22 @@ onMounted(load)
     </Button>
   </Teleport>
 
-  <div class="flex flex-col gap-4 mx-auto px-4 sm:px-8 pt-8 pb-40 max-w-6xl">
+  <div class="flex flex-col gap-4 mx-auto px-3 md:px-8 pt-4 md:pt-8 pb-40 max-w-6xl">
     <header class="flex flex-wrap gap-2">
-      <TextInput v-model="search" class="flex-1 min-w-64" placeholder="Search apps">
+      <TextInput
+        v-model="search"
+        class="flex-1 basis-full md:basis-0 md:min-w-64"
+        placeholder="Search apps"
+      >
         <template #prefix><span class="size-4 text-ink-gray-5 lucide-search" /></template>
       </TextInput>
 
-      <Select v-model="currentSiteName" :options="siteOptions" side="bottom" class="w-48">
+      <Select
+        v-model="currentSiteName"
+        :options="siteOptions"
+        side="bottom"
+        class="flex-1 md:flex-none md:w-48"
+      >
         <template #prefix><span class="size-4 text-ink-gray-5 lucide-globe" /></template>
       </Select>
 
@@ -137,23 +138,7 @@ onMounted(load)
         <template #prefix><span class="size-4 text-ink-gray-5 lucide-arrow-down-up" /></template>
       </Select>
 
-      <Dropdown :options="worksWithMenu">
-        <template #default="{ open }">
-          <Button :active="open">
-            <template #prefix>
-              <AppIcon
-                v-if="selectedWorksWith"
-                :name="selectedWorksWith.name"
-                :label="selectedWorksWith.title"
-                :logo="selectedWorksWith.logo_url"
-                size="xs"
-              />
-              <span v-else class="size-4 text-ink-gray-5 lucide-blocks" />
-            </template>
-            <span class="hidden sm:inline">{{ selectedWorksWith?.title || 'Works with' }}</span>
-          </Button>
-        </template>
-      </Dropdown>
+      <Select v-model="worksWith" :options="worksWithSelectOptions" side="bottom" class="w-44" />
     </header>
 
     <TabButtons
@@ -163,7 +148,7 @@ onMounted(load)
       class="mb-2 overflow-x-auto"
     />
 
-    <div v-if="loading" class="gap-4 grid sm:grid-cols-2 xl:grid-cols-3">
+    <div v-if="loading" class="gap-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
       <Skeleton v-for="i in 9" :key="i" class="rounded-6 h-24" />
     </div>
 
@@ -197,7 +182,7 @@ onMounted(load)
           <span class="text-ink-gray-5 text-base">{{ privateApps.length }}</span>
         </h2>
 
-        <div class="gap-4 grid sm:grid-cols-2 xl:grid-cols-3">
+        <div class="gap-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           <MarketplaceAppTile
             v-for="app in privateApps"
             :key="app.name"
@@ -213,7 +198,7 @@ onMounted(load)
           <span class="text-ink-gray-5 text-base">{{ apps.length }}</span>
         </h2>
 
-        <div class="gap-4 grid sm:grid-cols-2 xl:grid-cols-3">
+        <div class="gap-4 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
           <MarketplaceAppTile v-for="app in apps" :key="app.name" :app="app" @install="onInstall" />
         </div>
       </section>
