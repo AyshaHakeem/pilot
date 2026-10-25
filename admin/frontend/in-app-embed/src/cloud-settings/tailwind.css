@@ -10,7 +10,11 @@
   line-height: 1.5;
 }
 
-.cloud-settings-root { color-scheme: light; color: var(--ink-gray-8); }
+.cloud-settings-root {
+  color-scheme: light;
+  color: var(--ink-gray-8);
+  --outline-gray-1-5: color-mix(in srgb, var(--outline-gray-1) 50%, var(--outline-gray-2));
+}
 .cloud-settings-root[data-theme="dark"] { color-scheme: dark; }
 
 /* Keep wide tables inside their own scroll region. */
