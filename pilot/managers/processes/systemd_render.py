@@ -47,24 +47,11 @@ class SystemdRenderer(ServiceRenderer):
         post = f"ExecStopPost={_exec(pd.post_run)}\n" if pd.post_run else ""
         restart = "on-failure" if pd.restart_on_failure else "no"
         remove_socket = f"ExecStartPre=/bin/rm -f {pd.socket_file}\n" if pd.socket_file else ""
-        # systemd stops in reverse start order; redis must outlive a lite runner draining into it.
-        after_redis = (
-            ""
-            if pd.name.startswith("redis")
-            else f"After={self.bench_name}-redis_cache.service {self.bench_name}-redis_queue.service\n"
-        )
-        socket = self.get_socket_name(pd)
-        requires_socket = f"Requires={socket}\nAfter={socket}\n" if socket else ""
-        database = (
-            f"Requires={self.database_service}\nAfter={self.database_service}\nPartOf={self.database_service}\n"
-            if pd.name == "web" and self.database_service
-            else ""
-        )
         return (
             f"[Unit]\n"
             f"Description={self.bench_name} {pd.name}\n"
             f"PartOf={self.bench_name}.target\n"
-            f"{after_redis}{requires_socket}{database}\n"
+            f"{self._dependencies(pd)}\n"
             f"[Service]\n"
             f"Type=simple\n"
             f"{working_dir}{env}"
@@ -77,6 +64,17 @@ class SystemdRenderer(ServiceRenderer):
             f"StandardOutput=append:{pd.log_file}\n"
             f"StandardError=append:{pd.log_file}.error.log\n"
         )
+
+    def _dependencies(self, pd: ProcessDefinition) -> str:
+        # systemd stops in reverse start order; redis must outlive a lite runner draining into it.
+        lines = ""
+        if not pd.name.startswith("redis"):
+            lines += f"After={self.bench_name}-redis_cache.service {self.bench_name}-redis_queue.service\n"
+        if socket := self.get_socket_name(pd):
+            lines += f"Requires={socket}\nAfter={socket}\n"
+        if pd.name == "web" and self.database_service:
+            lines += f"Requires={self.database_service}\nAfter={self.database_service}\nPartOf={self.database_service}\n"
+        return lines
 
     def render_admin_socket(self, port: int) -> str:
         # No PartOf: admin stays reachable while the workload is stopped.

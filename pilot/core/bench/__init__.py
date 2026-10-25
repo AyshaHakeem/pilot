@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Callable
 from functools import cached_property
 from pathlib import Path
@@ -10,9 +9,6 @@ from typing import TYPE_CHECKING
 from pilot.config import BenchConfig
 from pilot.exceptions import BenchError
 
-# Longer than nginx's proxy_read_timeout, so requests that still use a renamed site's old path finish.
-SITE_ALIAS_HOLD_SECONDS = 150
-
 if TYPE_CHECKING:
     from pilot.config import S3Config, SiteConfig
     from pilot.core.app import App, NewAppOptions, RevisionPin
@@ -20,6 +16,7 @@ if TYPE_CHECKING:
     from pilot.core.bench.hostname_aliases import HostnameAliases
     from pilot.core.bench.migration.store import MigrationStore
     from pilot.core.bench.processes import BenchProcesses
+    from pilot.core.bench.site_aliases import SiteAliases
     from pilot.core.database import Database
     from pilot.core.notification import NotificationStore
     from pilot.core.site import Site
@@ -107,6 +104,12 @@ class Bench:
         from pilot.core.bench.processes import BenchProcesses
 
         return BenchProcesses(self)
+
+    @cached_property
+    def site_aliases(self) -> "SiteAliases":
+        from pilot.core.bench.site_aliases import SiteAliases
+
+        return SiteAliases(self)
 
     @cached_property
     def backups(self) -> "BenchBackups":
@@ -238,15 +241,6 @@ class Bench:
         from pilot.core.bench.inventory import BenchInventory
 
         return BenchInventory(self).sites()
-
-    def release_site_alias(self, name: str) -> None:
-        """Remove the symlink a rename leaves at a site's old path, so the name can be used again."""
-        path = self.sites_path / name
-        if not path.is_symlink():
-            return
-        if time.time() - path.lstat().st_mtime < SITE_ALIAS_HOLD_SECONDS:
-            raise BenchError(f"Site '{name}' was renamed moments ago. Try again in a few minutes.")
-        path.unlink()
 
     def site(self, name: str) -> "Site":
         from pilot.config import SiteConfig

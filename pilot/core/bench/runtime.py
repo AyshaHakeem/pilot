@@ -61,6 +61,7 @@ class BenchRuntime:
         return manager.config.existing or manager.is_reachable()
 
     def start(self, on_progress: Callable[[str], None]) -> None:
+        self.bench.site_aliases.release_expired()
         initialized = self.bench.is_initialized
         process_manager = self.bench.config.production.process_manager
 
@@ -103,6 +104,7 @@ class BenchRuntime:
         manager.install_config()
         manager.reload_manager_config()
         manager.restart()
+        self.bench.site_aliases.release_expired()
         if include_admin:
             manager.restart_admin()
 

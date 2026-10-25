@@ -135,12 +135,16 @@ def test_rename_followup_advises_on_failure(
 
 
 
-def _age_alias(path: Path) -> None:
+def _age_alias(bench: Bench, name: str) -> None:
     import os
     import time
 
     then = time.time() - 600
-    os.utime(path, (then, then), follow_symlinks=False)
+    os.utime(bench.sites_path / name, (then, then), follow_symlinks=False)
+    registry = bench.site_aliases.registry_path
+    if registry.exists():
+        recorded = json.loads(registry.read_text())
+        registry.write_text(json.dumps({alias: then for alias in recorded}))
 
 
 def test_rename_back_reclaims_the_old_name_once_requests_are_done(tmp_path: Path) -> None:
@@ -152,7 +156,7 @@ def test_rename_back_reclaims_the_old_name_once_requests_are_done(tmp_path: Path
         RenameSiteCommand(bench, old_name="new.localhost", new_name="old.localhost").run()
     assert (bench.sites_path / "new.localhost").is_dir()
 
-    _age_alias(bench.sites_path / "old.localhost")
+    _age_alias(bench, "old.localhost")
     RenameSiteCommand(bench, old_name="new.localhost", new_name="old.localhost").run()
 
     old_path = bench.sites_path / "old.localhost"
@@ -167,10 +171,10 @@ def test_a_new_site_may_take_a_renamed_sites_old_name(tmp_path: Path) -> None:
     _make_site(bench, "new.localhost")
     alias = bench.sites_path / "old.localhost"
     alias.symlink_to("new.localhost")
-    _age_alias(alias)
+    _age_alias(bench, "old.localhost")
 
     validate_new_site(bench, "old.localhost", [])
-    bench.release_site_alias("old.localhost")
+    bench.site_aliases.release("old.localhost")
 
     assert not alias.is_symlink()
     assert (bench.sites_path / "new.localhost").is_dir()
@@ -202,3 +206,24 @@ def test_bench_list_does_not_count_a_rename_alias(tmp_path: Path) -> None:
     (bench.sites_path / "old.localhost").symlink_to("new.localhost")
 
     assert ListCommand()._site_count(bench.path) == 1
+
+
+def test_workload_start_retires_expired_rename_aliases_only(tmp_path: Path) -> None:
+    import time
+
+    bench = _bench(tmp_path, "b1")
+    _make_site(bench, "new.localhost")
+    RenameSiteCommand(bench, old_name="new.localhost", new_name="newer.localhost").run()
+    (bench.sites_path / "dev.example.com").symlink_to("newer.localhost")
+
+    bench.site_aliases.release_expired()
+    assert (bench.sites_path / "new.localhost").is_symlink()
+
+    registry = json.loads(bench.site_aliases.registry_path.read_text())
+    registry["new.localhost"] = time.time() - 600
+    bench.site_aliases.registry_path.write_text(json.dumps(registry))
+    bench.site_aliases.release_expired()
+
+    assert not (bench.sites_path / "new.localhost").is_symlink()
+    assert (bench.sites_path / "dev.example.com").is_symlink()
+    assert json.loads(bench.site_aliases.registry_path.read_text()) == {}

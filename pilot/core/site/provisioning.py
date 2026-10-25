@@ -33,7 +33,7 @@ class SiteProvisioner:
         from pilot.core.site import Site
 
         via_wildcard = validate_new_site(self.bench, self.name, self.apps)
-        self.bench.release_site_alias(self.name)
+        self.bench.site_aliases.release(self.name)
         route = None
         if via_wildcard:
             route = register_with_provider(self.bench, self.name)

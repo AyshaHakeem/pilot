@@ -39,7 +39,7 @@ class SiteRename:
 
     def run(self, on_progress: Callable[[str], None]) -> None:
         self.validate()
-        self.bench.release_site_alias(self.new_name)
+        self.bench.site_aliases.release(self.new_name)
 
         on_progress(f"Renaming site '{self.old_name}' -> '{self.new_name}'...")
         # Register first so a provider failure needs no rollback.
@@ -136,6 +136,7 @@ class SiteRename:
         self.new_path.symlink_to(self.new_name)
         try:
             exchange_paths(old_path, self.new_path)
+            self.bench.site_aliases.record(self.old_name)
         except BaseException as error:
             self.new_path.unlink()
             if isinstance(error, OSError) and error.errno in (errno.ENOTSUP, errno.EINVAL, errno.ENOSYS):
