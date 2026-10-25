@@ -44,17 +44,27 @@ const required = computed<Field[]>(() => [
 ])
 
 const FIELDS = computed(() => [
-  { key: 'legal_name' as Field, label: __('Legal name'), autocomplete: 'organization' },
-  { key: 'email' as Field, label: __('Billing email'), type: 'email', autocomplete: 'email', placeholder: 'billing@company.com' },
-  { key: 'address_line1' as Field, label: __('Address'), autocomplete: 'address-line1', placeholder: __('Street address'), full: true },
-  { key: 'city' as Field, label: __('City'), autocomplete: 'address-level2' },
-  { key: 'state' as Field, label: __('State'), autocomplete: 'address-level1' },
-  { key: 'country' as Field, label: __('Country'), autocomplete: 'country-name' },
-  { key: 'pincode' as Field, label: __('PIN or ZIP code'), autocomplete: 'postal-code' },
-  ...(isIndia.value ? [{ key: 'gstin' as Field, label: __('GSTIN'), placeholder: '29ABCDE1234F1Z5' }] : []),
+  { key: 'legal_name' as Field, label: __('Legal name'), autocomplete: 'organization', placeholder: __('Enter legal name') },
+  { key: 'email' as Field, label: __('Billing email'), type: 'email', autocomplete: 'email', placeholder: __('Enter billing email') },
+  { key: 'address_line1' as Field, label: __('Address'), autocomplete: 'address-line1', placeholder: __('Enter street address'), full: true },
+  { key: 'city' as Field, label: __('City'), autocomplete: 'address-level2', placeholder: __('Enter city') },
+  { key: 'state' as Field, label: __('State'), autocomplete: 'address-level1', placeholder: __('Enter state') },
+  { key: 'country' as Field, label: __('Country'), autocomplete: 'country-name', placeholder: __('Enter country') },
+  { key: 'pincode' as Field, label: __('PIN or ZIP code'), autocomplete: 'postal-code', placeholder: __('Enter PIN or ZIP code') },
+  ...(isIndia.value ? [{ key: 'gstin' as Field, label: __('GSTIN'), placeholder: __('Enter GSTIN') }] : []),
 ])
 
-const currencies = ref<{ label: string; value: string }[]>([])
+const currencyIcons: Record<string, string> = {
+  INR: 'lucide-indian-rupee',
+  USD: 'lucide-dollar-sign',
+  EUR: 'lucide-euro',
+  GBP: 'lucide-pound-sterling',
+  JPY: 'lucide-japanese-yen',
+  CHF: 'lucide-swiss-franc',
+  RUB: 'lucide-russian-ruble',
+}
+
+const currencies = ref<{ label: string; value: string; icon: string }[]>([])
 const loaded = ref(false)
 const working = ref(false)
 const error = ref('')
@@ -69,9 +79,6 @@ watch(() => form.country, (country) => {
   const suggested = isIndia.value ? 'INR' : 'USD'
   if (currencies.value.some((option) => option.value === suggested)) form.currency = suggested
 })
-
-const label = (field: { key: Field; label: string }) =>
-  required.value.includes(field.key) ? field.label : __('{0} (optional)', [field.label])
 
 const MISSING: Partial<Record<Field, string>> = {
   legal_name: __('Enter the name to show on invoices.'),
@@ -90,9 +97,11 @@ const load = async () => {
   try {
     const profile = await getBillingProfile()
 
-    currencies.value = (profile.supported_currencies || []).map((c) =>
-      typeof c === 'string' ? { label: c, value: c } : c,
-    )
+    currencies.value = (profile.supported_currencies || []).map((c) => {
+      const option = typeof c === 'string' ? { label: c, value: c } : c
+
+      return { ...option, icon: currencyIcons[option.value] || 'lucide-banknote' }
+    })
 
     for (const key of Object.keys(form) as Field[]) form[key] = profile[key] || ''
     currencyTouched.value = Boolean(form.currency)
@@ -128,12 +137,10 @@ const save = async () => {
 </script>
 
 <template>
-  <section class="rounded-6 border border-outline-gray-2 p-5">
+  <section>
     <p v-if="step" class="text-p-sm text-ink-gray-5">{{ step }}</p>
 
-    <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">
-      {{ __("Billing details") }}
-    </h3>
+    <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">{{ __("Billing details") }}</h3>
 
     <p class="mt-1 text-p-sm text-ink-gray-5">
       {{ __("Shown on your invoices. Your currency sets how you pay.") }}
@@ -154,7 +161,8 @@ const save = async () => {
           <TextInput
             v-model="form[field.key]"
             :type="field.type || 'text'"
-            :label="label(field)"
+            :label="field.label"
+            :required="required.includes(field.key)"
             :placeholder="field.placeholder"
             :autocomplete="field.autocomplete"
             :disabled="working"
@@ -167,6 +175,8 @@ const save = async () => {
           <Select
             v-model="form.currency"
             :label="__('Currency')"
+            required
+            :placeholder="__('Choose a currency')"
             :options="currencies"
             :disabled="working"
             @update:model-value="currencyTouched = true"

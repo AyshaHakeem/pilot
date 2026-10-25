@@ -110,6 +110,13 @@ export interface MarketplaceApp {
   installed_version: string
   latest_version: string
   has_update: boolean
+  repo?: string
+  documentation?: string
+  website?: string
+  dependencies?: string[]
+  nightly?: boolean
+  frappe_version?: string
+  categories?: string[]
 }
 
 export interface Marketplace {
