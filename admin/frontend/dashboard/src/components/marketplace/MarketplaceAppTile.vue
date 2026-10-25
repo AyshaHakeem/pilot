@@ -113,11 +113,11 @@ const statusTheme = computed(() => {
           />
         </div>
 
-        <p class="mt-3 text-ink-gray-6 text-sm line-clamp-2">
+        <p class="mt-3 text-ink-gray-6 text-sm truncate">
           {{ app.description || 'No description yet.' }}
         </p>
 
-        <div v-if="hasMeta" class="flex items-center gap-3 mt-auto pt-3 text-ink-gray-5 text-xs">
+        <div v-if="hasMeta" class="flex items-center gap-3 mt-auto pt-2 h-7 text-ink-gray-5 text-xs">
           <span v-if="app.stars" class="flex items-center gap-1 shrink-0">
             <span class="size-3 lucide-star" />
             {{ compactNumber.format(app.stars) }}
@@ -154,7 +154,7 @@ const statusTheme = computed(() => {
         <dl class="gap-x-4 gap-y-3 grid grid-cols-2 pt-3 border-t border-outline-gray-2">
           <div v-if="categories" class="flex items-center gap-2.5">
             <span
-              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+              class="grid place-items-center bg-surface-gray-3 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
               <span class="lucide-shapes size-4" aria-hidden="true" />
             </span>
@@ -167,7 +167,7 @@ const statusTheme = computed(() => {
 
           <div v-if="app.stars" class="flex items-center gap-2.5">
             <span
-              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+              class="grid place-items-center bg-surface-gray-3 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
               <span class="lucide-star size-4" aria-hidden="true" />
             </span>
@@ -182,7 +182,7 @@ const statusTheme = computed(() => {
 
           <div v-if="app.label" class="flex items-center gap-2.5">
             <span
-              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+              class="grid place-items-center bg-surface-gray-3 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
               <span class="lucide-git-branch size-4" aria-hidden="true" />
             </span>
@@ -195,7 +195,7 @@ const statusTheme = computed(() => {
 
           <div v-if="app.frappe_version" class="flex items-center gap-2.5">
             <span
-              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+              class="grid place-items-center bg-surface-gray-3 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
               <span class="lucide-layers size-4" aria-hidden="true" />
             </span>
@@ -208,7 +208,7 @@ const statusTheme = computed(() => {
 
           <div v-if="app.requires?.length" class="flex items-center gap-2.5 col-span-2">
             <span
-              class="grid place-items-center bg-surface-gray-2 rounded-4 size-8 shrink-0 text-ink-gray-5"
+              class="grid place-items-center bg-surface-gray-3 rounded-4 size-8 shrink-0 text-ink-gray-5"
             >
               <span class="lucide-package size-4" aria-hidden="true" />
             </span>
