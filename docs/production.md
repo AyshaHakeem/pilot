@@ -49,6 +49,7 @@ A new bench deploys one bench process plus admin and the two redis servers, beca
 `[lite_mode] enabled` is the default. Turn lite mode off and the set becomes web,
 socketio, admin, workers, and redis - see [Lite Mode](configuration.md#lite-mode).
 Supervisor also runs a `schedule` process; systemd's worker pool runs the scheduler itself.
+systemd runs one Frappe `worker-pool` per `[[workers]]` group, so each set of queues keeps its own worker count. A bench with one group has one `worker_pool` unit; a bench with more has `worker_pool_<queues>` units, such as `worker_pool_default` and `worker_pool_long`. The pools share one scheduler, because Frappe's scheduler takes a bench-wide lock. A pool unit sets `KillMode=mixed`, so a stop signals only the pool. The pool then stops each worker once, and a worker finishes its running job before it exits. systemd's default sends SIGTERM to every process, and RQ's job process exits at once on SIGTERM, which lost the running job. systemd still kills what remains after the 90-second stop timeout.
 
 With systemd, the Node socketio process listens on the Unix socket `config/socketio.sock` in the bench, and nginx proxies `/socket.io` to it, so realtime does not answer on a public port. Supervisor, the Python backend, and a Frappe that does not read `FRAPPE_SOCKETIO_UDS` (before v16) keep `socketio_port`. With systemd, nginx tries the socket first and then `socketio_port`, so realtime answers when the realtime process and nginx were configured for different Frappe versions.
 

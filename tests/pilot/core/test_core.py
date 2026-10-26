@@ -832,6 +832,11 @@ def test_systemd_runs_one_worker_pool_per_group(tmp_path: Path) -> None:
     assert pools.keys() == {"worker_pool_default", "worker_pool_short", "worker_pool_long"}
     assert pools["worker_pool_default"].endswith("--num-workers 4 --queue default")
     assert pools["worker_pool_long"].endswith("--num-workers 2 --queue long")
+    assert all(
+        pd.stop_main_process_only
+        for pd in ProcessManager(bench)._prod_process_definitions()
+        if pd.name.startswith("worker_pool")
+    )
 
 
 def test_systemd_keeps_the_worker_pool_name_for_one_group(tmp_path: Path) -> None:

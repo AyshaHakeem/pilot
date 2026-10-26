@@ -33,6 +33,7 @@ class ProcessDefinition:
     socket_file: Path | None = None  # removed before each start; a stale one blocks listen()
     listen_address: str | None = None  # systemd holds it, so a restart queues requests instead of refusing them
     restart_on_failure: bool = True
+    stop_main_process_only: bool = False  # it stops its own children; a signal to them too kills their jobs
     pre_run: list[str] = field(default_factory=list)
     post_run: list[str] = field(default_factory=list)
 
@@ -290,6 +291,7 @@ class ProcessDefinitionBuilder:
             log_file=self.bench.logs_path / f"{name}.log",
             env=self.python_env(),
             working_dir=self.bench.sites_path,
+            stop_main_process_only=True,
         )
 
     def worker_definitions(self, queue: str, count: int) -> list[ProcessDefinition]:
