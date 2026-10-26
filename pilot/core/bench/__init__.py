@@ -458,6 +458,9 @@ class Bench:
         if not target:
             return None
         skip = normalize_host(ignoring) if ignoring else ""
+        pending_owner = self.site_aliases.pending_owner(target)
+        if pending_owner and normalize_host(pending_owner) != skip:
+            return pending_owner
         for site in self.sites():
             if skip and normalize_host(site.config.name) == skip:
                 continue

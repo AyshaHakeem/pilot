@@ -10,6 +10,7 @@ class MigrationBackupTask(Task):
     """Chain link: back up one site's tables before a migration, then queue the next step."""
 
     command: ClassVar[str] = "migration-backup"
+    timeout_seconds: ClassVar[int] = 86400
 
     operation_id: str
     site: str
@@ -32,4 +33,3 @@ class MigrationBackupTask(Task):
 
 if __name__ == "__main__":
     MigrationBackupTask.main()
-
