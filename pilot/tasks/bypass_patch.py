@@ -25,7 +25,7 @@ class BypassPatchTask(Task):
         except BenchError as error:
             self.report(str(error))
             sys.exit(1)
-        operation.enqueue_next(handoff_from=operation.task_ids.get("bypass_patch"))
+        operation.enqueue_next(handoff_from=self.running_task_id or None)
 
     @on_failure
     @on_cancel

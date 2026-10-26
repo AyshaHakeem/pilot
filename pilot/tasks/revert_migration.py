@@ -21,7 +21,7 @@ class RevertMigrationTask(Task):
         except Exception:
             self.step_failed()
             sys.exit(1)
-        operation.enqueue_next(handoff_from=operation.task_ids.get("restore"))
+        operation.enqueue_next(handoff_from=self.running_task_id or None)
 
     @on_failure
     @on_cancel
