@@ -262,16 +262,17 @@ class ProcessDefinitionBuilder:
         )
 
     def worker_pool_definitions(self) -> list[ProcessDefinition]:
-        """One pool per worker group, so each set of queues keeps its own worker count.
-        A single group keeps the plain `worker_pool` name."""
-        groups = self.bench.config.workers.groups
+        """One pool per set of queues, so each keeps its own worker count. Groups with the
+        same queues share a pool. A single pool keeps the plain `worker_pool` name."""
+        counts: dict[str, int] = {}
+        for group in self.bench.config.workers.groups:
+            queues = ",".join(group.queues)
+            counts[queues] = counts.get(queues, 0) + group.count
         return [
             self.worker_pool_definition(
-                "worker_pool" if len(groups) == 1 else f"worker_pool_{queue_slug(','.join(group.queues))}",
-                ",".join(group.queues),
-                group.count,
+                "worker_pool" if len(counts) == 1 else f"worker_pool_{queue_slug(queues)}", queues, count
             )
-            for group in groups
+            for queues, count in counts.items()
         ]
 
     def worker_pool_definition(self, name: str, queues: str, num_workers: int) -> ProcessDefinition:

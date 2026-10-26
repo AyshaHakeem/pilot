@@ -850,6 +850,25 @@ def test_systemd_runs_one_worker_pool_per_group(tmp_path: Path) -> None:
     )
 
 
+def test_systemd_groups_with_the_same_queues_share_a_pool(tmp_path: Path) -> None:
+    from pilot.config.worker import WorkerGroup
+
+    bench = make_bench(tmp_path)
+    bench.config.production.process_manager = "systemd"
+    bench.config.workers.groups = [
+        WorkerGroup(queues=["default"], count=2),
+        WorkerGroup(queues=["long"], count=1),
+        WorkerGroup(queues=["default"], count=3),
+    ]
+    pools = {
+        pd.name: shlex.join(pd.argv)
+        for pd in ProcessManager(bench)._prod_process_definitions()
+        if pd.name.startswith("worker_pool")
+    }
+    assert pools.keys() == {"worker_pool_default", "worker_pool_long"}
+    assert pools["worker_pool_default"].endswith("--num-workers 5 --queue default")
+
+
 def test_systemd_keeps_the_worker_pool_name_for_one_group(tmp_path: Path) -> None:
     from pilot.config.worker import WorkerGroup
 
