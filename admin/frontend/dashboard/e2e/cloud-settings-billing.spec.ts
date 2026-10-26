@@ -80,11 +80,11 @@ test('an ended trial names the deletion date', async ({ page }) => {
   await expect(page.getByText(/This site is stopped\. To keep the site and its data, add a payment method before .+\./)).toBeVisible()
 })
 
-test('during a trial, Change plan says plans open after a payment method', async ({ page }) => {
+test('during a trial, Change plan asks for a payment method before the plan list', async ({ page }) => {
   const calls = await openBilling(page, { get_billing: () => ({ message: billing() }), get_account_url: accountLinks })
 
   await page.getByRole('button', { name: 'Change plan' }).click()
-  await expect(page.getByText('Other plans open once you add a payment method.')).toBeVisible()
+  await expect(page.getByText('Your site is on a free trial. Add a payment method to keep it, then choose a bigger plan.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add payment method' })).toHaveCount(1)
   expect(calls.some((call) => call.method === 'get_plan_options')).toBe(false)
 })
