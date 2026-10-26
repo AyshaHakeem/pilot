@@ -89,7 +89,7 @@ class NeedsAttention(MigrationState):
 class Retrying(MigrationState):
     name = "retrying"
     label = "Retrying"
-    allowed = frozenset({"backing_up", "updating", "migrating"})
+    allowed = frozenset({"backing_up", "updating", "migrating", "needs_attention"})
 
 
 class RevertingApps(MigrationState):

@@ -4,7 +4,7 @@ from typing import Annotated, ClassVar
 from pilot.core.app import App
 from pilot.core.site import Site
 from pilot.integrations.marketplace import Marketplace
-from pilot.tasks import Arg, Task, on_cancel, on_failure, step
+from pilot.tasks import Arg, Task, on_cancel, on_failure, on_success, step
 
 
 @dataclass(kw_only=True)
@@ -31,9 +31,12 @@ class NewSiteTask(Task):
 
     @on_failure
     @on_cancel
-    def remove_failed_site(self) -> dict | None:
-        """Cleanup drops the site without a backup, so it must never target a site that predates this task."""
-        return None if self.bench.site(self.name).exists else {"site": self.name}
+    def remove_failed_site(self) -> dict:
+        return {"site": self.name}
+
+    @on_success
+    def release_site_creation(self) -> dict:
+        return {"site": self.name}
 
     @step("create", lambda self: f"Create site {self.name}")
     def create(self) -> None:

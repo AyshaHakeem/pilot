@@ -106,33 +106,22 @@ class TaskProcess:
                 return task_id
             if status == TaskStatus.RUNNING:
                 self.interrupt(task_id)
-            elif status != TaskStatus.QUEUED:
-                self._run_stored_callback_for_status(task_id)
-                self._store.remove_private_files(
-                    task_id,
-                    "process.json",
-                    "secrets.json",
-                    "callbacks.json",
-                )
-            else:
+            elif status == TaskStatus.QUEUED or not self._recover_finished_task(task_id):
                 return task_id
-        self._recover_terminal_callbacks()
-        return None
+        return self._recover_terminal_callbacks()
 
     def _reconciled_ownership(self, task_id: str) -> ProcessOwnership:
         ownership = self.ownership(task_id)
         if ownership == ProcessOwnership.UNKNOWN:
             return self._resolve_unknown(task_id)
-        if ownership == ProcessOwnership.OWNED and self._is_wrapper_dead(task_id):
-            self.interrupt(task_id)
+        if ownership == ProcessOwnership.OWNED:
+            try:
+                record = self._running_record(task_id)
+            except TaskNotRunningError:
+                return ProcessOwnership.UNKNOWN
+            if record.is_callback or self._inspector.is_leader_dead(record.identity):
+                self.interrupt(task_id)
         return ownership
-
-    def _is_wrapper_dead(self, task_id: str) -> bool:
-        try:
-            record = self._running_record(task_id)
-        except TaskNotRunningError:
-            return False
-        return self._inspector.is_leader_dead(record.identity)
 
     def _resolve_unknown(self, task_id: str) -> ProcessOwnership:
         """Look for the wrapper when the stored record is unreadable."""
@@ -339,10 +328,19 @@ class TaskProcess:
             return
         self._run_stored_callback(task_id, trigger)
 
-    def _recover_terminal_callbacks(self) -> None:
+    def _recover_terminal_callbacks(self) -> str | None:
         for task_id in self._store.terminal_task_ids_with_callbacks():
-            self._run_stored_callback_for_status(task_id)
-            self._store.remove_private_files(task_id, "secrets.json", "callbacks.json")
+            if not self._recover_finished_task(task_id):
+                return task_id
+        return None
+
+    def _recover_finished_task(self, task_id: str) -> bool:
+        self._run_stored_callback_for_status(task_id)
+        record = self.read(task_id)
+        if record is not None and record.is_callback:
+            return False
+        self._store.remove_private_files(task_id, "process.json", "secrets.json", "callbacks.json")
+        return True
 
     def _signal(
         self, record: TaskProcessRecord, signum: signal.Signals, *, exclude_pids: set[int] | None = None

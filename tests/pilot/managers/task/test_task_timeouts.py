@@ -14,7 +14,7 @@ import pytest
 from pilot.internal.atomic_file import exclusive_file_lock
 from pilot.internal.tasks.models import TaskStatus
 from pilot.internal.tasks.process import TaskProcess
-from pilot.internal.tasks.process_identity import ProcessInspector
+from pilot.internal.tasks.process_identity import ProcessInspector, TaskProcessRecord
 from pilot.internal.tasks.store import TaskStore
 from pilot.internal.tasks.worker import TaskWorker
 from pilot.managers.task.reader import TaskReader
@@ -211,3 +211,51 @@ def test_a_dead_wrapper_does_not_leave_its_callback_running(tmp_path):
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
         process.wait(timeout=5)
+
+
+def test_replayed_cleanup_is_stopped_before_replay_after_worker_crash(tmp_path):
+    site = tmp_path / "sites" / "test.local"
+    site.mkdir(parents=True)
+    config = site / "site_config.json"
+    config.write_text('{"ssl": true}')
+    task_id = "20261026-000001-111111"
+    store = TaskStore(tmp_path)
+    store.create_queued(
+        {"task_id": task_id, "command": "build", "args": {}, "bench_root": str(tmp_path)},
+        {
+            "callbacks.json": json.dumps(
+                {"on_success": {"operation": "disable-site-ssl", "args": {"site": "test.local"}}}
+            )
+        },
+    )
+    store.transition(task_id, TaskStatus.QUEUED, TaskStatus.RUNNING)
+    store.transition(task_id, TaskStatus.RUNNING, TaskStatus.SUCCESS)
+    script = f"from pathlib import Path; from pilot.internal.tasks.process import TaskProcess; TaskProcess(Path({str(tmp_path)!r})).reconcile()"
+    parent = subprocess.Popen([sys.executable, "-c", script])
+    record = None
+    inspector = ProcessInspector()
+    try:
+        with exclusive_file_lock(config):
+            wait_until(lambda: store.read_process(task_id) is not None)
+            record = TaskProcessRecord.from_dict(store.read_process(task_id))
+            assert record.is_callback
+            parent.kill()
+            parent.wait(timeout=5)
+            assert inspector.owned_pids(record.identity)
+            manager = TaskProcess(tmp_path)
+            assert manager.reconcile() == task_id
+            wait_until(lambda: not inspector.owned_pids(record.identity))
+            manager.interrupt(task_id)
+            assert json.loads(config.read_text()) == {"ssl": True}
+        assert manager.reconcile() is None
+        assert store.read_status(task_id) == TaskStatus.SUCCESS
+        assert json.loads(config.read_text()) == {"ssl": False}
+        assert not (store.task_dir(task_id) / "callbacks.json").exists()
+    finally:
+        if parent.poll() is None:
+            parent.kill()
+        parent.wait(timeout=5)
+        if record:
+            for pid in inspector.owned_pids(record.identity):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, signal.SIGKILL)

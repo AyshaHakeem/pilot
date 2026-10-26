@@ -67,13 +67,17 @@ class TaskProcessRecord:
     task_id: str
     argv: list[str]
     identity: ProcessIdentity
+    is_callback: bool = False
 
     def to_dict(self) -> dict:
-        return {
+        record = {
             "task_id": self.task_id,
             "argv": self.argv,
             "identity": self.identity.to_dict(),
         }
+        if self.is_callback:
+            record["is_callback"] = True
+        return record
 
     @classmethod
     def from_dict(cls, data: dict) -> "TaskProcessRecord":
@@ -81,6 +85,7 @@ class TaskProcessRecord:
             task_id=str(data["task_id"]),
             argv=[str(value) for value in data["argv"]],
             identity=ProcessIdentity.from_dict(data["identity"]),
+            is_callback=bool(data.get("is_callback", False)),
         )
 
 

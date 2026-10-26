@@ -263,6 +263,9 @@ class MigrationOperation:
         once the chain moved on."""
         if not self.chain or self.chain[-1]["task_id"] != task_id:
             return
+        if self.state == "retrying":
+            self._enter_needs_attention(self.return_state or "migrating", self.failed_site)
+            return
         if self.state in _REVERT_PHASES:
             self._fail_revert(
                 BenchError("The recovery task stopped. Restore again to resume from its checkpoint.")

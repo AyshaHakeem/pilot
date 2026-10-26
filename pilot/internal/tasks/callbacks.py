@@ -41,15 +41,31 @@ def _safe_site_path(bench_root: Path, site_name: str) -> Path:
 
 
 def _remove_failed_site(meta: dict, args: dict) -> None:
+    from pilot.core.site.creation import SiteCreationOwner
+
     site_name = args["site"]
     bench_root = Path(meta["bench_root"])
     site_path = _safe_site_path(bench_root, site_name)
-    if not _drop_failed_site(bench_root, site_name, site_path):
-        raise RuntimeError(
-            f"Could not clean up partial site {site_name!r}; its files were preserved for recovery."
-        )
-    shutil.rmtree(site_path, ignore_errors=True)
-    _remove_from_hosts(site_name)
+    owner = SiteCreationOwner(bench_root, site_name)
+    if not owner.is_owned_by(meta.get("task_id", "")):
+        return
+    with owner.locked():
+        if not owner.is_owned_by(meta.get("task_id", "")):
+            return
+        if not _drop_failed_site(bench_root, site_name, site_path):
+            raise RuntimeError(
+                f"Could not clean up partial site {site_name!r}; its files were preserved for recovery."
+            )
+        shutil.rmtree(site_path, ignore_errors=True)
+        _remove_from_hosts(site_name)
+        owner.release(meta["task_id"])
+
+
+def _release_site_creation(meta: dict, args: dict) -> None:
+    from pilot.core.site.creation import SiteCreationOwner
+
+    with SiteCreationOwner(Path(meta["bench_root"]), args["site"]).locked() as owner:
+        owner.release(meta["task_id"])
 
 
 def _drop_failed_site(bench_root: Path, site_name: str, site_path: Path) -> bool:
@@ -125,6 +141,7 @@ _OPERATIONS: dict[str, CallbackOperation] = {
     "disable-site-ssl": _disable_site_ssl,
     "reload-workers": _reload_workers,
     "fail-migration-step": _fail_migration_step,
+    "release-site-creation": _release_site_creation,
 }
 
 
@@ -149,13 +166,14 @@ def run_callback(spec: dict, meta: dict) -> None:
     _OPERATIONS[callback["operation"]](meta, callback["args"])
 
 
-def run_bounded_callback(spec: dict, meta: dict) -> None:
+def run_bounded_callback(spec: dict, meta: dict, *, recovery: bool = False) -> None:
     from pilot.internal.tasks.process import TaskProcess
     from pilot.internal.tasks.process_identity import ProcessInspector, TaskProcessRecord
+    from pilot.internal.tasks.store import TaskStore
 
     validate_callback(spec)
     argv = [sys.executable, "-m", "pilot.internal.tasks.callbacks"]
-    launch_id = os.environ.get("BENCH_TASK_LAUNCH_ID") or secrets.token_hex(16)
+    launch_id = (None if recovery else os.environ.get("BENCH_TASK_LAUNCH_ID")) or secrets.token_hex(16)
     process = subprocess.Popen(
         argv,
         stdin=subprocess.PIPE,
@@ -165,8 +183,13 @@ def run_bounded_callback(spec: dict, meta: dict) -> None:
         env={**os.environ, "BENCH_TASK_LAUNCH_ID": launch_id},
     )
     inspector = ProcessInspector()
+    store = TaskStore(Path(meta["bench_root"]))
+    identity = None
     try:
         identity = inspector.capture(process.pid, argv, launch_id)
+        if recovery:
+            record = TaskProcessRecord(meta["task_id"], argv, identity, is_callback=True)
+            store.write_process(meta["task_id"], process.pid, record.to_dict())
         _, stderr = process.communicate(
             json.dumps({"callback": spec, "meta": meta}).encode(), timeout=CALLBACK_TIMEOUT_SECONDS
         )
@@ -181,6 +204,8 @@ def run_bounded_callback(spec: dict, meta: dict) -> None:
         for pipe in (process.stdin, process.stdout, process.stderr):
             if pipe:
                 pipe.close()
+        if recovery and identity is not None:
+            _clear_stopped_callback(store, meta["task_id"], inspector, identity, argv)
     if process.returncode:
         raise RuntimeError(stderr.decode(errors="replace").strip() or "Callback failed.")
 
@@ -197,6 +222,15 @@ def _terminate_callback(process, record, controller) -> None:
     process.wait(timeout=3)
 
 
+def _clear_stopped_callback(store, task_id, inspector, identity, argv) -> None:
+    from pilot.internal.tasks.process_identity import ProcessOwnership
+
+    if inspector.inspect(identity, argv) not in {ProcessOwnership.DEAD, ProcessOwnership.STALE}:
+        return
+    if not inspector.owned_pids(identity):
+        store.remove_private_files(task_id, "process.json")
+
+
 def run_stored_callback(task_dir: Path, trigger: str) -> None:
     callbacks_path = task_dir / "callbacks.json"
     if not callbacks_path.exists():
@@ -204,7 +238,7 @@ def run_stored_callback(task_dir: Path, trigger: str) -> None:
     callbacks = json.loads(callbacks_path.read_text())
     callback = callbacks.get(trigger)
     if callback:
-        run_bounded_callback(callback, json.loads((task_dir / "meta.json").read_text()))
+        run_bounded_callback(callback, json.loads((task_dir / "meta.json").read_text()), recovery=True)
 
 
 if __name__ == "__main__":

@@ -1030,3 +1030,27 @@ def test_retrying_a_failed_final_restart_does_not_migrate_sites_again(tmp_path, 
     bench.reload_workers.side_effect = None
     operation.complete()
     assert operation.state == "completed"
+
+
+def test_an_interruption_in_the_retrying_state_can_be_retried_or_reverted(tmp_path):
+    operation, _ = _backing_up_operation(tmp_path)
+    operation.state = get_state("needs_attention")
+    operation.return_state = "migrating"
+    operation.failed_site = "site1.localhost"
+    operation.site("site1.localhost").migration_status = "failed"
+    operation.site("site1.localhost").backup_status = "backed_up"
+    transition = operation._transition
+
+    def interrupt_after_retrying(target):
+        transition(target)
+        if target == "retrying":
+            raise SystemExit("injected crash")
+
+    with patch.object(operation, "_transition", interrupt_after_retrying), pytest.raises(SystemExit):
+        operation.retry()
+    assert operation.state == "retrying"
+    operation.fail_stopped_step("task-101", "needs_attention", "site1.localhost")
+    assert operation.state == "needs_attention"
+    assert operation.can_revert
+    operation.retry()
+    assert operation.state == "migrating"
