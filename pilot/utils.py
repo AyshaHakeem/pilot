@@ -341,11 +341,15 @@ def _site_config_hosts(cfg: Path) -> Iterator[str]:
 
 def host_owner(bench_path: Path, host: str) -> str | None:
     """Return the sibling bench that already claims host, if any."""
+    from pilot.core.bench import Bench
+
     target = normalize_host(host)
     if not target:
         return None
     for sibling, config in iter_sibling_benches(bench_path):
-        if target in _bench_hosts(sibling, config):
+        if target in _bench_hosts(sibling, config) or Bench(config, sibling).site_aliases.pending_owner(
+            target
+        ):
             return config.name
     return None
 

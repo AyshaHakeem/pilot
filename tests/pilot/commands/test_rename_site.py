@@ -134,7 +134,6 @@ def test_rename_followup_advises_on_failure(
     assert "pilot setup letsencrypt -b b1" in out
 
 
-
 def _age_alias(bench: Bench, name: str) -> None:
     import os
     import time
@@ -213,7 +212,9 @@ def test_workload_start_retires_expired_rename_aliases_only(tmp_path: Path) -> N
 
     bench = _bench(tmp_path, "b1")
     _make_site(bench, "new.localhost")
-    RenameSiteCommand(bench, old_name="new.localhost", new_name="newer.localhost").run()
+    RenameSiteCommand(
+        bench, old_name="new.localhost", new_name="newer.localhost", release_old_hostname=True
+    ).run()
     (bench.sites_path / "dev.example.com").symlink_to("newer.localhost")
 
     bench.site_aliases.release_expired()
