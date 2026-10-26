@@ -315,19 +315,8 @@ def _restart_systemd(manager) -> bool:
     )
     # The web port may have changed, and the socket keeps its old one until it restarts.
     manager.reopen_sockets()
-    non_admin_units = [
-        manager._unit_name(process.name)
-        for process in manager._prod_process_definitions()
-        if process.name != "admin"
-    ]
-    if not non_admin_units:
+    definitions = [process for process in manager._prod_process_definitions() if process.name != "admin"]
+    if not definitions:
         return False
-    subprocess.run(
-        [*manager._systemctl(), "restart", *non_admin_units],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=env,
-        check=True,
-    )
+    manager.restart_processes(definitions)
     return True

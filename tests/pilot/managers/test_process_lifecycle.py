@@ -255,6 +255,7 @@ def test_settings_restart_reopens_the_web_socket_on_its_new_port(bench) -> None:
         patch.object(manager, "is_running", return_value=True),
         patch.object(manager, "link_units", side_effect=lambda: calls.append("link")),
         patch.object(manager, "reopen_sockets", side_effect=lambda: calls.append("reopen")),
+        patch.object(manager, "restart_processes", side_effect=lambda definitions: calls.append("restart")),
         patch(
             "pilot.core.bench.settings.subprocess.run",
             side_effect=lambda argv, **kwargs: calls.append(argv[2]),
