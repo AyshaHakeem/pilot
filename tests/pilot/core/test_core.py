@@ -59,6 +59,17 @@ def test_bench_loads_from_path(tmp_path: Path) -> None:
     assert bench.config.name == "alpha"
 
 
+def test_bench_makes_a_relative_path_absolute(tmp_path: Path, monkeypatch) -> None:
+    """A relative path would reach systemd units, which reject it."""
+    bench_dir = tmp_path / "benches" / "alpha"
+    _write_bench_toml(bench_dir, "alpha")
+    monkeypatch.chdir(tmp_path)
+
+    bench = Bench("benches/alpha")
+
+    assert bench.path == bench_dir
+
+
 def test_bench_loads_name_from_known_benches_dir(tmp_path: Path, monkeypatch) -> None:
     bench_dir = tmp_path / "benches" / "alpha"
     _write_bench_toml(bench_dir, "alpha")

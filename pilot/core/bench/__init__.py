@@ -49,7 +49,8 @@ class Bench:
     def _resolve_path(path_or_name: str | Path) -> Path:
         path = Path(path_or_name).expanduser()
         if isinstance(path_or_name, Path) or path.is_absolute() or path.parent != Path("."):
-            return path
+            # Unit files and nginx config need an absolute path.
+            return path.absolute()
 
         from pilot.utils import benches_dir
 
