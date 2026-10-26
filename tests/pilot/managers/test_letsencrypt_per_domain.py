@@ -225,7 +225,7 @@ def _renewal_benches(*eligible: bool) -> list:
 
 
 @pytest.mark.parametrize("renew_fails", [False, True])
-def test_the_daily_renewal_renews_once_and_checks_every_bench(tmp_path: Path, renew_fails: bool) -> None:
+def test_the_daily_renewal_refreshes_every_eligible_bench(tmp_path: Path, renew_fails: bool) -> None:
     from pilot.exceptions import CommandError
     from pilot.managers import letsencrypt
 
@@ -240,6 +240,95 @@ def test_the_daily_renewal_renews_once_and_checks_every_bench(tmp_path: Path, re
         letsencrypt.main()
 
     benches = [call.args[0] for call in manager.call_args_list]
-    assert benches == [Path("/benches/bench0"), Path("/benches/bench0"), Path("/benches/bench2")]
-    assert manager.return_value.renew.call_count == 1
+    assert benches == [Path("/benches/bench0"), Path("/benches/bench2")]
+    assert manager.return_value.renew.call_count == 2
     assert manager.return_value.alert_expiring_certificates.call_count == 2
+
+
+@pytest.mark.parametrize("route,expected", [(None, []), ("http", []), ("https", ["site.zone.example"])])
+def test_provider_wildcards_skip_local_certificates_unless_origin_tls_is_explicit(
+    route: str | None, expected: list[str]
+) -> None:
+    site = SiteConfig(
+        name="site.zone.example",
+        apps=[],
+        ssl=True,
+        route=RoutePolicy("https", route, "x_forwarded_for") if route else None,
+    )
+    with patch(
+        "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+        return_value=["*.zone.example"],
+    ):
+        assert certificate_domains(site) == expected
+
+
+def test_proxy_only_bench_does_not_need_an_email_or_install_certbot(tmp_path: Path) -> None:
+    from pilot.managers.letsencrypt import letsencrypt_email_required
+
+    bench = _bench(tmp_path)
+    bench.config.admin.domain = "admin.zone.example"
+    bench.config.admin.tls = True
+    bench.config.letsencrypt.email = ""
+    _site(bench, "site.zone.example", ssl=True)
+    with (
+        patch(
+            "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+            return_value=["*.zone.example"],
+        ),
+        patch.object(LetsEncryptManager, "install") as install,
+        patch("pilot.managers.letsencrypt.run_command") as certbot,
+    ):
+        assert not letsencrypt_email_required(bench)
+        bench.setup_letsencrypt()
+        LetsEncryptManager(bench).renew()
+    install.assert_not_called()
+    certbot.assert_not_called()
+
+
+@pytest.mark.parametrize("origin", ["http", "https"])
+def test_explicit_admin_origin_tls_takes_precedence_over_provider_wildcards(
+    tmp_path: Path, origin: str
+) -> None:
+    from pilot.managers.letsencrypt import is_admin_certificate_required
+
+    bench = _bench(tmp_path)
+    bench.config.admin.domain = "admin.zone.example"
+    bench.config.admin.tls = True
+    bench.config.admin.route = RoutePolicy("https", origin, "x_forwarded_for")
+    with patch(
+        "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+        return_value=["*.zone.example"],
+    ):
+        assert is_admin_certificate_required(bench) is (origin == "https")
+
+
+def test_renewal_and_expiry_checks_skip_legacy_proxy_domains_but_keep_custom_domains(tmp_path: Path) -> None:
+    from pilot.managers.nginx import NginxManager
+
+    bench = _bench(tmp_path)
+    bench.config.admin.domain = "admin.zone.example"
+    bench.config.admin.tls = True
+    bench.config.letsencrypt.email = "customer@example.test"
+    _site(bench, "site.zone.example", ssl=True)
+    _site(bench, "customer.example.com", ssl=True, domains=["alias.zone.example"])
+    with (
+        patch(
+            "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+            return_value=["*.zone.example"],
+        ),
+        patch.object(NginxManager, "has_cert", return_value=True),
+        patch.object(LetsEncryptManager, "_is_near_expiry", return_value=True),
+        patch.object(NginxManager, "apply_config") as apply_config,
+        patch("pilot.managers.letsencrypt.certificate_days_left", return_value=9),
+        patch("pilot.managers.letsencrypt.run_command") as certbot,
+    ):
+        manager = LetsEncryptManager(bench)
+        manager.renew()
+        assert manager.expiring_certificates() == [("customer.example.com", 9)]
+    command = certbot.call_args.args[0]
+    assert certbot.call_count == 1
+    assert command[command.index("-d") + 1] == "customer.example.com"
+    assert not any("zone.example" in arg for arg in command)
+    assert "--renew-with-new-domains" in command
+    assert "renew" not in command
+    apply_config.assert_called_once()

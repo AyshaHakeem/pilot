@@ -269,7 +269,9 @@ class SiteRename:
 
     def _serves_tls(self) -> bool:
         """Whether any site domain terminates TLS on this host."""
-        return bool(self._site_config_from(self._read_site_config()).tls_domains)
+        from pilot.managers.letsencrypt import certificate_domains
+
+        return bool(certificate_domains(self._site_config_from(self._read_site_config())))
 
     def _refresh_pilot_auth_token(self) -> None:
         from admin.backend.internal.session import Session
