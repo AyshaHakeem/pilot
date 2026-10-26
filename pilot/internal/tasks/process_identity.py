@@ -366,6 +366,15 @@ class ProcessInspector:
         except (FileNotFoundError, ProcessLookupError, PermissionError, OSError, ValueError):
             return False
 
+    def is_leader_dead(self, identity: ProcessIdentity) -> bool:
+        try:
+            snapshot = self._read_process(identity.pid)
+        except (FileNotFoundError, ProcessLookupError):
+            return True
+        except (PermissionError, OSError, ValueError):
+            return False
+        return snapshot.state == "Z" or snapshot.start_ticks != identity.start_ticks
+
     def _inspect_group(self, identity: ProcessIdentity) -> ProcessOwnership:
         try:
             pids = self._iter_pids()

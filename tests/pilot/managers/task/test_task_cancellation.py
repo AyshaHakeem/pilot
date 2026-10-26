@@ -133,6 +133,7 @@ def test_cancel_queued_task_runs_cancel_callback(
         resource_key="site:new.localhost",
     )
     monkeypatch.setitem(callback_module._OPERATIONS, "test-cancel", mark_cancelled)
+    monkeypatch.setattr(callback_module, "run_bounded_callback", callback_module.run_callback)
 
     TaskRunner(tmp_path).kill(TASK_ID)
 

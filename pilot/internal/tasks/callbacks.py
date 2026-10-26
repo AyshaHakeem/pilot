@@ -1,11 +1,19 @@
 import json
 import logging
+import os
+import secrets
 import shutil
+import signal
+import subprocess
+import sys
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 from pilot.internal.tasks.models import TaskStatus
 from pilot.managers.platform import remove_hosts_entry
+
+CALLBACK_TIMEOUT_SECONDS = 1200
 
 CallbackOperation = Callable[[dict, dict], None]
 
@@ -96,14 +104,19 @@ def _remove_restore_upload(bench_root: Path, upload_dir: Path) -> None:
 def _reload_workers(meta: dict, args: dict) -> None:
     from pilot.core.bench import Bench
 
-    Bench(Path(meta["bench_root"])).reload_workers(web_only=args.get("web_only", False))
+    Bench(Path(meta["bench_root"])).reload_workers(web_only=args.get("web_only", False), raises=True)
 
 
 def _fail_migration_step(meta: dict, args: dict) -> None:
     from pilot.core.bench import Bench
 
     operation = Bench(Path(meta["bench_root"])).migrations.get(args["operation_id"])
-    operation.fail_stopped_step(meta["task_id"], args["phase"], args.get("site"))
+    task_id = meta["task_id"]
+    if previous_task_id := args.get("previous_task_id"):
+        if not operation.chain or operation.chain[-1]["task_id"] != previous_task_id:
+            return
+        task_id = previous_task_id
+    operation.fail_stopped_step(task_id, args["phase"], args.get("site"))
 
 
 _OPERATIONS: dict[str, CallbackOperation] = {
@@ -136,6 +149,54 @@ def run_callback(spec: dict, meta: dict) -> None:
     _OPERATIONS[callback["operation"]](meta, callback["args"])
 
 
+def run_bounded_callback(spec: dict, meta: dict) -> None:
+    from pilot.internal.tasks.process import TaskProcess
+    from pilot.internal.tasks.process_identity import ProcessInspector, TaskProcessRecord
+
+    validate_callback(spec)
+    argv = [sys.executable, "-m", "pilot.internal.tasks.callbacks"]
+    launch_id = os.environ.get("BENCH_TASK_LAUNCH_ID") or secrets.token_hex(16)
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+        env={**os.environ, "BENCH_TASK_LAUNCH_ID": launch_id},
+    )
+    inspector = ProcessInspector()
+    try:
+        identity = inspector.capture(process.pid, argv, launch_id)
+        _, stderr = process.communicate(
+            json.dumps({"callback": spec, "meta": meta}).encode(), timeout=CALLBACK_TIMEOUT_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        record = TaskProcessRecord(str(meta.get("task_id", "callback")), argv, identity)
+        _terminate_callback(process, record, TaskProcess(Path(meta["bench_root"])))
+        raise RuntimeError(f"Callback timed out after {CALLBACK_TIMEOUT_SECONDS}s.") from None
+    finally:
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=3)
+        for pipe in (process.stdin, process.stdout, process.stderr):
+            if pipe:
+                pipe.close()
+    if process.returncode:
+        raise RuntimeError(stderr.decode(errors="replace").strip() or "Callback failed.")
+
+
+def _terminate_callback(process, record, controller) -> None:
+    from pilot.internal.tasks.process_identity import ProcessInspector
+
+    inspector = ProcessInspector()
+    deadline = time.monotonic() + 3
+    parent = {os.getpid()}
+    while inspector.owned_pids(record.identity) - parent and time.monotonic() < deadline:
+        controller._signal(record, signal.SIGKILL, exclude_pids=parent)
+        time.sleep(0.05)
+    process.wait(timeout=3)
+
+
 def run_stored_callback(task_dir: Path, trigger: str) -> None:
     callbacks_path = task_dir / "callbacks.json"
     if not callbacks_path.exists():
@@ -143,4 +204,9 @@ def run_stored_callback(task_dir: Path, trigger: str) -> None:
     callbacks = json.loads(callbacks_path.read_text())
     callback = callbacks.get(trigger)
     if callback:
-        run_callback(callback, json.loads((task_dir / "meta.json").read_text()))
+        run_bounded_callback(callback, json.loads((task_dir / "meta.json").read_text()))
+
+
+if __name__ == "__main__":
+    payload = json.load(sys.stdin)
+    run_callback(payload["callback"], payload["meta"])

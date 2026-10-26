@@ -123,7 +123,7 @@ def test_run_reloads_workers_after_fetching_apps_and_before_provisioning(tmp_pat
     ):
         task.run()
 
-    assert order.mock_calls == [call.fetch(), call.reload(), call.create()]
+    assert order.mock_calls == [call.fetch(), call.reload(raises=True), call.create()]
 
 
 def test_run_reloads_workers_even_when_no_app_was_fetched(tmp_path: Path) -> None:
@@ -148,6 +148,24 @@ def test_failure_cleanup_targets_a_site_this_task_would_create(tmp_path: Path) -
     task = make_task(tmp_path, ["frappe"])
 
     assert task.remove_failed_site() == {"site": "site1.localhost"}
+
+
+def test_restore_creation_cleanup_preserves_a_preexisting_site(tmp_path):
+    from pilot.tasks.new_site_from_backup import NewSiteFromBackupTask
+
+    bench = make_task(tmp_path, []).bench
+    task = NewSiteFromBackupTask(
+        bench=bench,
+        bench_root=tmp_path,
+        name="site1.localhost",
+        db_file="backup.sql",
+        admin_password="secret",
+    )
+    assert task.remove_failed_site() == {"site": "site1.localhost"}
+    site = bench.sites_path / "site1.localhost"
+    site.mkdir()
+    (site / "site_config.json").write_text("{}")
+    assert task.remove_failed_site() is None
 
 
 def test_failure_cleanup_never_targets_a_site_that_already_exists(tmp_path: Path) -> None:

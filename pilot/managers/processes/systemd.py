@@ -292,7 +292,10 @@ class SystemdProcessManager(SystemdUserMixin, ManagedProcessManager):
     @override
     def restart_processes(self, definitions: list[ProcessDefinition]) -> None:
         units = [self._unit_name(definition.name) for definition in definitions]
-        run_command(self._systemctl("restart", *units), env=self._systemctl_env(), timeout=_SYSTEMCTL_TIMEOUT)
+        timeout = _SYSTEMCTL_TIMEOUT + max(
+            (definition.stop_timeout or 0 for definition in definitions), default=0
+        )
+        run_command(self._systemctl("restart", *units), env=self._systemctl_env(), timeout=timeout)
 
     def is_configured(self) -> bool:
         result = subprocess.run(

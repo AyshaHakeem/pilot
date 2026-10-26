@@ -389,9 +389,7 @@ def test_operation_site_lifecycle(tmp_path: Path) -> None:
     assert op.sites[0].migration_status == "success"
     assert op.state == "completed"
     assert op.finished_at is not None
-    site_mock.set_maintenance_settings.assert_called_with(
-        {"maintenance_mode": 0, "pause_scheduler": 1}
-    )
+    site_mock.set_maintenance_settings.assert_called_with({"maintenance_mode": 0, "pause_scheduler": 1})
 
 
 def test_operation_failure_and_retry_resumes(tmp_path: Path) -> None:
@@ -402,7 +400,10 @@ def test_operation_failure_and_retry_resumes(tmp_path: Path) -> None:
     site_mock = MagicMock()
     site_mock.path = site_dir
     site_mock.maintenance_mode = False
-    site_mock.migrate.side_effect = MigrateError("Patch failure in v15", output="Executing patch_x in site1\nError")
+    site_mock.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
+    site_mock.migrate.side_effect = MigrateError(
+        "Patch failure in v15", output="Executing patch_x in site1\nError"
+    )
     mock_bench.site.return_value = site_mock
 
     from pilot.core.bench.migration.store import MigrationStore
@@ -410,7 +411,6 @@ def test_operation_failure_and_retry_resumes(tmp_path: Path) -> None:
     store = MigrationStore(mock_bench)
     op = store.create_site_migrate("site1.localhost")
     op.state = get_state("migrating")
-
 
     with pytest.raises(MigrateError):
         op.migrate_site("site1.localhost")
@@ -436,9 +436,7 @@ def test_chain_hands_resources_off_from_current_task(tmp_path: Path) -> None:
 
     operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
     operation.state = get_state("backing_up")
-    operation.chain.append(
-        {"command": "migration-backup", "task_id": "task-101", "site": "site1.localhost"}
-    )
+    operation.chain.append({"command": "migration-backup", "task_id": "task-101", "site": "site1.localhost"})
 
     with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-102") as queue:
         operation.enqueue_next(handoff_from="task-101")
@@ -470,9 +468,7 @@ def test_update_records_the_new_app_revision(tmp_path: Path) -> None:
     operation.update_apps()
 
     assert operation.apps[0].updated_sha == "2222222"
-    assert operation.apps[0].compare_url == (
-        "https://github.com/frappe/frappe/compare/1111111...2222222"
-    )
+    assert operation.apps[0].compare_url == ("https://github.com/frappe/frappe/compare/1111111...2222222")
     # No sites to migrate - the migrating phase has nothing to wait on, so it
     # must complete immediately instead of getting stuck.
     assert operation.state == "completed"
@@ -780,6 +776,7 @@ def test_snapshot_creation_rejects_another_unresolved_owner(tmp_path: Path) -> N
 def test_bypass_patch_records_audit(tmp_path: Path) -> None:
     mock_bench = MagicMock()
     mock_bench.path = tmp_path
+    mock_bench.site.return_value.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
     mock_bench.frappe_call = ["bench"]
     mock_bench.sites_path = tmp_path / "sites"
 
@@ -806,6 +803,7 @@ def test_bypass_patch_auto_resumes_migration(tmp_path: Path) -> None:
     """A successful skip-patch resumes the failed site and returns to migrating."""
     mock_bench = MagicMock()
     mock_bench.path = tmp_path
+    mock_bench.site.return_value.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
     mock_bench.frappe_call = ["bench"]
     mock_bench.sites_path = tmp_path / "sites"
 
@@ -833,7 +831,9 @@ def _branch_switch_migration(tmp_path: Path):
     from pilot.core.bench.migration.store import MigrationStore
 
     switched = AppRevision("myapp", "1111111", updated_sha="2222222", branch="main")
-    return mock_bench, MigrationStore(mock_bench).create_site_migrate("site1.localhost", switched_app=switched)
+    return mock_bench, MigrationStore(mock_bench).create_site_migrate(
+        "site1.localhost", switched_app=switched
+    )
 
 
 def test_a_branch_switch_migration_does_not_update_the_app_again(tmp_path: Path) -> None:
@@ -889,7 +889,10 @@ def test_a_killed_backup_task_pauses_the_operation_for_a_retry(tmp_path: Path) -
     mock_bench.site.return_value.set_maintenance_settings.assert_called_with(
         {"maintenance_mode": 0, "pause_scheduler": 0}
     )
+    mock_bench.site.return_value.set_maintenance_mode.reset_mock()
     operation.retry()
+    mock_bench.site.return_value.set_maintenance_mode.assert_called_once_with(True)
+    assert operation.site("site1.localhost").original_config == {"maintenance_mode": 0, "pause_scheduler": 0}
     assert operation.state == "backing_up"
     assert operation.next_backup_site() == "site1.localhost"
 
@@ -911,11 +914,18 @@ def test_chain_tasks_register_the_stopped_step_callback() -> None:
     from pilot.tasks.migration_backup import MigrationBackupTask
     from pilot.tasks.update import UpdateTask
 
-    for task, phase in ((MigrationBackupTask, "backing_up"), (MigrateTask, "migrating"), (UpdateTask, "updating")):
+    for task, phase in (
+        (MigrationBackupTask, "backing_up"),
+        (MigrateTask, "migrating"),
+        (UpdateTask, "updating"),
+    ):
         args = task.__new__(task)
         args.operation_id, args.site = "op-1", "site1.localhost"
         assert task.fail_migration_step(args)["phase"] == phase
-    assert validate_callback({"operation": "fail-migration-step", "args": {}})["operation"] == "fail-migration-step"
+    assert (
+        validate_callback({"operation": "fail-migration-step", "args": {}})["operation"]
+        == "fail-migration-step"
+    )
 
 
 def test_a_task_killed_before_it_queued_the_next_step_pauses_for_a_retry(tmp_path: Path) -> None:
@@ -946,3 +956,77 @@ def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path)
     site = operation.site("site1.localhost")
     assert operation.state == "needs_attention"
     assert (site.migration_status, site.touched_tables) == ("failed", ["tabItem"])
+
+
+@pytest.mark.parametrize("phase", ["reverting_apps", "reverting_sites", "restarting"])
+def test_a_stopped_revert_chain_can_resume_from_its_checkpoint(tmp_path, phase):
+    operation, _ = _backing_up_operation(tmp_path)
+    operation.state = get_state(phase)
+    operation.site("site1.localhost").backup_status = "backed_up"
+    operation.site("site1.localhost").migration_status = "recovering"
+    operation.apps = [AppRevision(name="frappe", sha="old")]
+    if phase != "reverting_apps":
+        operation.revert_checkpoints["apps"] = True
+    if phase == "restarting":
+        operation.revert_checkpoints["site:site1.localhost"] = True
+
+    operation.fail_stopped_step("task-101", phase, "site1.localhost")
+
+    assert operation.state == "revert_failed"
+    assert operation.can_revert
+    assert "stopped" in operation.diagnosis["message"]
+    operation.revert()
+    assert operation.state == phase
+
+
+@pytest.mark.parametrize("task_name", ["retry_update", "revert_migration", "bypass_patch"])
+def test_an_interrupted_action_recovers_only_before_it_queues_a_chain_task(tmp_path, monkeypatch, task_name):
+    import importlib
+
+    from pilot.internal.tasks.callbacks import run_callback
+
+    operation, bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("needs_attention")
+    operation.return_state = "backing_up"
+    operation.failed_site = "site1.localhost"
+    module = importlib.import_module(f"pilot.tasks.{task_name}")
+    task_class = next(
+        value for name, value in vars(module).items() if name.endswith("Task") and name != "Task"
+    )
+    task = task_class.__new__(task_class)
+    task.bench, task.operation_id = bench, operation.id
+    bench.migrations.get.return_value = operation
+    spec = {"operation": "fail-migration-step", "args": task.fail_migration_step()}
+    monkeypatch.setattr("pilot.core.bench.Bench", lambda root: bench)
+
+    operation.retry()
+    run_callback(spec, {"bench_root": str(tmp_path), "task_id": "action-task"})
+    assert operation.state == "needs_attention"
+
+    operation.retry()
+    operation.chain.append({"task_id": "next-task", "command": "migration-backup"})
+    run_callback(spec, {"bench_root": str(tmp_path), "task_id": "action-task"})
+    assert operation.state == "backing_up"
+
+
+@pytest.mark.parametrize("with_site", [False, True])
+def test_retrying_a_failed_final_restart_does_not_migrate_sites_again(tmp_path, with_site):
+    operation, bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("migrating")
+    if with_site:
+        operation.site("site1.localhost").migration_status = "success"
+    else:
+        operation.sites.clear()
+    bench.reload_workers.side_effect = BenchError("restart failed")
+
+    with pytest.raises(BenchError, match="restart failed"):
+        operation.complete()
+    bench.reload_workers.assert_called_with(raises=True)
+    operation.fail_stopped_step("task-101", "migrating", None)
+    operation.retry()
+
+    assert operation.state.next_step(operation) == ("complete-migration", {})
+    bench.site.return_value.migrate.assert_not_called()
+    bench.reload_workers.side_effect = None
+    operation.complete()
+    assert operation.state == "completed"

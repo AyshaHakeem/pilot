@@ -27,7 +27,7 @@ class NewSiteTask(Task):
         """Provisioning runs install-app, which enqueues jobs that import the
         site's apps. Always reload: an app already on the bench may still predate
         the running workers, having arrived through `pilot get-app`."""
-        self.bench.reload_workers()
+        self.bench.reload_workers(raises=True)
 
     @on_failure
     @on_cancel

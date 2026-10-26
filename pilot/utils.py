@@ -467,9 +467,12 @@ def _wait_for_process(
 
 
 def _terminate_process_group(process: subprocess.Popen) -> None:
-    # The child leads its own session, so killing its pgid reaches descendants too.
+    # sudo keeps the caller's session; its pid is not a process-group id.
     with contextlib.suppress(ProcessLookupError):
-        os.killpg(process.pid, signal.SIGKILL)
+        if os.getpgid(process.pid) == process.pid:
+            os.killpg(process.pid, signal.SIGKILL)
+        else:
+            process.kill()
     process.wait()
 
 
