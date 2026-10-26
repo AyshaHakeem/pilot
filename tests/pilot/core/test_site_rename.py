@@ -17,6 +17,7 @@ from pilot.config import RoutePolicy
 from pilot.core.bench import Bench
 from pilot.core.site.rename import SiteRename
 from pilot.exceptions import BenchError
+from pilot.internal.atomic_file import exchange_paths
 from tests.pilot.integrations.test_central_client import _bench
 
 OLD = "old.example.com"
@@ -131,33 +132,43 @@ def test_a_pending_destination_cannot_be_renamed_again(tmp_path: Path) -> None:
 
 def test_readers_keep_the_old_path_during_failed_renames_and_retries(tmp_path: Path) -> None:
     bench = _bench(tmp_path)
-    _site(bench, OLD)
+    _site(bench, OLD, db_name="original")
     stopped = threading.Event()
     started = threading.Event()
     errors = []
-    reads = []
+    reads = 0
 
     def read_config():
+        nonlocal reads
         started.set()
         while not stopped.is_set():
             try:
-                reads.append((bench.sites_path / OLD / "site_config.json").read_bytes())
-            except OSError as error:
+                assert _config(bench, OLD)["db_name"] == "original"
+                reads += 1
+            except (OSError, ValueError, KeyError, AssertionError) as error:
                 errors.append(error)
 
     reader = threading.Thread(target=read_config)
     reader.start()
     try:
         assert started.wait(timeout=5)
-        with patch.object(SiteRename, "_finish", side_effect=RuntimeError("interrupted")):
-            for _ in range(100):
-                with pytest.raises(RuntimeError, match="interrupted"):
-                    _rename(bench)
+        current = OLD
+        with patch("pilot.core.site.rename.exchange_paths", wraps=exchange_paths) as exchange:
+            for index in range(100):
+                target = f"renamed-{index}.example.com"
+                with (
+                    patch.object(SiteRename, "_finish", side_effect=RuntimeError("interrupted")),
+                    pytest.raises(RuntimeError, match="interrupted"),
+                ):
+                    _rename(bench, old=current, new=target)
+                _rename(bench, old=current, new=target)
+                current = target
+            assert exchange.call_count == 100
     finally:
         stopped.set()
         reader.join(timeout=5)
     assert not reader.is_alive()
-    assert reads and all(content == b"{}" for content in reads)
+    assert reads > 0
     assert not errors
 
 

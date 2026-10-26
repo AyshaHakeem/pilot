@@ -145,7 +145,6 @@ class SiteRename:
         if self.new_name in sites or (self.new_path.exists() and not self.new_path.is_symlink()):
             raise BenchError(f"Site '{self.new_name}' already exists in this bench.")
 
-        # Retain the original token and route across interrupted retries.
         config_path = self.site.path / "site_config.json"
         _load_site_config(config_path)
         self._original_site_config = config_path.read_text()
