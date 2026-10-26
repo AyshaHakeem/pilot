@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -9,9 +11,13 @@ import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pilot.internal.tasks.models import TaskStatus
 from pilot.managers.platform import remove_hosts_entry
+
+if TYPE_CHECKING:
+    from pilot.internal.tasks.process_identity import TaskProcessRecord
 
 CALLBACK_TIMEOUT_SECONDS = 1200
 
@@ -167,12 +173,14 @@ def run_callback(spec: dict, meta: dict) -> None:
 
 
 def run_bounded_callback(spec: dict, meta: dict, *, recovery: bool = False) -> None:
-    from pilot.internal.tasks.process import TaskProcess
     from pilot.internal.tasks.process_identity import ProcessInspector, TaskProcessRecord
     from pilot.internal.tasks.store import TaskStore
 
     validate_callback(spec)
+    store = TaskStore(Path(meta["bench_root"]))
     argv = [sys.executable, "-m", "pilot.internal.tasks.callbacks"]
+    if recovery:
+        argv.append(str(store.task_dir(meta["task_id"])))
     launch_id = (None if recovery else os.environ.get("BENCH_TASK_LAUNCH_ID")) or secrets.token_hex(16)
     process = subprocess.Popen(
         argv,
@@ -183,31 +191,40 @@ def run_bounded_callback(spec: dict, meta: dict, *, recovery: bool = False) -> N
         env={**os.environ, "BENCH_TASK_LAUNCH_ID": launch_id},
     )
     inspector = ProcessInspector()
-    store = TaskStore(Path(meta["bench_root"]))
     identity = None
     try:
         identity = inspector.capture(process.pid, argv, launch_id)
+        record = TaskProcessRecord(str(meta.get("task_id", "callback")), argv, identity, is_callback=recovery)
         if recovery:
-            record = TaskProcessRecord(meta["task_id"], argv, identity, is_callback=True)
             store.write_process(meta["task_id"], process.pid, record.to_dict())
+        _wait_for_callback(process, record, spec, meta)
+    finally:
+        _close_callback(process)
+        if recovery and identity is not None:
+            _clear_stopped_callback(store, meta["task_id"], inspector, identity, argv)
+
+
+def _wait_for_callback(process, record: TaskProcessRecord, spec: dict, meta: dict) -> None:
+    from pilot.internal.tasks.process import TaskProcess
+
+    try:
         _, stderr = process.communicate(
             json.dumps({"callback": spec, "meta": meta}).encode(), timeout=CALLBACK_TIMEOUT_SECONDS
         )
     except subprocess.TimeoutExpired:
-        record = TaskProcessRecord(str(meta.get("task_id", "callback")), argv, identity)
         _terminate_callback(process, record, TaskProcess(Path(meta["bench_root"])))
         raise RuntimeError(f"Callback timed out after {CALLBACK_TIMEOUT_SECONDS}s.") from None
-    finally:
-        if process.poll() is None:
-            process.kill()
-            process.wait(timeout=3)
-        for pipe in (process.stdin, process.stdout, process.stderr):
-            if pipe:
-                pipe.close()
-        if recovery and identity is not None:
-            _clear_stopped_callback(store, meta["task_id"], inspector, identity, argv)
     if process.returncode:
         raise RuntimeError(stderr.decode(errors="replace").strip() or "Callback failed.")
+
+
+def _close_callback(process) -> None:
+    if process.poll() is None:
+        process.kill()
+        process.wait(timeout=3)
+    for pipe in (process.stdin, process.stdout, process.stderr):
+        if pipe:
+            pipe.close()
 
 
 def _terminate_callback(process, record, controller) -> None:

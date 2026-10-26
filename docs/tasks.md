@@ -62,7 +62,7 @@ On expiry, the worker stops verified task processes, including descendants that 
 
 Callbacks run in separate processes with a 20-minute limit. This allows the default lite worker drain to finish. A callback timeout stops its verified descendants. Callback failures appear in the task output. A failed or cancelled migration pauses for Retry or Restore; an interrupted restore can resume from its saved checkpoints. If only the final worker restart failed, Retry queues `complete-migration` without running completed site migrations again.
 
-Replayed callbacks save their process identity before they can change state. After a worker crash, the next worker stops that callback and its verified descendants before replaying cleanup. An interrupted `retrying` transition returns to Needs attention, so Retry and Restore remain available.
+Replayed callbacks save their process identity before they can change state. After a worker crash, the next worker stops that callback and its verified descendants before replaying cleanup. If a process record is corrupt, recovery checks for a live wrapper or replay callback before clearing the finished task. A live process with unverified ownership blocks the queue for manual recovery. An interrupted `retrying` transition returns to Needs attention, so Retry and Restore remain available.
 
 Site creation records its owning task under a per-site lock. Failure cleanup takes the same lock and deletes a partial site only when its owner matches the task. Cancelling queued creation does not delete a site created later by another task or the CLI. Successful creation releases its ownership record. Old tasks without an ownership record preserve partial sites for manual recovery.
 

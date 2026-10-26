@@ -70,7 +70,7 @@ class TaskProcessRecord:
     is_callback: bool = False
 
     def to_dict(self) -> dict:
-        record = {
+        record: dict[str, object] = {
             "task_id": self.task_id,
             "argv": self.argv,
             "identity": self.identity.to_dict(),

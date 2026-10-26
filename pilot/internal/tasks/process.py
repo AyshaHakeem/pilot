@@ -124,14 +124,17 @@ class TaskProcess:
         return ownership
 
     def _resolve_unknown(self, task_id: str) -> ProcessOwnership:
-        """Look for the wrapper when the stored record is unreadable."""
-        markers = [WRAPPER_MODULE, str(self._store.task_dir(task_id))]
+        """Look for the wrapper or replay callback when its record is unreadable."""
+        task_dir = str(self._store.task_dir(task_id))
         try:
-            pid = self._inspector.get_pid_matching(markers, self._pid_hint(task_id))
+            for module in (WRAPPER_MODULE, "pilot.internal.tasks.callbacks"):
+                if self._inspector.get_pid_matching([module, task_dir], self._pid_hint(task_id)) is not None:
+                    self._unknown_since.pop(task_id, None)
+                    return ProcessOwnership.OWNED
         except OSError:
             return self._unknown_within_grace(task_id)
         self._unknown_since.pop(task_id, None)
-        return ProcessOwnership.OWNED if pid is not None else ProcessOwnership.DEAD
+        return ProcessOwnership.DEAD
 
     def _unknown_within_grace(self, task_id: str) -> ProcessOwnership:
         # ponytail: in-memory clock, a worker restart extends the wait
@@ -343,8 +346,7 @@ class TaskProcess:
 
     def _recover_finished_task(self, task_id: str) -> bool:
         self._run_stored_callback_for_status(task_id)
-        record = self.read(task_id)
-        if record is not None and record.is_callback:
+        if self._reconciled_ownership(task_id) in {ProcessOwnership.OWNED, ProcessOwnership.UNKNOWN}:
             return False
         self._store.remove_private_files(task_id, "process.json", "secrets.json", "callbacks.json")
         return True
