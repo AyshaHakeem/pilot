@@ -12,10 +12,12 @@ const getErrorMessage = useErrorMessage()
 
 interface Props {
   store: Store
+  /** The plan a free trial just converted to. The card then offers a bigger one. */
+  convertedPlan?: string
 }
 
 const props = defineProps<Props>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; 'add-payment': [] }>()
 const store = props.store
 
 const options = ref<PlanOptions | null>(null)
@@ -72,14 +74,25 @@ onMounted(() => {
 
 <template>
   <section>
-    <h3 class="text-base-semibold text-ink-gray-8">{{ __("Change plan") }}</h3>
-    <p v-if="!needsPaymentMethod" class="mt-1 text-p-sm text-ink-gray-5">
+    <h3 class="text-base-semibold text-ink-gray-8">
+      {{ convertedPlan && !started ? __("You're on the {0} plan", [convertedPlan]) : __("Change plan") }}
+    </h3>
+    <p v-if="convertedPlan && !started" class="mt-1 text-p-sm text-ink-gray-5">
+      {{ __("Billing has started. Choose a bigger plan now, or keep this one.") }}
+    </p>
+    <p v-else-if="!needsPaymentMethod" class="mt-1 text-p-sm text-ink-gray-5">
       {{ __("Pick the size this site runs on. You pay for the new plan from today.") }}
     </p>
 
-    <p v-if="needsPaymentMethod" class="mt-5 rounded-6 bg-surface-gray-2 p-4 text-p-sm text-ink-gray-7">
-      {{ __("Other plans open once you add a payment method.") }}
-    </p>
+    <div v-if="needsPaymentMethod" class="mt-5 space-y-4 rounded-6 bg-surface-gray-2 p-4">
+      <p class="text-p-sm text-ink-gray-7">
+        {{ __("Your site is on a free trial. Add a payment method to keep it, then choose a bigger plan.") }}
+      </p>
+      <div class="flex gap-2">
+        <Button :label="__('Back')" @click="emit('close')" />
+        <Button variant="solid" :label="__('Add payment method')" @click="emit('add-payment')" />
+      </div>
+    </div>
 
     <div v-else-if="started" class="mt-5 rounded-6 bg-surface-gray-2 p-4" role="status">
       <p class="text-p-sm text-ink-gray-7">
@@ -159,7 +172,11 @@ onMounted(() => {
           @click="openExternal(morePlansUrl)"
         />
 
-        <Button :disabled="submitting" :label="__('Cancel')" @click="emit('close')" />
+        <Button
+          :disabled="submitting"
+          :label="convertedPlan ? __('Keep this plan') : __('Cancel')"
+          @click="emit('close')"
+        />
 
         <Button
           type="submit"
@@ -172,7 +189,7 @@ onMounted(() => {
     </form>
 
     <Button
-      v-if="needsPaymentMethod || started"
+      v-if="started"
       class="mt-5"
       :label="__('Back')"
       @click="emit('close')"

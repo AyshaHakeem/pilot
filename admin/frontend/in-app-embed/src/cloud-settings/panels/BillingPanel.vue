@@ -65,15 +65,34 @@ const planSubtitle = computed(() => {
     .join(' · ')
 })
 
+// Kept from the start of the payment flow: the add-card step reloads billing, and the trial is gone by the end.
+const trialPlan = ref('')
+
 const startPayment = () => {
+  trialPlan.value = trial.value?.plan?.title || ''
   removeError.value = ''
   stepCount.value = billing.value?.profile_complete ? 1 : 2
   flow.value = billing.value?.profile_complete ? 'payment' : 'profile'
 }
 
-const finishPayment = () => {
+// After a card converts the trial, the plan step opens so the customer can choose a bigger plan.
+const convertedPlan = ref('')
+
+const finishPayment = async () => {
   flow.value = ''
   toast.success(__('Payment method added.'))
+
+  await store.loadBilling(true)
+  if (trialPlan.value && !billing.value?.trial) {
+    convertedPlan.value = trialPlan.value
+    flow.value = 'plan'
+  }
+  trialPlan.value = ''
+}
+
+const closePlan = () => {
+  convertedPlan.value = ''
+  flow.value = ''
 }
 
 const removeCard = async () => {
@@ -143,7 +162,7 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
         v-if="trial"
         :trial="trial"
         :plan-name="plan.name"
-        :is-adding="isAddingPayment"
+        :is-adding="isAddingPayment || flow === 'plan'"
         @add-payment="startPayment"
       />
 
@@ -166,7 +185,9 @@ const changePlanUrl = computed(() => store.state.accountLinks?.change_plan)
       <ChangePlanCard
         v-if="flow === 'plan'"
         :store="store"
-        @close="flow = ''"
+        :converted-plan="convertedPlan"
+        @close="closePlan"
+        @add-payment="startPayment"
       />
 
       <section
