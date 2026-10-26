@@ -1031,7 +1031,10 @@ def test_retrying_a_failed_final_restart_does_not_migrate_sites_again(tmp_path, 
     with pytest.raises(BenchError, match="restart failed"):
         operation.complete()
     bench.reload_workers.assert_called_with(raises=True)
+    assert operation.state == "needs_attention"
+    assert "Restarting services failed: restart failed" in operation.diagnosis["message"]
     operation.fail_stopped_step("task-101", "migrating", None)
+    assert "Restarting services failed" in operation.diagnosis["message"]
     operation.retry()
 
     assert operation.state.next_step(operation) == ("complete-migration", {})

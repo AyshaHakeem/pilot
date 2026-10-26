@@ -522,9 +522,15 @@ class MigrationOperation:
         if self.state != "migrating" or any(site.migration_status != "success" for site in self.sites):
             raise MigrationStateError("Finish every site migration before completing the update.")
         on_step("restart", "Restarting services")
-        # An updated app may declare different processes; the restart then restarts them.
-        self.bench.processes.apply()
-        self.bench.reload_workers(raises=True)
+        try:
+            # An updated app may declare different processes; the restart then restarts them.
+            self.bench.processes.apply()
+            self.bench.reload_workers(raises=True)
+        except Exception as error:
+            message = f"Restarting services failed: {error}. Retry to restart them again."
+            self.diagnosis = {"phase": "migrating", "message": message, "output_excerpt": ""}
+            self._enter_needs_attention("migrating", None)
+            raise
         self._restore_maintenance()
         for site in self.sites:
             if site.backup_status == "backed_up":

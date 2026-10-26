@@ -87,9 +87,12 @@ class SiteCommands:
     def has_pending_background_jobs(self) -> bool:
         """Frappe's `ready-for-migration`: whether the site has a queued or running job."""
         cmd = self.site._frappe_call("frappe", "--site", self.site.config.name, "ready-for-migration")
-        result = subprocess.run(
-            cmd, cwd=self.site.bench.sites_path, capture_output=True, text=True, timeout=120
-        )
+        try:
+            result = subprocess.run(
+                cmd, cwd=self.site.bench.sites_path, capture_output=True, text=True, timeout=120
+            )
+        except subprocess.TimeoutExpired as error:
+            raise BenchError(f"Checking the background jobs of {self.site.config.name} timed out.") from error
         if result.returncode == 0:
             return False
         if "NOT READY" in result.stdout:
