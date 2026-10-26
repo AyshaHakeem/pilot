@@ -118,6 +118,7 @@ export const TASK_TYPES = [
     commands: [
       'update',
       'migrate',
+      'complete-migration',
       'retry-update',
       'revert-migration',
       'bypass-patch',

@@ -167,6 +167,28 @@ def test_timeout_preserves_uncertain_process_ownership(tmp_path):
     assert (store.task_dir(task_id) / "process.json").exists()
 
 
+@pytest.mark.parametrize("metadata", [{"started_at": "invalid"}, {"timeout_seconds": "invalid"}])
+def test_invalid_deadline_metadata_does_not_prevent_dead_process_recovery(tmp_path, metadata, caplog):
+    store = TaskStore(tmp_path)
+    task_id = "20261026-000001-111111"
+    store.create_queued({"task_id": task_id, "command": "build", **metadata})
+    store.transition(task_id, TaskStatus.QUEUED, TaskStatus.RUNNING)
+    argv = [sys.executable, "-c", "import time; time.sleep(60)"]
+    process = subprocess.Popen(
+        argv, start_new_session=True, env={**os.environ, "BENCH_TASK_LAUNCH_ID": "dead-task"}
+    )
+    try:
+        identity = ProcessInspector().capture(process.pid, argv, "dead-task")
+        store.write_process(task_id, process.pid, TaskProcessRecord(task_id, argv, identity).to_dict())
+    finally:
+        process.kill()
+        process.wait()
+
+    assert TaskProcess(tmp_path).reconcile() is None
+    assert store.read_status(task_id) == TaskStatus.FAILED
+    assert "Cannot restore the execution deadline" in caplog.text
+
+
 def test_a_dead_wrapper_does_not_leave_its_callback_running(tmp_path):
     site = tmp_path / "sites" / "test.local"
     site.mkdir(parents=True)

@@ -228,18 +228,25 @@ class TaskProcess:
             self._expired.discard(task_id)
             return
         if task_id not in self._deadlines:
-            meta = self._store.read_metadata(task_id)
-            timeout = meta.get("timeout_seconds", 24 * 60 * 60)
-            started_at = meta.get("started_at")
-            elapsed = (
-                (datetime.now(UTC) - datetime.fromisoformat(started_at)).total_seconds() if started_at else 0
-            )
-            self._deadlines[task_id] = time.monotonic() + max(0, timeout - max(0, elapsed))
+            try:
+                self._deadlines[task_id] = time.monotonic() + self._remaining_budget(task_id)
+            except (OSError, TypeError, ValueError, TaskNotFoundError):
+                logging.exception("Cannot restore the execution deadline for task %s", task_id)
+                return
         if time.monotonic() >= self._deadlines[task_id]:
             if task_id not in self._expired:
                 logging.error("Task %s exceeded its execution time limit", task_id)
             self._expired.add(task_id)
             self.interrupt(task_id)
+
+    def _remaining_budget(self, task_id: str) -> float:
+        meta = self._store.read_metadata(task_id)
+        timeout = meta.get("timeout_seconds", 24 * 60 * 60)
+        started_at = meta.get("started_at")
+        elapsed = (
+            (datetime.now(UTC) - datetime.fromisoformat(started_at)).total_seconds() if started_at else 0
+        )
+        return max(0, timeout - max(0, elapsed))
 
     def interrupt(self, task_id: str) -> None:
         """Fail a task whose process died without finalizing."""

@@ -56,7 +56,7 @@ Class flags tune runtime behavior: `audit_on_queue`, `is_cancellable_while_runni
 
 ## Deadlines and recovery
 
-`timeout_seconds` sets a task's total execution budget. It defaults to one hour. Submission saves the budget in task metadata. Queue wait does not count. The worker uses a monotonic deadline while it runs and restores the remaining budget from `started_at` when it adopts a task after a restart. Tasks queued before budgets were recorded use 24 hours.
+`timeout_seconds` sets a task's total execution budget. It defaults to one hour. Submission saves the budget in task metadata. Queue wait does not count. The worker uses a monotonic deadline while it runs and restores the remaining budget from `started_at` when it adopts a task after a restart. Tasks queued before budgets were recorded use 24 hours. Invalid deadline metadata produces a worker log error; process ownership and dead-process recovery still run.
 
 On expiry, the worker stops verified task processes, including descendants that started their own sessions. It records `failed` with `task_timeout` and runs the failure callback before claiming more work. An uncertain process identity keeps the queue blocked for manual recovery. A timeout does not undo database writes, restore deleted data, or cancel a service operation already accepted by systemd. Review the output before retrying a destructive operation. These deadlines apply to queued tasks; direct CLI calls to core methods do not use the task worker.
 
@@ -93,7 +93,7 @@ The limits below are conservative safety limits, not expected operation times. L
 | `reinstall-site` | 24 hours | No |
 | `remove-app` | 1 hour | Yes |
 | `rename-site` | 1 hour | No |
-| `restart-database` | 5 minutes | No |
+| `restart-database` | 1 hour | No |
 | `restart-services` | 1 hour | Yes |
 | `restore-site` | 24 hours | No |
 | `retry-update` | 5 minutes | Yes |
@@ -106,7 +106,7 @@ The limits below are conservative safety limits, not expected operation times. L
 | `set-max-database-connections` | 5 minutes | No |
 | `set-performance-schema` | 5 minutes | No |
 | `setup-letsencrypt` | 1 hour | Yes |
-| `setup-nginx` | 5 minutes | Yes |
+| `setup-nginx` | 1 hour | Yes |
 | `switch-branch` | 1 hour | No |
 | `switch-lite-mode` | 1 hour | Yes |
 | `uninstall-app` | 1 hour | No |

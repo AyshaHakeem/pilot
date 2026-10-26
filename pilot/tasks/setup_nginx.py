@@ -7,7 +7,6 @@ from pilot.tasks import Task, step
 @dataclass(kw_only=True)
 class SetupNginxTask(Task):
     command: ClassVar[str] = "setup-nginx"
-    timeout_seconds: ClassVar[int] = 300
 
     def run(self) -> None:
         self.setup_nginx()
