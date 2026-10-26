@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import subprocess
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
@@ -82,6 +83,19 @@ class SiteCommands:
                 returncode=result.returncode,
             )
         return result.stdout
+
+    def has_pending_background_jobs(self) -> bool:
+        """Frappe's `ready-for-migration`: whether the site has a queued or running job."""
+        cmd = self.site._frappe_call("frappe", "--site", self.site.config.name, "ready-for-migration")
+        result = subprocess.run(
+            cmd, cwd=self.site.bench.sites_path, capture_output=True, text=True, timeout=120
+        )
+        if result.returncode == 0:
+            return False
+        if "NOT READY" in result.stdout:
+            return True
+        output = (result.stderr or result.stdout).strip()[-1000:]
+        raise BenchError(f"Could not check the background jobs of {self.site.config.name}: {output}")
 
     def clear_cache(self) -> None:
         cmd = self.site._frappe_call("frappe", "--site", self.site.config.name, "clear-cache")

@@ -810,8 +810,39 @@ def test_systemd_definitions_leave_scheduling_to_worker_pool(tmp_path: Path) -> 
     bench = make_bench(tmp_path)
     bench.config.production.process_manager = "systemd"
     names = [pd.name for pd in ProcessManager(bench)._prod_process_definitions()]
-    assert "worker_pool" in names
+    assert any(name.startswith("worker_pool") for name in names)
     assert "schedule" not in names
+
+
+def test_systemd_runs_one_worker_pool_per_group(tmp_path: Path) -> None:
+    from pilot.config.worker import WorkerGroup
+
+    bench = make_bench(tmp_path)
+    bench.config.production.process_manager = "systemd"
+    bench.config.workers.groups = [
+        WorkerGroup(queues=["default"], count=4),
+        WorkerGroup(queues=["short"], count=3),
+        WorkerGroup(queues=["long"], count=2),
+    ]
+    pools = {
+        pd.name: shlex.join(pd.argv)
+        for pd in ProcessManager(bench)._prod_process_definitions()
+        if pd.name.startswith("worker_pool")
+    }
+    assert pools.keys() == {"worker_pool_default", "worker_pool_short", "worker_pool_long"}
+    assert pools["worker_pool_default"].endswith("--num-workers 4 --queue default")
+    assert pools["worker_pool_long"].endswith("--num-workers 2 --queue long")
+
+
+def test_systemd_keeps_the_worker_pool_name_for_one_group(tmp_path: Path) -> None:
+    from pilot.config.worker import WorkerGroup
+
+    bench = make_bench(tmp_path)
+    bench.config.production.process_manager = "systemd"
+    bench.config.workers.groups = [WorkerGroup(queues=["default", "short", "long"], count=2)]
+    pools = [pd for pd in ProcessManager(bench)._prod_process_definitions() if pd.name.startswith("worker_pool")]
+    assert [pd.name for pd in pools] == ["worker_pool"]
+    assert pools[0].log_file == bench.logs_path / "worker_pool.log"
 
 
 def test_process_definitions_worker_names_are_numbered(tmp_path: Path) -> None:

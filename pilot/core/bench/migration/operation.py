@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ _CHAIN_TASKS = {
 }
 _CHAIN_PHASES = ("backing_up", "updating", "migrating")
 _REVERT_PHASES = ("reverting_apps", "reverting_sites", "restarting")
+_JOBS_WAIT_SECONDS = 300  # as long as Frappe Cloud waits before it migrates a site
 
 
 def _now() -> str:
@@ -176,6 +178,7 @@ class MigrationOperation:
     ) -> None:
         site = self.site(name)
         on_step("backup", f"Backing up {name}")
+        self.wait_for_background_jobs("backing_up", [name], on_progress)
         site.backup_status = "backing_up"
         self._save()
         try:
@@ -210,6 +213,7 @@ class MigrationOperation:
             for revision in self.apps
             if revision.target_sha
         }
+        self.wait_for_background_jobs("updating", [site.name for site in self.sites], on_progress)
         try:
             self.bench._update_apps(filter_set, on_progress, pins)
             self.bench._reinstall_apps(filter_set, on_progress)
@@ -238,6 +242,7 @@ class MigrationOperation:
     ) -> None:
         site = self.site(name)
         on_step("migrate", f"Migrating {name}")
+        self.wait_for_background_jobs("migrating", [name], on_progress)
         site.migration_status = "running"
         self._save()
         try:
@@ -257,6 +262,33 @@ class MigrationOperation:
             self._save()
         if self.next_migrate_site() is None:
             self.complete(on_step)
+
+    def wait_for_background_jobs(self, phase: str, names: list[str], on_progress: OnProgress) -> None:
+        """Wait until the sites run no background job, as Frappe Cloud does before it migrates.
+        Maintenance mode stops their scheduler, so their queues drain."""
+        from pilot.managers.processes.local import ProcessManager
+
+        if not names or not ProcessManager.for_bench(self.bench).is_running():
+            return
+        deadline = time.monotonic() + _JOBS_WAIT_SECONDS
+        for name in names:
+            on_progress(f"Waiting for the background jobs of {name}...")
+            try:
+                while self.bench.site(name).has_pending_background_jobs:
+                    if time.monotonic() >= deadline:
+                        raise BenchError(
+                            f"{name} still has background jobs after {_JOBS_WAIT_SECONDS} seconds."
+                        )
+                    time.sleep(2)
+            except BenchError as error:
+                self._pause_before_step(phase, name, f"{error} The step did not start. Retry later.")
+
+    def _pause_before_step(self, phase: str, name: str, message: str) -> None:
+        self.diagnosis = {"phase": phase, "message": message, "output_excerpt": ""}
+        self._enter_needs_attention(phase, None if phase == "updating" else name)
+        if phase == "backing_up":
+            self._restore_maintenance()
+        raise BenchError(message)
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
         """Pause for the user when a chain task stopped without its failure handling. A no-op

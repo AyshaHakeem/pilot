@@ -236,6 +236,38 @@ def test_enable_scheduler_fails_loudly(tmp_path: Path) -> None:
             raise AssertionError("expected BenchError")
 
 
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected"),
+    [
+        (0, "READY for migration: site site1.example.com does not have any background jobs", False),
+        (1, "NOT READY for migration: site site1.example.com has pending background jobs", True),
+    ],
+)
+def test_pending_background_jobs_come_from_ready_for_migration(tmp_path, returncode, stdout, expected) -> None:
+    bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
+    site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
+    result = MagicMock(returncode=returncode, stdout=stdout, stderr="")
+
+    with patch("pilot.core.site.commands.subprocess.run", return_value=result) as run:
+        assert site.has_pending_background_jobs is expected
+
+    assert run.call_args.args[0][-3:] == ["--site", "site1.example.com", "ready-for-migration"]
+
+
+def test_a_failed_background_job_check_fails_loudly(tmp_path: Path) -> None:
+    from pilot.exceptions import BenchError
+
+    bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
+    site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
+    result = MagicMock(returncode=1, stdout="", stderr="redis.exceptions.ConnectionError: refused")
+
+    with (
+        patch("pilot.core.site.commands.subprocess.run", return_value=result),
+        pytest.raises(BenchError, match="ConnectionError"),
+    ):
+        _ = site.has_pending_background_jobs
+
+
 def test_a_new_site_sends_mail_under_its_first_label_in_title_case(tmp_path: Path) -> None:
     provisioner = _provisioner(tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), provisioner.bench)

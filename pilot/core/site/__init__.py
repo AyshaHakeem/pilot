@@ -223,6 +223,12 @@ class Site:
 
         return SiteCommands(self).migrate(skip_failing)
 
+    @property
+    def has_pending_background_jobs(self) -> bool:
+        from pilot.core.site.commands import SiteCommands
+
+        return SiteCommands(self).has_pending_background_jobs()
+
     def clear_cache(self) -> None:
         from pilot.core.site.commands import SiteCommands
 

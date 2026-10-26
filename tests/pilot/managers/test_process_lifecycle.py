@@ -286,4 +286,15 @@ def test_systemd_restart_allows_the_lite_worker_to_drain(bench):
     web = ProcessDefinition(name="web", argv=["true"], log_file=bench.logs_path / "web.log", stop_timeout=690)
     with patch.object(systemd_module, "run_command") as run:
         manager.restart_processes([web])
-    assert run.call_args.kwargs["timeout"] == 780
+    assert run.call_args.kwargs["timeout"] == 810
+
+
+def test_systemd_restart_waits_for_the_default_stop_timeout(bench):
+    """A worker that finishes its job before it stops may take systemd's whole default stop timeout."""
+    from pilot.managers.processes.definitions import ProcessDefinition
+
+    manager = SystemdProcessManager(bench)
+    workers = ProcessDefinition(name="worker_pool", argv=["true"], log_file=bench.logs_path / "w.log")
+    with patch.object(systemd_module, "run_command") as run:
+        manager.restart_processes([workers])
+    assert run.call_args.kwargs["timeout"] == 210

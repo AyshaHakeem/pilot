@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -13,6 +13,15 @@ from pilot.core.bench.migration.operation import AppRevision, SiteProgress
 from pilot.core.bench.migration.state import MigrationStateError, get_state, validate_transition
 from pilot.exceptions import BenchError, MigrateError
 from pilot.integrations.marketplace import Marketplace
+
+
+@pytest.fixture(autouse=True)
+def workload(monkeypatch):
+    """A stopped workload runs no job, so the steps skip the background-job wait unless a test starts it."""
+    manager = MagicMock()
+    manager.is_running.return_value = False
+    monkeypatch.setattr("pilot.managers.processes.local.ProcessManager.for_bench", lambda bench: manager)
+    return manager
 
 
 def test_state_transitions() -> None:
@@ -1054,3 +1063,83 @@ def test_an_interruption_in_the_retrying_state_can_be_retried_or_reverted(tmp_pa
     assert operation.can_revert
     operation.retry()
     assert operation.state == "migrating"
+
+
+def _site_with_jobs(pending: list[bool] | Exception) -> MagicMock:
+    site = MagicMock()
+    site.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
+    type(site).has_pending_background_jobs = PropertyMock(side_effect=pending)
+    return site
+
+
+def test_a_migration_waits_until_the_site_runs_no_background_job(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs([True, True, False])
+    site.path = tmp_path
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost", with_safeguards=False)
+    operation.state = get_state("migrating")
+
+    with patch("pilot.core.bench.migration.operation.time.sleep") as sleep:
+        operation.migrate_site("site1.localhost")
+
+    assert sleep.call_count == 2
+    site.migrate.assert_called_once_with()
+    assert operation.state == "completed"
+
+
+def test_jobs_that_do_not_finish_pause_before_the_backup(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs(lambda: True)
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-101"):
+        operation.begin()
+
+    clock = iter([0, 100, 301])
+    with (
+        patch("pilot.core.bench.migration.operation.time.monotonic", side_effect=lambda: next(clock)),
+        patch("pilot.core.bench.migration.operation.time.sleep"),
+        pytest.raises(BenchError, match="still has background jobs after 300 seconds"),
+    ):
+        operation.back_up_site("site1.localhost")
+
+    site.migration_backup.create.assert_not_called()
+    assert operation.state == "needs_attention"
+    assert operation.failed_site == "site1.localhost"
+    assert operation.site("site1.localhost").backup_status == "pending"
+    site.set_maintenance_settings.assert_called_with({"maintenance_mode": 0, "pause_scheduler": 0})
+    operation.retry()
+    assert operation.next_backup_site() == "site1.localhost"
+
+
+def test_jobs_that_do_not_finish_pause_before_the_code_changes(tmp_path: Path, workload) -> None:
+    """The update has not started, so there is nothing to revert."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    mock_bench.site.return_value = _site_with_jobs(BenchError("redis is down"))
+    operation = MigrationStore(mock_bench)._create(
+        "update", apps=[AppRevision("frappe", "1111111")], apps_filter=None, sites=["site1.localhost"]
+    )
+    operation.state = get_state("updating")
+
+    with pytest.raises(BenchError, match="redis is down"):
+        operation.update_apps()
+
+    mock_bench._update_apps.assert_not_called()
+    assert operation.state == "needs_attention"
+    assert operation.failed_site is None
+    assert "The step did not start" in operation.diagnosis["message"]
+    operation.retry()
+    assert operation.state == "updating"
