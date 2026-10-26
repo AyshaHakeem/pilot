@@ -9,11 +9,12 @@ import {
 } from '@frappe/cloud-sdk/api'
 import { Button, ErrorMessage, Skeleton, TextInput } from 'frappe-ui'
 import type { PaymentCheckout, PaymentGateway, PaymentMethodSetup } from '@frappe/cloud-sdk'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RazorpayLogo from '../assets/Razorpay-1.svg?inline'
 import StripeLogo from '../assets/Stripe.svg?inline'
 import UpiLogo from '../assets/UPI-1.svg?inline'
 import { openExternal } from '../external'
+import { holdRazorpayCheckout, releaseRazorpayCheckout } from '../razorpayCheckout'
 import { useErrorMessage, type Store } from '../store'
 
 const __ = useTranslation()
@@ -99,6 +100,7 @@ const load = async () => {
 }
 
 onMounted(load)
+onBeforeUnmount(releaseRazorpayCheckout)
 
 const start = () => {
   if (!canContinue.value || !gateway.value) return
@@ -170,21 +172,32 @@ const openRazorpayCheckout = (handles: PaymentMethodSetup) => {
     handler: (response: RazorpayResponse) => confirmRazorpay(handles.payment_method, response),
     modal: {
       ondismiss: () => {
+        releaseRazorpayCheckout()
         working.value = false
         message.value = __('Setup cancelled.')
       },
     },
   })
 
+  // The modal stays open after a decline so the customer can try another card.
   rzp.on('payment.failed', (response) => {
     error.value = response?.error?.description || __('Your bank did not approve this. Try again or use another card.')
     working.value = false
   })
 
-  rzp.open()
+  holdRazorpayCheckout()
+
+  try {
+    rzp.open()
+  } catch (exception) {
+    releaseRazorpayCheckout()
+    throw exception
+  }
 }
 
 const confirmRazorpay = async (paymentMethod: string, response: RazorpayResponse) => {
+  releaseRazorpayCheckout()
+
   await run(async () => {
     const result = await confirmPaymentMethod({
       payment_method: paymentMethod,

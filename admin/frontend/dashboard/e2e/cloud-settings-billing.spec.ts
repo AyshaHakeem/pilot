@@ -254,6 +254,47 @@ test('a trial held by the spending limit says why and offers no payment action',
   await expect(page.getByRole('button', { name: 'Add payment method' })).toHaveCount(0)
 })
 
+test('Razorpay checkout takes clicks while the settings dialog is open', async ({ page }) => {
+  await page.route('https://checkout.razorpay.com/v1/checkout.js', (route) =>
+    route.fulfill({
+      contentType: 'application/javascript',
+      body: `window.Razorpay = class {
+        constructor(options) { this.options = options }
+        on() {}
+        open() {
+          const root = document.createElement('div')
+          root.className = 'razorpay-container'
+          root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fff;padding:24px'
+          root.innerHTML = '<label>Card number <input id="rzp-card"></label><button type="button" id="rzp-pay">Pay</button><button type="button" id="rzp-close">Close checkout</button>'
+          root.querySelector('#rzp-close').onclick = () => { root.remove(); this.options.modal.ondismiss() }
+          document.body.append(root)
+        }
+      }`,
+    }),
+  )
+  await openBilling(page, {
+    get_billing: () => ({ message: billing() }),
+    get_account_url: accountLinks,
+    get_payment_gateways: () => ({ message: [{ name: 'Razorpay', label: 'Razorpay', adapter_key: 'Razorpay', method_types: ['Card'] }] }),
+    add_payment_method: () => ({ message: { key_id: 'rzp_test', order_id: 'order_1', customer_id: 'cust_1', payment_method: 'pm-1', prefill: {} } }),
+  })
+
+  await page.getByRole('button', { name: 'Add payment method' }).click()
+  await page.getByLabel('Phone').fill('9876543210')
+  await page.getByRole('button', { name: 'Continue with Razorpay' }).click()
+
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents)).toBe('none')
+  const card = page.locator('#rzp-card')
+  await card.click()
+  await expect(card).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Payment method' })).toBeVisible()
+  await page.locator('#rzp-pay').click()
+
+  await page.locator('#rzp-close').click()
+  await expect(page.getByText('Setup cancelled.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.getElementById('razorpay-checkout-clicks') !== null)).toBe(false)
+})
+
 test('Razorpay needs a phone number before it opens', async ({ page }) => {
   const calls = await openBilling(page, {
     get_billing: () => ({ message: billing() }),
