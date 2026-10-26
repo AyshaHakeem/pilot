@@ -389,7 +389,8 @@ const tileClass = (isSelected: boolean) => [
 
     <p class="flex items-center gap-1.5 text-p-sm text-ink-gray-5">
       <span class="lucide-info size-3.5 shrink-0" aria-hidden="true" />
-      {{ __("We don't charge your card now. It's saved to bill automatically when your billing cycle ends.") }}
+      {{ __("We don't charge your payment method now. It's saved to bill automatically when your billing cycle ends.")
+      }}
     </p>
 
     <p class="flex items-center gap-1.5 text-p-sm text-ink-gray-5">
