@@ -80,14 +80,17 @@ def local_public_domains(site: "SiteConfig") -> list[str]:
     from pilot.core.adapters.domain_provider import DomainRouteProvider
     from pilot.utils import matches_wildcard
 
-    patterns = DomainRouteProvider.wildcard_domains()
+    patterns: list[str] | None = None
     domains = []
     for domain in public_domains(site):
         route = site.configured_route_for(domain)
         if route is not None:
             if route.origin_tls:
                 domains.append(domain)
-        elif not matches_wildcard(domain, patterns):
+            continue
+        if patterns is None:
+            patterns = DomainRouteProvider.wildcard_domains()
+        if not matches_wildcard(domain, patterns):
             domains.append(domain)
     return domains
 
@@ -370,8 +373,8 @@ class LetsEncryptManager:
         days_left = certificate_days_left(cert_file)
         return days_left is None or days_left < _CERT_EXPIRY_THRESHOLD_DAYS
 
-    def expiring_certificates(self) -> list[tuple[str, int]]:
-        """(certificate name, days left) for this bench's certificates close to expiry."""
+    def get_certificate_paths(self) -> list[tuple[str, Path]]:
+        """Existing certificate files for this bench's current local TLS routes."""
         from pilot.managers.nginx import NginxManager
 
         nginx = NginxManager(self.bench)
@@ -381,8 +384,12 @@ class LetsEncryptManager:
                 certificates.append((self.bench.certificate_name(site.config), nginx.cert_path(site.config)))
         if is_admin_certificate_required(self.bench) and nginx.has_admin_cert:
             certificates.append((self.bench.config.admin.domain, nginx.admin_cert_path))
+        return certificates
+
+    def expiring_certificates(self) -> list[tuple[str, int]]:
+        """(certificate name, days left) for this bench's certificates close to expiry."""
         expiring = []
-        for name, path in certificates:
+        for name, path in self.get_certificate_paths():
             days_left = certificate_days_left(path)
             if days_left is not None and days_left < _CERT_ALERT_DAYS:
                 expiring.append((name, days_left))
@@ -433,7 +440,7 @@ def install_renewal_timer() -> None:
 def main() -> None:
     """Refresh each bench's local certificates, then check their expiry."""
     from pilot.core.bench import Bench
-    from pilot.exceptions import CommandError
+    from pilot.exceptions import BenchError
     from pilot.utils import cli_root, iter_sibling_benches
 
     benches = [
@@ -441,15 +448,16 @@ def main() -> None:
         for path, config in iter_sibling_benches(cli_root() / "benches" / ".certificates-placeholder")
         if config.production.enabled and config.letsencrypt.email
     ]
-    if not benches:
-        return
     for bench in benches:
         manager = LetsEncryptManager(bench)
         try:
             manager.renew()
-        except CommandError as error:
-            print(f"Certificate refresh failed: {error}")
-        manager.alert_expiring_certificates()
+        except (BenchError, OSError, ValueError) as error:
+            print(f"Certificate refresh failed for {bench.path}: {error}")
+        try:
+            manager.alert_expiring_certificates()
+        except (BenchError, OSError, ValueError) as error:
+            print(f"Certificate expiry check failed for {bench.path}: {error}")
 
 
 if __name__ == "__main__":

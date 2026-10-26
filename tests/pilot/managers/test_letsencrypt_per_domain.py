@@ -226,23 +226,86 @@ def _renewal_benches(*eligible: bool) -> list:
 
 @pytest.mark.parametrize("renew_fails", [False, True])
 def test_the_daily_renewal_refreshes_every_eligible_bench(tmp_path: Path, renew_fails: bool) -> None:
+    from types import SimpleNamespace
+
     from pilot.exceptions import CommandError
     from pilot.managers import letsencrypt
 
     with (
         patch("pilot.utils.cli_root", return_value=tmp_path),
         patch("pilot.utils.iter_sibling_benches", return_value=_renewal_benches(True, False, True)),
-        patch("pilot.core.bench.Bench", side_effect=lambda config, path: path),
+        patch("pilot.core.bench.Bench", side_effect=lambda config, path: SimpleNamespace(path=path)),
         patch.object(letsencrypt, "LetsEncryptManager") as manager,
     ):
         if renew_fails:
             manager.return_value.renew.side_effect = CommandError("certbot failed")
         letsencrypt.main()
 
-    benches = [call.args[0] for call in manager.call_args_list]
+    benches = [call.args[0].path for call in manager.call_args_list]
     assert benches == [Path("/benches/bench0"), Path("/benches/bench2")]
     assert manager.return_value.renew.call_count == 2
     assert manager.return_value.alert_expiring_certificates.call_count == 2
+
+
+@pytest.mark.parametrize(
+    "name,origin,expected",
+    [
+        ("site.local", None, []),
+        ("site.localhost", None, []),
+        ("site.example.com", "http", []),
+        ("site.example.com", "https", ["site.example.com"]),
+    ],
+)
+def test_private_names_and_explicit_routes_do_not_query_wildcards(
+    name: str, origin: str | None, expected: list[str]
+) -> None:
+    from pilot.exceptions import DomainProviderError
+
+    site = SiteConfig(
+        name=name,
+        apps=[],
+        ssl=True,
+        route=RoutePolicy("https", origin, "x_forwarded_for") if origin else None,
+    )
+    with patch(
+        "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+        side_effect=DomainProviderError("provider unavailable"),
+    ) as provider:
+        assert certificate_domains(site) == expected
+    provider.assert_not_called()
+
+
+def test_a_provider_failure_does_not_stop_a_later_bench_with_explicit_routes(tmp_path: Path, capsys) -> None:
+    from pilot.exceptions import DomainProviderError
+    from pilot.managers import letsencrypt
+    from pilot.managers.nginx import NginxManager
+
+    first = _bench(tmp_path, "first")
+    later = _bench(tmp_path, "later")
+    for bench in (first, later):
+        bench.config.production.enabled = True
+        bench.config.letsencrypt.email = "ops@example.test"
+    _site(first, "unknown.example.com", ssl=True)
+    _site(later, "known.example.com", route=RoutePolicy("https", "https", "x_forwarded_for").to_dict())
+    with (
+        patch(
+            "pilot.utils.iter_sibling_benches",
+            return_value=[(first.path, first.config), (later.path, later.config)],
+        ),
+        patch(
+            "pilot.core.adapters.domain_provider.DomainRouteProvider.wildcard_domains",
+            side_effect=DomainProviderError("provider unavailable"),
+        ),
+        patch.object(NginxManager, "has_cert", return_value=False),
+        patch.object(NginxManager, "apply_config"),
+        patch("pilot.managers.letsencrypt.run_command") as certbot,
+    ):
+        letsencrypt.main()
+    assert certbot.call_count == 1
+    assert "known.example.com" in certbot.call_args.args[0]
+    output = capsys.readouterr().out
+    assert f"Certificate refresh failed for {first.path}" in output
+    assert f"Certificate expiry check failed for {first.path}" in output
 
 
 @pytest.mark.parametrize("route,expected", [(None, []), ("http", []), ("https", ["site.zone.example"])])

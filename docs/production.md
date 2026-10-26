@@ -110,6 +110,8 @@ You can also set `letsencrypt.email` in `common_config.toml` before setup.
 Let's Encrypt setup also installs the host-wide user timer `pilot-certificates.timer`. It runs 15 minutes after boot and then daily. It checks each production bench's current local certificate domains and refreshes certificates near expiry or with changed domain coverage. It does not run an unfiltered host-wide `certbot renew`. Proxy-terminated and removed routes are excluded from renewal and expiry alerts. A local certificate with less than 14 days left gets an alert in the bench's notifications and its alert sinks. Its log is `system/logs/certificates.log` in the Pilot directory. Existing certificate files are retained. A separate renewal service installed by the operating system has its own configuration.
 When an upstream proxy terminates HTTPS, set `admin.tls = false` so Pilot does not change site SSL settings or request certificates.
 
+Private names and explicit route policies need no wildcard-provider lookup. If a provider lookup or certificate check fails during daily maintenance, Pilot logs the bench path and the error and continues with the other benches. A failed refresh does not prevent the expiry check for that bench.
+
 When requests arrive from configured proxy servers, Pilot preserves the forwarded scheme supplied by an edge that terminates TLS. Socket.IO also preserves an explicit browser `Origin` and reconstructs a same-origin value from the forwarded scheme and host only when that header is absent.
 
 A vhost that receives TLS through PROXY protocol v2 uses its local `$scheme` instead, because the PROXY protocol does not carry `X-Forwarded-Proto`. The scheme is chosen per vhost, so edge-terminated and passthrough vhosts can share one bench.
