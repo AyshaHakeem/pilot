@@ -229,8 +229,6 @@ def test_unchanged_ram_replaces_legacy_limits_with_computed_limits(memory) -> No
     )
     memory.manager._set_runtime_memory_limits.assert_called_once_with(sizing)
     memory.manager._write_config.assert_not_called()
-    with CommonConfig.open(root):
-        pass
     assert "memory_high_mb" not in (root / "common_config.toml").read_text()
     assert "memory_max_mb" not in (root / "common_config.toml").read_text()
 
