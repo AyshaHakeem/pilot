@@ -350,6 +350,10 @@ class AppRepository:
 
     def checkout_pinned_commit(self, sha: str) -> None:
         """Check out a specific commit SHA, staying on the app's configured branch."""
+        if self.repo.has_commit(sha):
+            # A commit never changes, so a local copy needs no fetch: a restore works offline.
+            self._checkout_pinned_ref(sha)
+            return
         self._sync_remote_url()
         self.repo.prune_stale_temp_packs()
         try:

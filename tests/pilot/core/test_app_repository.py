@@ -414,3 +414,17 @@ def test_a_shallow_clone_does_not_offer_a_same_version_commit_from_the_same_time
     repository.app.installed_version = "17.0.0.dev0"
 
     assert repository._is_ahead_of_installed(tip, "17.0.0-dev") is False
+
+
+def test_a_local_commit_is_checked_out_without_a_fetch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A restore must work when the app has no reachable remote, as when the network is down."""
+    path, _ = _repo_with_two_commits(tmp_path / "app")
+    first = GitRepo(path)._run("rev-parse", "HEAD~1").stdout.strip()
+
+    def no_network(cmd, **kwargs):
+        raise AssertionError(f"unexpected command {cmd}")
+
+    monkeypatch.setattr(repository, "run_command", no_network)
+    _repository(path).checkout_pinned_commit(first)
+
+    assert GitRepo(path).head_sha == first
