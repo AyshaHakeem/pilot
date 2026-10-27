@@ -350,7 +350,6 @@ def test_logs_sync_reinstalls_the_shipper_for_a_changed_unit(tmp_path: Path) -> 
 
 
 def test_worker_input_tails_the_pool_of_every_worker_group(tmp_path: Path) -> None:
-    """systemd runs one pool per worker group, each with its own log, such as worker_pool_long.log."""
     configurator = _configurator(tmp_path)
     config = TelemetryConfig(endpoint="https://datum.internal", token="secret")
 

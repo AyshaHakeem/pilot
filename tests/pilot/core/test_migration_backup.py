@@ -74,7 +74,6 @@ def migration_site(tmp_path: Path, database_engine: str) -> MagicMock:
 
 
 def test_a_failed_table_import_says_why(tmp_path: Path) -> None:
-    """A restore while MariaDB is down must name the cause, not only the table."""
     import gzip
 
     site = migration_site(tmp_path, "mariadb")

@@ -39,7 +39,7 @@ _CHAIN_TASKS = {
 }
 _CHAIN_PHASES = ("backing_up", "updating", "migrating")
 _REVERT_PHASES = ("reverting_apps", "reverting_sites", "restarting")
-_JOBS_WAIT_SECONDS = 300  # as long as Frappe Cloud waits before it migrates a site
+_JOBS_WAIT_SECONDS = 300
 
 
 def _now() -> str:
@@ -113,7 +113,7 @@ class MigrationOperation:
     chain: list[dict] = field(default_factory=list)  # ordered chain task records
     revert_checkpoints: dict = field(default_factory=dict)
     decisions: list = field(default_factory=list)  # user decisions, e.g. patch skips
-    is_web_restarted_in_maintenance: bool = False  # web read maintenance mode after it was turned on
+    is_web_restarted_in_maintenance: bool = False
 
     bench: "Bench" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
     store: "MigrationStore" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
@@ -265,8 +265,7 @@ class MigrationOperation:
             self.complete(on_step)
 
     def wait_for_background_jobs(self, phase: str, names: list[str], on_progress: OnProgress) -> None:
-        """Wait until the sites run no background job, as Frappe Cloud does before it migrates.
-        Maintenance mode stops their scheduler, so their queues drain."""
+        """Drain queued and running jobs while maintenance mode pauses the scheduler."""
         from pilot.managers.processes.local import ProcessManager
 
         if not names or not ProcessManager.for_bench(self.bench).is_running():
@@ -293,8 +292,7 @@ class MigrationOperation:
         raise BenchError(message)
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None, reason: str = "") -> None:
-        """Pause for the user when a chain task stopped without its failure handling. A no-op
-        once the chain moved on. `reason` is the task's last error, when it printed one."""
+        """Pause an interrupted chain step unless its successor has already taken over."""
         detail = f": {reason}" if reason else ""
         if not self.chain or self.chain[-1]["task_id"] != task_id:
             return
@@ -525,13 +523,12 @@ class MigrationOperation:
                 self.bench.site(site.name).set_maintenance_settings(site.original_config)
 
     def _lift_maintenance(self) -> None:
-        """Restore the sites' settings, and restart web so it serves them now: Frappe reads a
-        site's config again only after 60 seconds."""
+        """Restore maintenance settings and refresh web workers."""
         self._restore_maintenance()
         self.bench.reload_workers(web_only=True, raises=True)
 
     def _restart_web_in_maintenance(self, on_progress: OnProgress) -> None:
-        """Web reads maintenance mode only after 60 seconds, so restart it before a step changes a site."""
+        """Refresh Frappe's 60-second site-config cache before changing site data."""
         if self.is_web_restarted_in_maintenance:
             return
         on_progress("Restarting web so it stops serving the sites...")

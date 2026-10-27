@@ -142,7 +142,7 @@ def _fail_migration_step(meta: dict, args: dict) -> None:
 
 
 def _last_task_error(meta: dict) -> str:
-    """The last error the task printed, such as "No space left on device"; empty when it was killed."""
+    """Return the last nonnumeric task error, or an empty string."""
     log = Path(meta["bench_root"]) / "tasks" / meta["task_id"] / "output.log"
     try:
         lines = log.read_text(errors="replace").splitlines()

@@ -351,7 +351,6 @@ class AppRepository:
     def checkout_pinned_commit(self, sha: str) -> None:
         """Check out a specific commit SHA, staying on the app's configured branch."""
         if self.repo.has_commit(sha):
-            # A commit never changes, so a local copy needs no fetch: a restore works offline.
             self._checkout_pinned_ref(sha)
             return
         self._sync_remote_url()
@@ -393,7 +392,6 @@ class AppRepository:
         is_named_branch = branch and not self.is_commit_hash(branch)
         target = self.repo.get_commit_sha(ref)
         if target and target == self.repo.head_sha and (not is_named_branch or self.repo.branch == branch):
-            # Already there: a stash would only hide the working tree's edits.
             return
         stashed = self.repo.stash_all()
         if is_named_branch and self.repo.checkout_new_branch(branch, ref):

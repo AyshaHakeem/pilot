@@ -345,7 +345,6 @@ def test_successful_manual_apply_does_not_change_boot_baseline_or_swap(memory) -
 
 
 def test_the_sized_memory_includes_the_aria_page_cache() -> None:
-    """MariaDB's own 128M Aria default left a 2 GB host's server over its MemoryHigh at startup."""
     sizing = calculate_mariadb_memory(1962)
     assert sizing.aria_pagecache_mb == sizing.key_buffer_mb == 32
     startup_mb = sizing.innodb_buffer_pool_mb + sizing.key_buffer_mb + sizing.aria_pagecache_mb + 16

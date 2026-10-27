@@ -6,8 +6,7 @@ PATCH_NAME = Path(__file__).stem
 
 
 def run(benches_root: Path) -> None:
-    """Size the shared MariaDB's Aria page cache in my.cnf. MariaDB's 128M default left a
-    small host's server over its MemoryHigh, where it stalled. Applies at the next start."""
+    """Size the shared MariaDB Aria cache for its next start."""
     from pilot.config import BenchConfig
     from pilot.internal.patch_state import is_applied, mark_applied
     from pilot.managers.database import MariaDBManager

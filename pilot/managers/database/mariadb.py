@@ -395,8 +395,7 @@ class MariaDBManager(UserOwnedDBManager):
         return True
 
     def size_aria_pagecache(self) -> bool:
-        """Write the sized Aria page cache into my.cnf. It applies at the next start, because
-        MariaDB cannot resize it live. Returns whether my.cnf changed."""
+        """Write the sized Aria cache for the next start; return whether config changed."""
         if is_macos() or self.config.existing or not self.my_cnf_path.exists():
             return False
         if "aria-pagecache-buffer-size" in self.my_cnf_path.read_text():

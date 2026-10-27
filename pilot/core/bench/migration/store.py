@@ -84,8 +84,7 @@ class MigrationStore:
             )
 
     def record_action(self, operation_id: str, role: str, task_id: str) -> None:
-        """Record a queued action task on the stored operation. The task may already have
-        changed the operation, so a copy read before it was queued must not be saved."""
+        """Record against current state; the queued task may already have advanced it."""
         with exclusive_file_lock(self._update_lock_key(operation_id)):
             operation = self.get(operation_id)
             operation.task_ids[role] = task_id
@@ -100,9 +99,8 @@ class MigrationStore:
     def get_for_chain_task(
         self, operation_id: str, task_id: str, command: str, args: dict
     ) -> MigrationOperation:
-        """The operation once its chain lists this task. The task that queued it records it
-        right after, and a copy read before that would drop the record when it is saved.
-        If that task stopped first, record this one here."""
+        """Wait for registration to avoid overwriting the chain entry.
+        Recover the entry if the queuing task stopped before registering it."""
         deadline = time.monotonic() + _CHAIN_RECORD_WAIT_SECONDS
         while True:
             operation = self.get(operation_id)

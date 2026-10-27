@@ -1131,7 +1131,6 @@ def test_jobs_that_do_not_finish_pause_before_the_backup(tmp_path: Path, workloa
 
 
 def test_jobs_that_do_not_finish_pause_before_the_code_changes(tmp_path: Path, workload) -> None:
-    """The update has not started, so there is nothing to revert."""
     from pilot.core.bench.migration.store import MigrationStore
 
     workload.is_running.return_value = True
@@ -1155,7 +1154,6 @@ def test_jobs_that_do_not_finish_pause_before_the_code_changes(tmp_path: Path, w
 
 
 def test_web_restarts_once_after_maintenance_mode_is_turned_on(tmp_path: Path, workload) -> None:
-    """Frappe reads site config again only after 60 seconds, so web would serve the sites until then."""
     from pilot.core.bench.migration.store import MigrationStore
 
     workload.is_running.return_value = True
@@ -1175,7 +1173,6 @@ def test_web_restarts_once_after_maintenance_mode_is_turned_on(tmp_path: Path, w
 
     mock_bench.reload_workers.reset_mock()
     operation.migrate_site("site1.localhost")
-    # No second restart before the migrate; the completion restarts everything, then web again.
     assert mock_bench.reload_workers.call_args_list == [call(raises=True), call(web_only=True, raises=True)]
 
 
