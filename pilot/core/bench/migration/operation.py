@@ -292,9 +292,10 @@ class MigrationOperation:
             self._lift_maintenance()
         raise BenchError(message)
 
-    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
+    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None, reason: str = "") -> None:
         """Pause for the user when a chain task stopped without its failure handling. A no-op
-        once the chain moved on."""
+        once the chain moved on. `reason` is the task's last error, when it printed one."""
+        detail = f": {reason}" if reason else ""
         if not self.chain or self.chain[-1]["task_id"] != task_id:
             return
         if self.state == "retrying":
@@ -302,7 +303,7 @@ class MigrationOperation:
             return
         if self.state in _REVERT_PHASES:
             self._fail_revert(
-                BenchError("The recovery task stopped. Restore again to resume from its checkpoint.")
+                BenchError(f"The recovery task stopped{detail}. Restore again to resume from its checkpoint.")
             )
             return
         if self.state not in _CHAIN_PHASES:
@@ -314,7 +315,7 @@ class MigrationOperation:
             self._fail_site_step(phase, site_name)
         self.diagnosis = {
             "phase": phase,
-            "message": "The task stopped before it finished. Retry it, or revert.",
+            "message": f"The task stopped before it finished{detail}. Retry it, or revert.",
             "output_excerpt": "",
         }
         self._enter_needs_attention(phase, site_name)

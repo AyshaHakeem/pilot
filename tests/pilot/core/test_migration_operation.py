@@ -1248,3 +1248,32 @@ def test_a_chain_task_records_itself_when_its_queuer_stopped_first(tmp_path: Pat
     assert store.get(operation.id).chain == [
         {"command": "migrate", "task_id": "task-501", "site": "site1.localhost"}
     ]
+
+
+def test_a_stopped_step_names_the_error_the_task_printed(tmp_path: Path) -> None:
+    from pilot.internal.tasks.callbacks import _last_task_error
+
+    task_dir = tmp_path / "tasks" / "task-101"
+    task_dir.mkdir(parents=True)
+    (task_dir / "output.log").write_text(
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - STEP backup,1.0 Backing up\n"
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - Error: [Errno 28] No space left on device\n"
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - Error: 1\n"
+    )
+    reason = _last_task_error({"bench_root": str(tmp_path), "task_id": "task-101"})
+    assert reason == "[Errno 28] No space left on device"
+
+    operation, _mock_bench = _backing_up_operation(tmp_path)
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost", reason)
+    assert operation.diagnosis["message"] == (
+        "The task stopped before it finished: [Errno 28] No space left on device. Retry it, or revert."
+    )
+
+
+def test_a_killed_task_has_no_error_to_name(tmp_path: Path) -> None:
+    from pilot.internal.tasks.callbacks import _last_task_error
+
+    task_dir = tmp_path / "tasks" / "task-101"
+    task_dir.mkdir(parents=True)
+    (task_dir / "output.log").write_text("<14>1 t host migrate 1 - - Executing patch\n")
+    assert _last_task_error({"bench_root": str(tmp_path), "task_id": "task-101"}) == ""

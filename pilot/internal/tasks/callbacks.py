@@ -138,7 +138,22 @@ def _fail_migration_step(meta: dict, args: dict) -> None:
         if not operation.chain or operation.chain[-1]["task_id"] != previous_task_id:
             return
         task_id = previous_task_id
-    operation.fail_stopped_step(task_id, args["phase"], args.get("site"))
+    operation.fail_stopped_step(task_id, args["phase"], args.get("site"), _last_task_error(meta))
+
+
+def _last_task_error(meta: dict) -> str:
+    """The last error the task printed, such as "No space left on device"; empty when it was killed."""
+    log = Path(meta["bench_root"]) / "tasks" / meta["task_id"] / "output.log"
+    try:
+        lines = log.read_text(errors="replace").splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        error = line.partition(" - - ")[2] if " - - " in line else line
+        # The wrapper ends with the exit code, such as "Error: 1".
+        if error.startswith("Error: ") and not error[7:].strip().isdigit():
+            return error[7:].strip()[:500]
+    return ""
 
 
 _OPERATIONS: dict[str, CallbackOperation] = {
