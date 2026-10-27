@@ -1,5 +1,5 @@
 from pathlib import Path
-from subprocess import CompletedProcess
+from subprocess import CompletedProcess, Popen
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -73,21 +73,27 @@ def migration_site(tmp_path: Path, database_engine: str) -> MagicMock:
     return site
 
 
-def test_a_failed_table_import_says_why(tmp_path: Path) -> None:
+@pytest.mark.parametrize("rows", [1, 50000])
+def test_a_failed_table_import_says_why(tmp_path: Path, rows: int) -> None:
     import gzip
 
     site = migration_site(tmp_path, "mariadb")
     backup = SiteMigrationBackup(site)
     dump = tmp_path / "tabUser.sql.gz"
     with gzip.open(dump, "wb") as compressed:
-        compressed.write(b"INSERT INTO x VALUES (1);\n" * 50000)
+        compressed.write(b"INSERT INTO x VALUES (1);\n" * rows)
     client = tmp_path / "mariadb"
     client.write_text("#!/bin/sh\necho \"ERROR 2002 (HY000): Can't connect to server\" >&2\nexit 1\n")
     client.chmod(0o755)
+    def exited_client(*args, **kwargs):
+        process = Popen(*args, **kwargs)
+        process.wait(timeout=5)
+        return process
 
     with (
         patch.object(SiteMigrationBackup, "_cli", return_value=str(client)),
         patch.object(SiteMigrationBackup, "_conn_args", return_value=[]),
+        patch("pilot.core.site.migration_backup.subprocess.Popen", side_effect=exited_client),
         pytest.raises(BenchError, match=r"Failed to import tabUser\.sql\.gz .*Can.t connect to server"),
     ):
         backup._import_dump({}, "site_db", dump)

@@ -1286,7 +1286,8 @@ def test_a_chain_task_records_itself_when_its_queuer_stopped_first(tmp_path: Pat
     ]
 
 
-def test_a_stopped_step_names_the_error_the_task_printed(tmp_path: Path) -> None:
+@pytest.mark.parametrize("suffix", ["", "."])
+def test_a_stopped_step_names_the_error_the_task_printed(tmp_path: Path, suffix: str) -> None:
     from pilot.internal.tasks.callbacks import _last_task_error
 
     task_dir = tmp_path / "tasks" / "task-101"
@@ -1300,7 +1301,7 @@ def test_a_stopped_step_names_the_error_the_task_printed(tmp_path: Path) -> None
     assert reason == "[Errno 28] No space left on device"
 
     operation, _mock_bench = _backing_up_operation(tmp_path)
-    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost", reason)
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost", reason + suffix)
     assert operation.diagnosis["message"] == (
         "The task stopped before it finished: [Errno 28] No space left on device. Retry it, or revert."
     )

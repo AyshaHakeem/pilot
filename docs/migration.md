@@ -84,7 +84,7 @@ Putting the sites into maintenance mode first prevents writes while the bench is
 
 Maintenance mode also stops each site's scheduler, but jobs that are already queued or running continue. Before a site's backup, before the app update, and before a site's migrate, Pilot runs Frappe's `ready-for-migration` for the site until it reports no queued or running job, for up to 300 seconds. This is what Frappe Cloud does before it migrates a site. If the jobs do not finish in time, the operation goes to `needs_attention` before the step starts, so a retry runs the same step again. Pilot skips the wait while the workload is stopped, because then no worker runs jobs.
 
-Frappe reads a site's config again only after 60 seconds. So before the first step, Pilot restarts web once, and web stops serving the sites at once. When Pilot turns maintenance mode off, it restarts web again, so the sites answer at once instead of up to 60 seconds later. Web holds its socket through a restart, so requests wait instead of failing.
+Frappe reads a site's config again only after 60 seconds. So before the first step, Pilot restarts web once, and web stops serving the sites at once. When Pilot turns maintenance mode off, it restarts web again, so the sites answer at once instead of up to 60 seconds later. Under systemd, the web socket stays open during restart and queues new requests. Supervisor and older lite-mode runners briefly refuse requests while web starts.
 
 If either web restart fails, the task fails and the operation pauses for Retry. A failed restart cannot be treated as a completed maintenance change.
 

@@ -17,8 +17,8 @@ def run(benches_root: Path) -> None:
         if is_applied(bench_dir, PATCH_NAME):
             continue
         config = BenchConfig.read(bench_dir)
-        if config.db_type == "mariadb" and MariaDBManager(config.mariadb).size_aria_pagecache():
-            print("Sized MariaDB's Aria page cache. It applies when MariaDB next starts.")
+        if config.db_type == "mariadb":
+            MariaDBManager(config.mariadb).size_aria_pagecache()
         mark_applied(bench_dir, PATCH_NAME)
 
 

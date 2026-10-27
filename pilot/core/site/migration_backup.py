@@ -5,6 +5,7 @@ import json
 import shutil
 import subprocess
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -118,19 +119,20 @@ class SiteMigrationBackup:
         config = read_site_config(self.site.path)
         db_name = config["db_name"]
         previous = set(self.previous_tables)
-        restore_tables = [table for table in (tables or sorted(previous)) if table in previous]
-        for table in restore_tables:
-            if not self._dump_path(table).is_file():
-                raise BenchError(
-                    f"Missing migration table dump for {self.site.config.name}: {self._dump_path(table).name}"
-                )
-
-        for table in restore_tables:
-            self._import_dump(config, db_name, self._dump_path(table))
+        for dump in self.get_restore_dumps(tables, previous):
+            self._import_dump(config, db_name, dump)
 
         created = [t for t in self._list_tables(config, db_name) if t not in previous]
         if created:
             self._drop_tables(config, db_name, created)
+
+    def get_restore_dumps(self, tables: list[str], previous: set[str]) -> list[Path]:
+        """Validate every required dump before importing any table."""
+        dumps = [self._dump_path(table) for table in (tables or sorted(previous)) if table in previous]
+        for dump in dumps:
+            if not dump.is_file():
+                raise BenchError(f"Missing migration table dump for {self.site.config.name}: {dump.name}")
+        return dumps
 
     def discard(self) -> None:
         if self.directory.exists():
@@ -192,7 +194,8 @@ class SiteMigrationBackup:
             except BrokenPipeError:
                 pass  # the client exited early; its exit code and error tell why
             finally:
-                process.stdin.close()
+                with suppress(BrokenPipeError):
+                    process.stdin.close()
             if process.wait() != 0:
                 errors.seek(0)
                 reason = errors.read().decode(errors="replace").strip()[-500:]

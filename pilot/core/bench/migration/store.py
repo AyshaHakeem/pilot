@@ -4,13 +4,16 @@ import json
 import secrets
 import time
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.core.bench.migration.operation import AppRevision, MigrationOperation, SiteProgress
 from pilot.core.bench.migration.state import get_state
 from pilot.exceptions import BenchError, MigrationConflictError, MigrationNotFoundError
-from pilot.internal.atomic_file import atomic_write_private_text, exclusive_file_lock
+from pilot.internal.atomic_file import (
+    atomic_write_private_text,
+    exclusive_file_lock,
+    replace_private_text_locked,
+)
 from pilot.utils import make_private_directory
 
 if TYPE_CHECKING:
@@ -78,23 +81,17 @@ class MigrationStore:
 
     def save(self, operation: MigrationOperation) -> None:
         make_private_directory(self.root, parents=True)
-        with exclusive_file_lock(self._update_lock_key(operation.id)):
-            atomic_write_private_text(
-                self.root / f"{operation.id}.json", json.dumps(operation.to_dict(), indent=2)
-            )
+        atomic_write_private_text(
+            self.root / f"{operation.id}.json", json.dumps(operation.to_dict(), indent=2)
+        )
 
     def record_action(self, operation_id: str, role: str, task_id: str) -> None:
         """Record against current state; the queued task may already have advanced it."""
-        with exclusive_file_lock(self._update_lock_key(operation_id)):
+        path = self.root / f"{operation_id}.json"
+        with exclusive_file_lock(path):
             operation = self.get(operation_id)
             operation.task_ids[role] = task_id
-            atomic_write_private_text(
-                self.root / f"{operation_id}.json", json.dumps(operation.to_dict(), indent=2)
-            )
-
-    def _update_lock_key(self, operation_id: str) -> Path:
-        """Lock key for a read-modify-write of an operation; the write itself locks the file path."""
-        return self.root / f"{operation_id}.update"
+            replace_private_text_locked(path, json.dumps(operation.to_dict(), indent=2))
 
     def get_for_chain_task(
         self, operation_id: str, task_id: str, command: str, args: dict

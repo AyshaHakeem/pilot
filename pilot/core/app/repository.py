@@ -388,13 +388,11 @@ class AppRepository:
         check anything out. The stash is left alone on success: the revision being
         moved to is free to conflict with it, and dropping it would lose work.
         """
-        branch = self.app.config.branch
-        is_named_branch = branch and not self.is_commit_hash(branch)
-        target = self.repo.get_commit_sha(ref)
-        if target and target == self.repo.head_sha and (not is_named_branch or self.repo.branch == branch):
+        if self.is_at_pinned_ref(ref):
             return
+        branch = self.app.config.branch
         stashed = self.repo.stash_all()
-        if is_named_branch and self.repo.checkout_new_branch(branch, ref):
+        if branch and not self.is_commit_hash(branch) and self.repo.checkout_new_branch(branch, ref):
             return
         try:
             run_command(["git", "-C", str(self.app.path), "checkout", ref])
@@ -402,3 +400,10 @@ class AppRepository:
             if stashed:
                 self.repo.stash_pop()
             raise
+
+    def is_at_pinned_ref(self, ref: str) -> bool:
+        """Check both the revision and configured branch before touching local edits."""
+        branch = self.app.config.branch
+        if branch and not self.is_commit_hash(branch) and self.repo.branch != branch:
+            return False
+        return self.repo.get_commit_sha(ref) == self.repo.head_sha != ""

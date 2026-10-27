@@ -394,15 +394,14 @@ class MariaDBManager(UserOwnedDBManager):
             time.sleep(1)
         return True
 
-    def size_aria_pagecache(self) -> bool:
-        """Write the sized Aria cache for the next start; return whether config changed."""
+    def size_aria_pagecache(self) -> None:
+        """Write the sized Aria cache for the next start."""
         if is_macos() or self.config.existing or not self.my_cnf_path.exists():
-            return False
+            return
         if "aria-pagecache-buffer-size" in self.my_cnf_path.read_text():
-            return False
+            return
         with self.database_action_lock():
             self._write_config()
-        return True
 
     def keep_out_of_swap(self) -> None:
         """Set MemorySwapMax to 0, live first and then in the unit file, so a failed attempt can retry."""

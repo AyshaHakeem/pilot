@@ -131,6 +131,14 @@ class MigrationOperation:
         return bool(self.apps) and not self.apps_updated
 
     @property
+    def revision_pins(self) -> dict[str, RevisionPin]:
+        return {
+            revision.name: RevisionPin(kind=revision.target_kind, ref=revision.target_sha)
+            for revision in self.apps
+            if revision.target_sha
+        }
+
+    @property
     def resource_keys(self) -> list[str]:
         """Resources every task of this operation locks: bench update + each site."""
         return ["bench:update", *[f"site:{site.name.lower()}" for site in self.sites]]
@@ -209,14 +217,9 @@ class MigrationOperation:
         """
         on_step("update", "Updating apps")
         filter_set = set(self.apps_filter) if self.apps_filter else None
-        pins = {
-            revision.name: RevisionPin(kind=revision.target_kind, ref=revision.target_sha)
-            for revision in self.apps
-            if revision.target_sha
-        }
         self.wait_for_background_jobs("updating", [site.name for site in self.sites], on_progress)
         try:
-            self.bench._update_apps(filter_set, on_progress, pins)
+            self.bench._update_apps(filter_set, on_progress, self.revision_pins)
             self.bench._reinstall_apps(filter_set, on_progress)
             self.bench._rebuild_assets(filter_set, on_progress)
             for revision in self.apps:
@@ -293,7 +296,7 @@ class MigrationOperation:
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None, reason: str = "") -> None:
         """Pause an interrupted chain step unless its successor has already taken over."""
-        detail = f": {reason}" if reason else ""
+        detail = f": {reason.rstrip('.')}" if reason else ""
         if not self.chain or self.chain[-1]["task_id"] != task_id:
             return
         if self.state == "retrying":
@@ -306,6 +309,9 @@ class MigrationOperation:
             return
         if self.state not in _CHAIN_PHASES:
             return
+        self._fail_stopped_forward_step(phase, site_name, detail)
+
+    def _fail_stopped_forward_step(self, phase: str, site_name: str | None, detail: str) -> None:
         if self.state != phase or self._is_step_done(phase, site_name):
             # The step finished, but the task stopped before it queued the next task.
             phase, site_name = str(self.state), None

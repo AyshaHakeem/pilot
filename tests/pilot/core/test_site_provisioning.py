@@ -244,26 +244,27 @@ def test_enable_scheduler_fails_loudly(tmp_path: Path) -> None:
     ],
 )
 def test_pending_background_jobs_come_from_ready_for_migration(tmp_path, returncode, stdout, expected) -> None:
+    from pilot.exceptions import CommandError
+
     bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
-    result = MagicMock(returncode=returncode, stdout=stdout, stderr="")
 
-    with patch("pilot.core.site.commands.subprocess.run", return_value=result) as run:
+    error = CommandError(stdout, returncode=returncode) if returncode else None
+    with patch("pilot.core.site.commands.run_command", side_effect=error) as run:
         assert site.has_pending_background_jobs is expected
 
     assert run.call_args.args[0][-3:] == ["--site", "site1.example.com", "ready-for-migration"]
 
 
 def test_a_failed_background_job_check_fails_loudly(tmp_path: Path) -> None:
-    from pilot.exceptions import BenchError
+    from pilot.exceptions import BenchError, CommandError
 
     bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
     stderr = 'Traceback (most recent call last):\n  File "x.py", line 1\nredis.exceptions.ConnectionError: refused\n'
-    result = MagicMock(returncode=1, stdout="", stderr=stderr)
 
     with (
-        patch("pilot.core.site.commands.subprocess.run", return_value=result),
+        patch("pilot.core.site.commands.run_command", side_effect=CommandError(stderr)),
         pytest.raises(BenchError, match=r"example\.com: redis\.exceptions\.ConnectionError: refused$"),
     ):
         _ = site.has_pending_background_jobs

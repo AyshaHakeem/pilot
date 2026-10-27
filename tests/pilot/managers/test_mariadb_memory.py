@@ -275,7 +275,9 @@ def test_an_existing_server_gets_its_aria_page_cache_sized_once(tmp_path: Path) 
         patch("pilot.managers.database.mariadb.is_macos", return_value=False),
         patch.object(manager, "_total_memory_mb", return_value=1962),
         patch.object(manager, "database_action_lock", return_value=nullcontext()),
+        patch.object(manager, "_write_config", wraps=manager._write_config) as write_config,
     ):
-        assert manager.size_aria_pagecache() is True
+        manager.size_aria_pagecache()
         assert "aria-pagecache-buffer-size = 32M" in manager.my_cnf_path.read_text()
-        assert manager.size_aria_pagecache() is False
+        manager.size_aria_pagecache()
+        write_config.assert_called_once()

@@ -19,7 +19,7 @@ def _bench(root: Path, name: str, db_type: str) -> None:
 
 def test_the_shared_mariadb_is_sized_once(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
-    monkeypatch.setattr(MariaDBManager, "size_aria_pagecache", lambda self: calls.append("sized") or True)
+    monkeypatch.setattr(MariaDBManager, "size_aria_pagecache", lambda self: calls.append("sized"))
     root = tmp_path / "benches"
     _bench(root, "one", "mariadb")
     _bench(root, "two", "postgres")
