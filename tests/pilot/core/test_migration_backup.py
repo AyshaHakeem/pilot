@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from pilot.core.site.migration_backup import SiteMigrationBackup
+from pilot.exceptions import BenchError
 
 
 @pytest.mark.parametrize("database_engine", ["sqlite", "postgres"])
@@ -70,3 +71,24 @@ def migration_site(tmp_path: Path, database_engine: str) -> MagicMock:
     site.bench.migrations.unresolved_for_site.return_value = [MagicMock(id="operation-1")]
     site._frappe_call.side_effect = lambda *args: ["bench", *args]
     return site
+
+
+def test_a_failed_table_import_says_why(tmp_path: Path) -> None:
+    """A restore while MariaDB is down must name the cause, not only the table."""
+    import gzip
+
+    site = migration_site(tmp_path, "mariadb")
+    backup = SiteMigrationBackup(site)
+    dump = tmp_path / "tabUser.sql.gz"
+    with gzip.open(dump, "wb") as compressed:
+        compressed.write(b"INSERT INTO x VALUES (1);\n" * 50000)
+    client = tmp_path / "mariadb"
+    client.write_text("#!/bin/sh\necho \"ERROR 2002 (HY000): Can't connect to server\" >&2\nexit 1\n")
+    client.chmod(0o755)
+
+    with (
+        patch.object(SiteMigrationBackup, "_cli", return_value=str(client)),
+        patch.object(SiteMigrationBackup, "_conn_args", return_value=[]),
+        pytest.raises(BenchError, match=r"Failed to import tabUser\.sql\.gz .*Can.t connect to server"),
+    ):
+        backup._import_dump({}, "site_db", dump)

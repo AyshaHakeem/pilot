@@ -4,6 +4,7 @@ import gzip
 import json
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -169,14 +170,20 @@ class SiteMigrationBackup:
 
     def _import_dump(self, config: dict, db_name: str, dump: Path) -> None:
         argv = [self._cli(), *self._conn_args(config), db_name]
-        with gzip.open(dump, "rb") as compressed:
-            process = subprocess.Popen(argv, stdin=subprocess.PIPE)
+        with gzip.open(dump, "rb") as compressed, tempfile.TemporaryFile() as errors:
+            process = subprocess.Popen(argv, stdin=subprocess.PIPE, stderr=errors)
             if process.stdin is None:
                 raise BenchError("Database import input pipe was not created")
-            shutil.copyfileobj(compressed, process.stdin)
-            process.stdin.close()
+            try:
+                shutil.copyfileobj(compressed, process.stdin)
+            except BrokenPipeError:
+                pass  # the client exited early; its exit code and error tell why
+            finally:
+                process.stdin.close()
             if process.wait() != 0:
-                raise BenchError(f"Failed to import {dump.name} for {self.site.config.name}")
+                errors.seek(0)
+                reason = errors.read().decode(errors="replace").strip()[-500:]
+                raise BenchError(f"Failed to import {dump.name} for {self.site.config.name}: {reason}")
 
     def _drop_tables(self, config: dict, db_name: str, tables: list[str]) -> None:
         statements = ";".join(f"DROP TABLE IF EXISTS `{t.replace('`', '')}`" for t in tables)
