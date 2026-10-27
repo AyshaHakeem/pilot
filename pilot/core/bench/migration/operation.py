@@ -113,6 +113,7 @@ class MigrationOperation:
     chain: list[dict] = field(default_factory=list)  # ordered chain task records
     revert_checkpoints: dict = field(default_factory=dict)
     decisions: list = field(default_factory=list)  # user decisions, e.g. patch skips
+    is_web_restarted_in_maintenance: bool = False  # web read maintenance mode after it was turned on
 
     bench: "Bench" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
     store: "MigrationStore" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
@@ -193,7 +194,7 @@ class MigrationOperation:
                 "output_excerpt": "",
             }
             self._enter_needs_attention("backing_up", name)
-            self._restore_maintenance()
+            self._lift_maintenance()
             raise
         self._save()
         if self.next_backup_site() is None:
@@ -270,6 +271,7 @@ class MigrationOperation:
 
         if not names or not ProcessManager.for_bench(self.bench).is_running():
             return
+        self._restart_web_in_maintenance(on_progress)
         deadline = time.monotonic() + _JOBS_WAIT_SECONDS
         for name in names:
             on_progress(f"Waiting for the background jobs of {name}...")
@@ -287,7 +289,7 @@ class MigrationOperation:
         self.diagnosis = {"phase": phase, "message": message, "output_excerpt": ""}
         self._enter_needs_attention(phase, None if phase == "updating" else name)
         if phase == "backing_up":
-            self._restore_maintenance()
+            self._lift_maintenance()
         raise BenchError(message)
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
@@ -317,7 +319,7 @@ class MigrationOperation:
         }
         self._enter_needs_attention(phase, site_name)
         if phase == "backing_up":
-            self._restore_maintenance()
+            self._lift_maintenance()
 
     def _fail_site_step(self, phase: str, site_name: str) -> None:
         site = self.site(site_name)
@@ -461,7 +463,7 @@ class MigrationOperation:
             # The reverted apps may declare different processes; the restart then restarts them.
             self.bench.processes.apply()
             self.bench.reload_workers(raises=True)
-            self._restore_maintenance()
+            self._lift_maintenance()
             for site in self.sites:
                 if site.backup_status == "backed_up":
                     self.bench.site(site.name).migration_backup.discard()
@@ -511,12 +513,28 @@ class MigrationOperation:
             if not site.original_config:
                 site.original_config = site_obj.maintenance_settings
             site_obj.set_maintenance_mode(True)
+        self.is_web_restarted_in_maintenance = False
         self._save()
 
     def _restore_maintenance(self) -> None:
         for site in self.sites:
             if site.original_config:
                 self.bench.site(site.name).set_maintenance_settings(site.original_config)
+
+    def _lift_maintenance(self) -> None:
+        """Restore the sites' settings, and restart web so it serves them now: Frappe reads a
+        site's config again only after 60 seconds."""
+        self._restore_maintenance()
+        self.bench.reload_workers(web_only=True)
+
+    def _restart_web_in_maintenance(self, on_progress: OnProgress) -> None:
+        """Web reads maintenance mode only after 60 seconds, so restart it before a step changes a site."""
+        if self.is_web_restarted_in_maintenance:
+            return
+        on_progress("Restarting web so it stops serving the sites...")
+        self.bench.reload_workers(web_only=True)
+        self.is_web_restarted_in_maintenance = True
+        self._save()
 
     def complete(self, on_step: OnStep = _NO_STEP) -> None:
         if self.state != "migrating" or any(site.migration_status != "success" for site in self.sites):
@@ -531,7 +549,7 @@ class MigrationOperation:
             self.diagnosis = {"phase": "migrating", "message": message, "output_excerpt": ""}
             self._enter_needs_attention("migrating", None)
             raise
-        self._restore_maintenance()
+        self._lift_maintenance()
         for site in self.sites:
             if site.backup_status == "backed_up":
                 self.bench.site(site.name).migration_backup.discard()
@@ -585,6 +603,7 @@ class MigrationOperation:
             "chain": self.chain,
             "revert_checkpoints": self.revert_checkpoints,
             "decisions": self.decisions,
+            "is_web_restarted_in_maintenance": self.is_web_restarted_in_maintenance,
         }
 
     @classmethod
@@ -609,6 +628,7 @@ class MigrationOperation:
             chain=data.get("chain", []),
             revert_checkpoints=data.get("revert_checkpoints", {}),
             decisions=data.get("decisions", []),
+            is_web_restarted_in_maintenance=data.get("is_web_restarted_in_maintenance", False),
         )
         operation.bench = bench
         operation.store = store

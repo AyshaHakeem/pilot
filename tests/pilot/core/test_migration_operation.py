@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 
@@ -1146,3 +1146,41 @@ def test_jobs_that_do_not_finish_pause_before_the_code_changes(tmp_path: Path, w
     assert "The step did not start" in operation.diagnosis["message"]
     operation.retry()
     assert operation.state == "updating"
+
+
+def test_web_restarts_once_after_maintenance_mode_is_turned_on(tmp_path: Path, workload) -> None:
+    """Frappe reads site config again only after 60 seconds, so web would serve the sites until then."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs(lambda: False)
+    site.path = tmp_path
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-101"):
+        operation.begin()
+    mock_bench.reload_workers.assert_not_called()
+
+    operation.back_up_site("site1.localhost")
+    assert mock_bench.reload_workers.call_args_list == [call(web_only=True)]
+    assert operation.is_web_restarted_in_maintenance is True
+
+    mock_bench.reload_workers.reset_mock()
+    operation.migrate_site("site1.localhost")
+    # No second restart before the migrate; the completion restarts everything, then web again.
+    assert mock_bench.reload_workers.call_args_list == [call(raises=True), call(web_only=True)]
+
+
+def test_web_restarts_after_maintenance_mode_is_turned_off(tmp_path: Path) -> None:
+    operation, mock_bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("migrating")
+    operation.site("site1.localhost").migration_status = "success"
+    events = []
+    mock_bench.site.return_value.set_maintenance_settings.side_effect = lambda settings: events.append("lift")
+    mock_bench.reload_workers.side_effect = lambda **kwargs: events.append(kwargs)
+
+    operation.complete()
+
+    assert events == [{"raises": True}, "lift", {"web_only": True}]
