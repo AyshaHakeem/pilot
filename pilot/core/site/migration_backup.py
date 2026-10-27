@@ -96,9 +96,19 @@ class SiteMigrationBackup:
 
     @property
     def previous_tables(self) -> list[str]:
-        if not self.previous_tables_path.exists():
-            return []
-        return json.loads(self.previous_tables_path.read_text(encoding="utf-8"))
+        try:
+            tables = json.loads(self.previous_tables_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            raise BenchError(
+                f"Cannot read migration table inventory for {self.site.config.name}: {error}"
+            ) from error
+        if (
+            not isinstance(tables, list)
+            or not tables
+            or any(not isinstance(table, str) or not table for table in tables)
+        ):
+            raise BenchError(f"Invalid migration table inventory for {self.site.config.name}")
+        return tables
 
     def restore(self, tables: list[str]) -> None:
         """Restore a full database backup or selected MariaDB table dumps."""
@@ -108,12 +118,15 @@ class SiteMigrationBackup:
         config = read_site_config(self.site.path)
         db_name = config["db_name"]
         previous = set(self.previous_tables)
-        restore_tables = tables or list(previous)
+        restore_tables = [table for table in (tables or sorted(previous)) if table in previous]
+        for table in restore_tables:
+            if not self._dump_path(table).is_file():
+                raise BenchError(
+                    f"Missing migration table dump for {self.site.config.name}: {self._dump_path(table).name}"
+                )
 
         for table in restore_tables:
-            dump = self._dump_path(table)
-            if dump.exists():
-                self._import_dump(config, db_name, dump)
+            self._import_dump(config, db_name, self._dump_path(table))
 
         created = [t for t in self._list_tables(config, db_name) if t not in previous]
         if created:

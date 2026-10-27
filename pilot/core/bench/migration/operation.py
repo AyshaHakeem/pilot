@@ -349,8 +349,10 @@ class MigrationOperation:
         self._prepare_sites()
         self.diagnosis = None
         self._transition("retrying")
-        if phase == "backing_up" and self.failed_site:
-            self.site(self.failed_site).backup_status = "pending"
+        if phase == "backing_up":
+            # Sites were live after the failure, so every snapshot may be stale.
+            for site in self.sites:
+                site.backup_status = "pending"
         elif phase == "migrating" and self.failed_site:
             self.site(self.failed_site).migration_status = "pending"
         self.failed_site = None
@@ -526,14 +528,14 @@ class MigrationOperation:
         """Restore the sites' settings, and restart web so it serves them now: Frappe reads a
         site's config again only after 60 seconds."""
         self._restore_maintenance()
-        self.bench.reload_workers(web_only=True)
+        self.bench.reload_workers(web_only=True, raises=True)
 
     def _restart_web_in_maintenance(self, on_progress: OnProgress) -> None:
         """Web reads maintenance mode only after 60 seconds, so restart it before a step changes a site."""
         if self.is_web_restarted_in_maintenance:
             return
         on_progress("Restarting web so it stops serving the sites...")
-        self.bench.reload_workers(web_only=True)
+        self.bench.reload_workers(web_only=True, raises=True)
         self.is_web_restarted_in_maintenance = True
         self._save()
 
@@ -545,12 +547,12 @@ class MigrationOperation:
             # An updated app may declare different processes; the restart then restarts them.
             self.bench.processes.apply()
             self.bench.reload_workers(raises=True)
+            self._lift_maintenance()
         except Exception as error:
             message = f"Restarting services failed: {error}. Retry to restart them again."
             self.diagnosis = {"phase": "migrating", "message": message, "output_excerpt": ""}
             self._enter_needs_attention("migrating", None)
             raise
-        self._lift_maintenance()
         for site in self.sites:
             if site.backup_status == "backed_up":
                 self.bench.site(site.name).migration_backup.discard()

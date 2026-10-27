@@ -626,6 +626,12 @@ def test_backup_failure_restores_every_sites_original_settings(tmp_path: Path) -
             {"maintenance_mode": 0, "pause_scheduler": scheduler}
         )
 
+    operation.retry()
+    assert operation.next_backup_site() == "one.local"
+    assert all(site.backup_status == "pending" for site in operation.sites)
+    operation.back_up_site("one.local")
+    assert sites["one.local"].migration_backup.create.call_count == 2
+
 
 def test_bypass_patch_rejects_patch_other_than_diagnosed_patch(tmp_path: Path) -> None:
     mock_bench = MagicMock()
@@ -947,8 +953,8 @@ def test_a_task_killed_before_it_queued_the_next_step_pauses_for_a_retry(tmp_pat
     assert (operation.state, operation.failed_site) == ("needs_attention", None)
     operation.retry()
     assert operation.state == "backing_up"
-    assert operation.site("site1.localhost").backup_status == "backed_up"
-    assert operation.next_backup_site() == "site2.localhost"
+    assert operation.site("site1.localhost").backup_status == "pending"
+    assert operation.next_backup_site() == "site1.localhost"
 
 
 def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path) -> None:
@@ -1164,13 +1170,13 @@ def test_web_restarts_once_after_maintenance_mode_is_turned_on(tmp_path: Path, w
     mock_bench.reload_workers.assert_not_called()
 
     operation.back_up_site("site1.localhost")
-    assert mock_bench.reload_workers.call_args_list == [call(web_only=True)]
+    assert mock_bench.reload_workers.call_args_list == [call(web_only=True, raises=True)]
     assert operation.is_web_restarted_in_maintenance is True
 
     mock_bench.reload_workers.reset_mock()
     operation.migrate_site("site1.localhost")
     # No second restart before the migrate; the completion restarts everything, then web again.
-    assert mock_bench.reload_workers.call_args_list == [call(raises=True), call(web_only=True)]
+    assert mock_bench.reload_workers.call_args_list == [call(raises=True), call(web_only=True, raises=True)]
 
 
 def test_web_restarts_after_maintenance_mode_is_turned_off(tmp_path: Path) -> None:
@@ -1183,7 +1189,40 @@ def test_web_restarts_after_maintenance_mode_is_turned_off(tmp_path: Path) -> No
 
     operation.complete()
 
-    assert events == [{"raises": True}, "lift", {"web_only": True}]
+    assert events == [{"raises": True}, "lift", {"web_only": True, "raises": True}]
+
+
+def test_a_failed_web_restart_stops_the_backup(tmp_path: Path, workload) -> None:
+    from pilot.core.bench import Bench
+
+    operation, bench = _backing_up_operation(tmp_path)
+    bench.reload_workers = Bench.reload_workers.__get__(bench)
+    bench.site.return_value = _site_with_jobs(lambda: False)
+    workload.is_running.return_value = True
+    workload.reload_workers.side_effect = BenchError("web restart failed")
+
+    with pytest.raises(BenchError, match="web restart failed"):
+        operation.back_up_site("site1.localhost")
+
+    bench.site.return_value.migration_backup.create.assert_not_called()
+    assert not operation.is_web_restarted_in_maintenance
+
+
+def test_a_failed_web_restart_does_not_complete_the_operation(tmp_path: Path, workload) -> None:
+    from pilot.core.bench import Bench
+
+    operation, bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("migrating")
+    operation.site("site1.localhost").migration_status = "success"
+    bench.reload_workers = Bench.reload_workers.__get__(bench)
+    workload.reload_workers.side_effect = [None, BenchError("web restart failed")]
+
+    with pytest.raises(BenchError, match="web restart failed"):
+        operation.complete()
+
+    assert operation.state == "needs_attention"
+    assert "web restart failed" in operation.diagnosis["message"]
+    bench.site.return_value.migration_backup.discard.assert_not_called()
 
 
 def test_recording_an_action_keeps_what_the_action_already_changed(tmp_path: Path) -> None:

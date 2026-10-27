@@ -92,3 +92,63 @@ def test_a_failed_table_import_says_why(tmp_path: Path) -> None:
         pytest.raises(BenchError, match=r"Failed to import tabUser\.sql\.gz .*Can.t connect to server"),
     ):
         backup._import_dump({}, "site_db", dump)
+
+
+@pytest.mark.parametrize("inventory", [None, "{", "{}", "[]", "[42]", '["tabUser", null]'])
+def test_restore_rejects_a_missing_or_invalid_table_inventory(tmp_path: Path, inventory) -> None:
+    site = migration_site(tmp_path, "mariadb")
+    backup = SiteMigrationBackup(site)
+    backup.directory.mkdir()
+    if inventory is not None:
+        backup.previous_tables_path.write_text(inventory)
+
+    with (
+        patch.object(backup, "_list_tables", return_value=["tabUser"]) as list_tables,
+        patch.object(backup, "_import_dump") as import_dump,
+        patch.object(backup, "_drop_tables") as drop_tables,
+        pytest.raises(BenchError, match="table inventory"),
+    ):
+        backup.restore([])
+
+    list_tables.assert_not_called()
+    import_dump.assert_not_called()
+    drop_tables.assert_not_called()
+
+
+def test_restore_checks_all_required_dumps_before_it_imports_any(tmp_path: Path) -> None:
+    site = migration_site(tmp_path, "mariadb")
+    backup = SiteMigrationBackup(site)
+    backup.directory.mkdir()
+    backup.previous_tables_path.write_text('["tabUser", "tabDocType"]')
+    backup._dump_path("tabUser").write_bytes(b"dump")
+
+    with (
+        patch.object(backup, "_import_dump") as import_dump,
+        patch.object(backup, "_drop_tables") as drop_tables,
+        patch.object(backup, "_list_tables", return_value=["tabUser", "tabDocType"]),
+        pytest.raises(BenchError, match=r"tabDocType\.sql\.gz"),
+    ):
+        backup.restore(["tabUser", "tabDocType"])
+
+    import_dump.assert_not_called()
+    drop_tables.assert_not_called()
+
+
+def test_restore_drops_new_tables_without_requiring_a_dump_for_them(tmp_path: Path) -> None:
+    site = migration_site(tmp_path, "mariadb")
+    backup = SiteMigrationBackup(site)
+    backup.directory.mkdir()
+    backup.previous_tables_path.write_text('["tabUser"]')
+    backup._dump_path("tabUser").write_bytes(b"dump")
+
+    with (
+        patch.object(backup, "_import_dump") as import_dump,
+        patch.object(backup, "_drop_tables") as drop_tables,
+        patch.object(backup, "_list_tables", return_value=["tabUser", "tabNew"]),
+    ):
+        backup.restore(["tabUser", "tabNew"])
+
+    import_dump.assert_called_once_with(
+        {"db_type": "mariadb", "db_name": "site_db"}, "site_db", backup._dump_path("tabUser")
+    )
+    drop_tables.assert_called_once_with({"db_type": "mariadb", "db_name": "site_db"}, "site_db", ["tabNew"])
