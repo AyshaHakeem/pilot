@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from pilot.config import SiteConfig
 from pilot.config.site import email_sender_name
+from pilot.core.site.creation import SiteCreationOwner
 from pilot.exceptions import BenchError
+from pilot.internal.tasks.process import TASK_ID_ENV
 
 if TYPE_CHECKING:
     from pilot.config import RoutePolicy
@@ -30,9 +33,17 @@ class SiteProvisioner:
         self.db_type = db_type
 
     def provision(self, on_progress: Callable[[str], None], *, schedule_backups: bool = True) -> "Site":
+        with SiteCreationOwner(self.bench.path, self.name).locked() as owner:
+            via_wildcard = validate_new_site(self.bench, self.name, self.apps)
+            self.bench.site_aliases.release(self.name)
+            owner.claim(os.environ.get(TASK_ID_ENV, ""))
+            return self._provision(via_wildcard, on_progress, schedule_backups)
+
+    def _provision(
+        self, via_wildcard: bool, on_progress: Callable[[str], None], schedule_backups: bool
+    ) -> "Site":
         from pilot.core.site import Site
 
-        via_wildcard = validate_new_site(self.bench, self.name, self.apps)
         route = None
         if via_wildcard:
             route = register_with_provider(self.bench, self.name)
@@ -160,7 +171,8 @@ def validate_new_site(bench: "Bench", name: str, apps: list[str]) -> bool:
     from pilot.core.adapters.domain_provider import DomainRouteProvider
     from pilot.utils import host_owner, matches_wildcard, normalize_host
 
-    if (bench.sites_path / name / "site_config.json").exists():
+    path = bench.sites_path / name
+    if not path.is_symlink() and (path / "site_config.json").exists():
         raise BenchError(f"Site '{name}' already exists.")
     owner = host_owner(bench.path, name)
     if owner:

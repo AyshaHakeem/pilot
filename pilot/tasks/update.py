@@ -10,6 +10,7 @@ class UpdateTask(Task):
     """Chain link: update/reinstall/rebuild apps, then queue the first site migration."""
 
     command: ClassVar[str] = "update"
+    timeout_seconds: ClassVar[int] = 86400
 
     operation_id: str
 

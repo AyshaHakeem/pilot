@@ -21,7 +21,14 @@ const formatDate = (value?: string | null) =>
   value ? new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(value)) : ''
 
 const isEnded = computed(() => props.trial.state === 'Ended')
-const plan = computed(() => props.planName || __('paid'))
+const plan = computed(() => props.trial.plan?.title || props.planName || __('paid'))
+
+// The rate the subscription charges, once Central knows the team's billing currency.
+const price = computed(() => {
+  const trialPlan = props.trial.plan
+  if (!trialPlan?.monthly_rate || !trialPlan.currency) return ''
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: trialPlan.currency }).format(trialPlan.monthly_rate)
+})
 
 const theme = computed(() => {
   if (isEnded.value) return 'red'
@@ -42,6 +49,9 @@ const description = computed(() => {
     return __('This site is stopped. To keep the site and its data, add a payment method before {0}. Billing for the {1} plan then starts.', [formatDate(props.trial.deletes_on), plan.value])
   if (props.trial.held)
     return __('Your payment method is added, but the {0} plan is above your spending limit. Contact support to raise the limit.', [plan.value])
+
+  if (price.value)
+    return __('Your site is free until {0}. To keep the site, add a payment method. When you add it, billing for the {1} plan at {2} a month starts, and full server access turns on. You can choose a bigger plan next.', [formatDate(props.trial.ends_on), plan.value, price.value])
 
   return __('Your site is free until {0}. To keep the site, add a payment method. Billing for the {1} plan then starts, and full server access turns on.', [formatDate(props.trial.ends_on), plan.value])
 })

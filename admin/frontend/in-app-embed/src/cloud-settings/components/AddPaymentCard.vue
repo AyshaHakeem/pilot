@@ -9,11 +9,12 @@ import {
 } from '@frappe/cloud-sdk/api'
 import { Button, ErrorMessage, Skeleton, TextInput } from 'frappe-ui'
 import type { PaymentCheckout, PaymentGateway, PaymentMethodSetup } from '@frappe/cloud-sdk'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import RazorpayLogo from '../assets/Razorpay-1.svg?inline'
 import StripeLogo from '../assets/Stripe.svg?inline'
 import UpiLogo from '../assets/UPI-1.svg?inline'
 import { openExternal } from '../external'
+import { holdRazorpayCheckout, releaseRazorpayCheckout } from '../razorpayCheckout'
 import { useErrorMessage, type Store } from '../store'
 
 const __ = useTranslation()
@@ -99,6 +100,7 @@ const load = async () => {
 }
 
 onMounted(load)
+onBeforeUnmount(releaseRazorpayCheckout)
 
 const start = () => {
   if (!canContinue.value || !gateway.value) return
@@ -170,21 +172,32 @@ const openRazorpayCheckout = (handles: PaymentMethodSetup) => {
     handler: (response: RazorpayResponse) => confirmRazorpay(handles.payment_method, response),
     modal: {
       ondismiss: () => {
+        releaseRazorpayCheckout()
         working.value = false
         message.value = __('Setup cancelled.')
       },
     },
   })
 
+  // The modal stays open after a decline so the customer can try another card.
   rzp.on('payment.failed', (response) => {
     error.value = response?.error?.description || __('Your bank did not approve this. Try again or use another card.')
     working.value = false
   })
 
-  rzp.open()
+  holdRazorpayCheckout()
+
+  try {
+    rzp.open()
+  } catch (exception) {
+    releaseRazorpayCheckout()
+    throw exception
+  }
 }
 
 const confirmRazorpay = async (paymentMethod: string, response: RazorpayResponse) => {
+  releaseRazorpayCheckout()
+
   await run(async () => {
     const result = await confirmPaymentMethod({
       payment_method: paymentMethod,
@@ -257,13 +270,11 @@ const tileClass = (isSelected: boolean) => [
 </script>
 
 <template>
-  <section class="space-y-4 rounded-6 border border-outline-gray-2 p-5">
+  <section class="space-y-4">
     <div>
       <p v-if="step" class="text-p-sm text-ink-gray-5">{{ step }}</p>
 
-      <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">
-        {{ __("Payment method") }}
-      </h3>
+      <h3 class="text-base-semibold text-ink-gray-8" :class="step && 'mt-1'">{{ __("Payment method") }}</h3>
     </div>
 
     <ErrorMessage :message="error" />
@@ -375,6 +386,12 @@ const tileClass = (isSelected: boolean) => [
       />
       <ErrorMessage :message="contactError" class="mt-1" />
     </div>
+
+    <p class="flex items-center gap-1.5 text-p-sm text-ink-gray-5">
+      <span class="lucide-info size-3.5 shrink-0" aria-hidden="true" />
+      {{ __("We don't charge your payment method now. It's saved to bill automatically when your billing cycle ends.")
+      }}
+    </p>
 
     <p class="flex items-center gap-1.5 text-p-sm text-ink-gray-5">
       <template v-if="message">{{ message }}</template>

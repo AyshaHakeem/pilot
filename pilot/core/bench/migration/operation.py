@@ -34,8 +34,10 @@ _CHAIN_TASKS = {
     "revert-apps": "pilot.tasks.revert_apps.RevertAppsTask",
     "revert-site": "pilot.tasks.revert_site.RevertSiteTask",
     "restart-services": "pilot.tasks.restart_services.RestartServicesTask",
+    "complete-migration": "pilot.tasks.complete_migration.CompleteMigrationTask",
 }
 _CHAIN_PHASES = ("backing_up", "updating", "migrating")
+_REVERT_PHASES = ("reverting_apps", "reverting_sites", "restarting")
 
 
 def _now() -> str:
@@ -119,9 +121,7 @@ class MigrationOperation:
 
     @property
     def can_revert(self) -> bool:
-        return not self.safeguards_disabled and all(
-            site.backup_status == "backed_up" for site in self.sites
-        )
+        return not self.safeguards_disabled and all(site.backup_status == "backed_up" for site in self.sites)
 
     @property
     def needs_app_update(self) -> bool:
@@ -231,7 +231,7 @@ class MigrationOperation:
         self.apps_updated = True
         self._transition("migrating")
         if self.next_migrate_site() is None:
-            self._complete(on_step)
+            self.complete(on_step)
 
     def migrate_site(
         self, name: str, on_step: OnStep = _NO_STEP, on_progress: OnProgress = _NO_PROGRESS
@@ -256,12 +256,22 @@ class MigrationOperation:
             self._union_touched_tables(site)
             self._save()
         if self.next_migrate_site() is None:
-            self._complete(on_step)
+            self.complete(on_step)
 
     def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
         """Pause for the user when a chain task stopped without its failure handling. A no-op
         once the chain moved on."""
-        if self.chain[-1]["task_id"] != task_id or self.state not in _CHAIN_PHASES:
+        if not self.chain or self.chain[-1]["task_id"] != task_id:
+            return
+        if self.state == "retrying":
+            self._enter_needs_attention(self.return_state or "migrating", self.failed_site)
+            return
+        if self.state in _REVERT_PHASES:
+            self._fail_revert(
+                BenchError("The recovery task stopped. Restore again to resume from its checkpoint.")
+            )
+            return
+        if self.state not in _CHAIN_PHASES:
             return
         if self.state != phase or self._is_step_done(phase, site_name):
             # The step finished, but the task stopped before it queued the next task.
@@ -301,6 +311,7 @@ class MigrationOperation:
         if self.state != "needs_attention":
             raise MigrationStateError(f"Retry is not allowed from state {self.state}")
         phase = self.return_state or "migrating"
+        self._prepare_sites()
         self.diagnosis = None
         self._transition("retrying")
         if phase == "backing_up" and self.failed_site:
@@ -364,8 +375,7 @@ class MigrationOperation:
             (
                 site.name
                 for site in self.sites
-                if site.migration_status != "pending"
-                and not self.revert_checkpoints.get(f"site:{site.name}")
+                if site.migration_status != "pending" and not self.revert_checkpoints.get(f"site:{site.name}")
             ),
             None,
         )
@@ -418,7 +428,7 @@ class MigrationOperation:
         try:
             # The reverted apps may declare different processes; the restart then restarts them.
             self.bench.processes.apply()
-            self.bench.reload_workers()
+            self.bench.reload_workers(raises=True)
             self._restore_maintenance()
             for site in self.sites:
                 if site.backup_status == "backed_up":
@@ -476,11 +486,13 @@ class MigrationOperation:
             if site.original_config:
                 self.bench.site(site.name).set_maintenance_settings(site.original_config)
 
-    def _complete(self, on_step: OnStep) -> None:
+    def complete(self, on_step: OnStep = _NO_STEP) -> None:
+        if self.state != "migrating" or any(site.migration_status != "success" for site in self.sites):
+            raise MigrationStateError("Finish every site migration before completing the update.")
         on_step("restart", "Restarting services")
         # An updated app may declare different processes; the restart then restarts them.
         self.bench.processes.apply()
-        self.bench.reload_workers()
+        self.bench.reload_workers(raises=True)
         self._restore_maintenance()
         for site in self.sites:
             if site.backup_status == "backed_up":

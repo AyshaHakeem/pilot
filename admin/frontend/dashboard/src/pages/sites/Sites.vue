@@ -197,6 +197,7 @@ onMounted(() => {
       </TextInput>
 
       <Select
+        side="bottom"
         v-model="statusFilter"
         :options="statusOptions"
         :size="isMobile ? 'md' : 'sm'"

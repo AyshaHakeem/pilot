@@ -29,6 +29,26 @@ def _provisioner(tmp_path: Path) -> SiteProvisioner:
     return SiteProvisioner(bench, "site1.example.com", ["frappe"], "admin", "mariadb")
 
 
+def test_provisioning_records_its_owner_before_site_creation_starts(tmp_path, monkeypatch):
+    from pilot.core.site.creation import SiteCreationOwner
+
+    provisioner = _provisioner(tmp_path)
+    monkeypatch.setenv("BENCH_TASK_ID", "creating-task")
+
+    def fail_during_creation(*args):
+        assert SiteCreationOwner(tmp_path, provisioner.name).is_owned_by("creating-task")
+        raise RuntimeError("injected creation failure")
+
+    with (
+        patch("pilot.core.site.provisioning.validate_new_site", return_value=False),
+        patch.object(provisioner, "_provision", side_effect=fail_during_creation),
+        pytest.raises(RuntimeError, match="injected creation failure"),
+    ):
+        provisioner.provision(lambda message: None)
+
+    assert SiteCreationOwner(tmp_path, provisioner.name).is_owned_by("creating-task")
+
+
 def test_obtain_cert_never_regenerates_without_ssl(tmp_path: Path) -> None:
     """An ssl_ready=False pass would strip 443 bench-wide while certbot runs."""
     site = MagicMock()

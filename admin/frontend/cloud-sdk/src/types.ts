@@ -38,6 +38,15 @@ export interface BillingTrial {
   deletes_on: string | null
   /** The team has a payment method, but the plan is above its spending limit, so the trial stays open. */
   held?: boolean
+  /** The plan the site converts to, at the rate its subscription charges. */
+  plan?: BillingTrialPlan | null
+}
+
+export interface BillingTrialPlan {
+  title: string
+  /** Null until the team has a billing currency. */
+  monthly_rate: number | null
+  currency: string | null
 }
 
 export interface PlanOption {
@@ -110,6 +119,13 @@ export interface MarketplaceApp {
   installed_version: string
   latest_version: string
   has_update: boolean
+  repo?: string
+  documentation?: string
+  website?: string
+  dependencies?: string[]
+  nightly?: boolean
+  frappe_version?: string
+  categories?: string[]
 }
 
 export interface Marketplace {

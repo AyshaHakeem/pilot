@@ -66,8 +66,9 @@ onMounted(load)
 
     <div class="space-y-4">
       <div class="flex sm:flex-row flex-col gap-4">
-        <Select label="Provider" v-model="provider" :options="providerOptions" class="w-full" />
+        <Select side="bottom" label="Provider" v-model="provider" :options="providerOptions" class="w-full" />
         <Select
+          side="bottom"
           label="Region"
           v-model="region"
           :options="regionOptions"

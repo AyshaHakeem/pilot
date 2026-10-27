@@ -80,11 +80,11 @@ test('an ended trial names the deletion date', async ({ page }) => {
   await expect(page.getByText(/This site is stopped\. To keep the site and its data, add a payment method before .+\./)).toBeVisible()
 })
 
-test('during a trial, Change plan says plans open after a payment method', async ({ page }) => {
+test('during a trial, Change plan asks for a payment method before the plan list', async ({ page }) => {
   const calls = await openBilling(page, { get_billing: () => ({ message: billing() }), get_account_url: accountLinks })
 
   await page.getByRole('button', { name: 'Change plan' }).click()
-  await expect(page.getByText('Other plans open once you add a payment method.')).toBeVisible()
+  await expect(page.getByText('Your site is on a free trial. Add a payment method to keep it, then choose a bigger plan.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add payment method' })).toHaveCount(1)
   expect(calls.some((call) => call.method === 'get_plan_options')).toBe(false)
 })
@@ -126,11 +126,11 @@ test('India asks for the state and offers GSTIN', async ({ page }) => {
   })
 
   await page.getByRole('button', { name: 'Add payment method' }).click()
-  await expect(page.getByLabel('GSTIN (optional)')).toHaveCount(0)
+  await expect(page.getByLabel('GSTIN', { exact: true })).toHaveCount(0)
 
   await page.getByLabel('Country').fill('India')
-  await expect(page.getByLabel('GSTIN (optional)')).toBeVisible()
-  await expect(page.getByLabel('State', { exact: true })).toBeVisible()
+  await expect(page.getByLabel('GSTIN', { exact: true })).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'State (required)', exact: true })).toBeVisible()
 })
 
 test('a paid site moves to a bigger plan and opens the progress page', async ({ page }) => {
@@ -201,7 +201,7 @@ test('a spending limit blocks a bigger plan and says why', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Move to Pro' })).toBeDisabled()
 })
 
-test('a failed plan list offers a retry, and See more plans opens Central', async ({ page }) => {
+test('a failed plan list offers a retry, and Check more plans opens Central', async ({ page }) => {
   let attempts = 0
   await openBilling(page, {
     get_billing: () => ({ message: billing({ onTrial: null, hasCard: true }) }),
@@ -217,7 +217,7 @@ test('a failed plan list offers a retry, and See more plans opens Central', asyn
   await page.evaluate(() => {
     window.open = (url) => ((window as unknown as { opened: unknown }).opened = String(url)) && null
   })
-  await page.getByRole('button', { name: 'See more plans in Frappe Cloud' }).click()
+  await page.getByRole('button', { name: 'Check more plans', exact: true }).click()
   expect(await page.evaluate(() => (window as unknown as { opened: string }).opened)).toBe('https://cloud.example.test/plans')
 })
 
@@ -252,6 +252,47 @@ test('a trial held by the spending limit says why and offers no payment action',
   await expect(page.getByText('Your site is still on the free trial')).toBeVisible()
   await expect(page.getByText(/above your spending limit\. Contact support to raise the limit\./)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add payment method' })).toHaveCount(0)
+})
+
+test('Razorpay checkout takes clicks while the settings dialog is open', async ({ page }) => {
+  await page.route('https://checkout.razorpay.com/v1/checkout.js', (route) =>
+    route.fulfill({
+      contentType: 'application/javascript',
+      body: `window.Razorpay = class {
+        constructor(options) { this.options = options }
+        on() {}
+        open() {
+          const root = document.createElement('div')
+          root.className = 'razorpay-container'
+          root.style.cssText = 'position:fixed;inset:0;z-index:2147483647;background:#fff;padding:24px'
+          root.innerHTML = '<label>Card number <input id="rzp-card"></label><button type="button" id="rzp-pay">Pay</button><button type="button" id="rzp-close">Close checkout</button>'
+          root.querySelector('#rzp-close').onclick = () => { root.remove(); this.options.modal.ondismiss() }
+          document.body.append(root)
+        }
+      }`,
+    }),
+  )
+  await openBilling(page, {
+    get_billing: () => ({ message: billing() }),
+    get_account_url: accountLinks,
+    get_payment_gateways: () => ({ message: [{ name: 'Razorpay', label: 'Razorpay', adapter_key: 'Razorpay', method_types: ['Card'] }] }),
+    add_payment_method: () => ({ message: { key_id: 'rzp_test', order_id: 'order_1', customer_id: 'cust_1', payment_method: 'pm-1', prefill: {} } }),
+  })
+
+  await page.getByRole('button', { name: 'Add payment method' }).click()
+  await page.getByLabel('Phone').fill('9876543210')
+  await page.getByRole('button', { name: 'Continue with Razorpay' }).click()
+
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.body).pointerEvents)).toBe('none')
+  const card = page.locator('#rzp-card')
+  await card.click()
+  await expect(card).toBeFocused()
+  await expect(page.getByRole('heading', { name: 'Payment method' })).toBeVisible()
+  await page.locator('#rzp-pay').click()
+
+  await page.locator('#rzp-close').click()
+  await expect(page.getByText('Setup cancelled.')).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.getElementById('razorpay-checkout-clicks') !== null)).toBe(false)
 })
 
 test('Razorpay needs a phone number before it opens', async ({ page }) => {

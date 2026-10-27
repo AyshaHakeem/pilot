@@ -10,6 +10,7 @@ class MigrateTask(Task):
     """Chain link: migrate one site, then queue the next site (or complete)."""
 
     command: ClassVar[str] = "migrate"
+    timeout_seconds: ClassVar[int] = 86400
 
     operation_id: str
     site: str

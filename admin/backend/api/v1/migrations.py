@@ -56,6 +56,7 @@ _CHAIN_LABELS = {
     "migration-backup": "Backup",
     "update": "Update apps",
     "migrate": "Migrate",
+    "complete-migration": "Finish update",
     "revert-apps": "Revert apps",
     "revert-site": "Recover site",
     "restart-services": "Restart services",
@@ -78,9 +79,7 @@ def _task_logs(operation: MigrationOperation) -> list[dict]:
         key = (record["command"], site)
         attempts[key] = attempts.get(key, 0) + 1
         label = base if attempts[key] == 1 else f"{base} (attempt {attempts[key]})"
-        logs.append(
-            {"id": task_id, "label": label, "site": site, "status": _task_status(store, task_id)}
-        )
+        logs.append({"id": task_id, "label": label, "site": site, "status": _task_status(store, task_id)})
     return logs
 
 

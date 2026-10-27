@@ -22,6 +22,12 @@ class SiteDomains:
         """Register a domain and return its provider route policy."""
         return self._provider.register(self.site.config.name, domain)
 
+    def attach(self, domain: str, *, primary: bool = False) -> None:
+        if not primary or not self.status(domain)[0]:
+            self.register(domain)
+        if primary:
+            self.set_primary(domain)
+
     def deregister(self, domain: str) -> None:
         self._provider.deregister(self.site.config.name, domain)
 
@@ -49,10 +55,7 @@ class SiteDomains:
         config = self._site_config()
         site_name = config.name
         primary = self.primary() or site_name
-        rows = [
-            self._description(config, domain, domain == primary)
-            for domain in [site_name, *self.names()]
-        ]
+        rows = [self._description(config, domain, domain == primary) for domain in [site_name, *self.names()]]
         return rows, primary
 
     def describe_domain(self, domain: str) -> dict[str, str | bool] | None:
@@ -114,13 +117,13 @@ class SiteDomains:
             domains=config.get("domains") or [],
             route=RoutePolicy.from_dict(config["route"]) if config.get("route") else None,
         )
-        return bool(site.tls_domains)
+        from pilot.managers.letsencrypt import certificate_domains
+
+        return bool(certificate_domains(site))
 
     def _site_config(self) -> "SiteConfig":
         return next(
-            site.config
-            for site in self.site.bench.sites()
-            if site.config.name == self.site.config.name
+            site.config for site in self.site.bench.sites() if site.config.name == self.site.config.name
         )
 
     def _description(

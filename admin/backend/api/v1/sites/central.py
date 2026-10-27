@@ -75,6 +75,6 @@ def account_url(name: str):
         "url": url,
         "billing": f"{url}/dashboard/billing",
         "change_plan": f"{url}/dashboard/servers?{urlencode({'pilot': audience, 'action': 'resize'})}",
-        "server": f"{url}/dashboard/servers?{urlencode({'pilot': audience, 'action': 'open-bench'})}",
+        "server": f"{url}/api/method/central.api.sso.open_bench?{urlencode({'pilot': audience})}",
     }
     return jsonify(link)

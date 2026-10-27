@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from pilot.core.bench.hostname_aliases import HostnameAliases
     from pilot.core.bench.migration.store import MigrationStore
     from pilot.core.bench.processes import BenchProcesses
+    from pilot.core.bench.site_aliases import SiteAliases
     from pilot.core.database import Database
     from pilot.core.notification import NotificationStore
     from pilot.core.site import Site
@@ -105,6 +106,12 @@ class Bench:
         return BenchProcesses(self)
 
     @cached_property
+    def site_aliases(self) -> "SiteAliases":
+        from pilot.core.bench.site_aliases import SiteAliases
+
+        return SiteAliases(self)
+
+    @cached_property
     def backups(self) -> "BenchBackups":
         from pilot.core.bench.backups import BenchBackups
 
@@ -173,7 +180,7 @@ class Bench:
 
     @property
     def is_initialized(self) -> bool:
-        return self.python.exists()
+        return self.python.exists() and not (self.path / ".initializing").exists()
 
     @property
     def frappe_call(self) -> list[str]:
@@ -451,6 +458,9 @@ class Bench:
         if not target:
             return None
         skip = normalize_host(ignoring) if ignoring else ""
+        pending_owner = self.site_aliases.pending_owner(target)
+        if pending_owner and normalize_host(pending_owner) != skip:
+            return pending_owner
         for site in self.sites():
             if skip and normalize_host(site.config.name) == skip:
                 continue
