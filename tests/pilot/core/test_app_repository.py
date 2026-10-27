@@ -428,3 +428,14 @@ def test_a_local_commit_is_checked_out_without_a_fetch(tmp_path: Path, monkeypat
     _repository(path).checkout_pinned_commit(first)
 
     assert GitRepo(path).head_sha == first
+
+
+def test_checking_out_the_current_commit_keeps_the_working_tree(tmp_path: Path) -> None:
+    """A restore checks every app out, also one the update did not change; its edits must stay."""
+    path, head = _repo_with_two_commits(tmp_path / "app")
+    (path / "file").write_text("an uncommitted edit")
+
+    _repository(path)._checkout_pinned_ref(head)
+
+    assert (path / "file").read_text() == "an uncommitted edit"
+    assert GitRepo(path)._text("stash", "list") == ""
