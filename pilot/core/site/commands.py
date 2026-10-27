@@ -97,8 +97,9 @@ class SiteCommands:
             return False
         if "NOT READY" in result.stdout:
             return True
-        output = (result.stderr or result.stdout).strip()[-1000:]
-        raise BenchError(f"Could not check the background jobs of {self.site.config.name}: {output}")
+        # The last line is the exception, such as redis' "Connection refused".
+        reason = ((result.stderr or result.stdout).strip().splitlines() or ["no output"])[-1]
+        raise BenchError(f"Could not check the background jobs of {self.site.config.name}: {reason}")
 
     def clear_cache(self) -> None:
         cmd = self.site._frappe_call("frappe", "--site", self.site.config.name, "clear-cache")

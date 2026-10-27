@@ -259,11 +259,12 @@ def test_a_failed_background_job_check_fails_loudly(tmp_path: Path) -> None:
 
     bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
-    result = MagicMock(returncode=1, stdout="", stderr="redis.exceptions.ConnectionError: refused")
+    stderr = 'Traceback (most recent call last):\n  File "x.py", line 1\nredis.exceptions.ConnectionError: refused\n'
+    result = MagicMock(returncode=1, stdout="", stderr=stderr)
 
     with (
         patch("pilot.core.site.commands.subprocess.run", return_value=result),
-        pytest.raises(BenchError, match="ConnectionError"),
+        pytest.raises(BenchError, match=r"example\.com: redis\.exceptions\.ConnectionError: refused$"),
     ):
         _ = site.has_pending_background_jobs
 
