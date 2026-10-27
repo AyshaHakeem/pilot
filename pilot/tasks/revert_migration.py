@@ -16,12 +16,14 @@ class RevertMigrationTask(Task):
 
     def run(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
+        if self.running_task_id:
+            operation.task_ids["restore"] = self.running_task_id
         try:
             operation.revert()
         except Exception:
             self.step_failed()
             sys.exit(1)
-        operation.enqueue_next(handoff_from=operation.task_ids.get("restore"))
+        operation.enqueue_next(handoff_from=self.running_task_id or None)
 
     @on_failure
     @on_cancel

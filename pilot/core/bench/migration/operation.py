@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -38,6 +39,7 @@ _CHAIN_TASKS = {
 }
 _CHAIN_PHASES = ("backing_up", "updating", "migrating")
 _REVERT_PHASES = ("reverting_apps", "reverting_sites", "restarting")
+_JOBS_WAIT_SECONDS = 300
 
 
 def _now() -> str:
@@ -111,6 +113,7 @@ class MigrationOperation:
     chain: list[dict] = field(default_factory=list)  # ordered chain task records
     revert_checkpoints: dict = field(default_factory=dict)
     decisions: list = field(default_factory=list)  # user decisions, e.g. patch skips
+    is_web_restarted_in_maintenance: bool = False
 
     bench: "Bench" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
     store: "MigrationStore" = field(default=None, repr=False, compare=False)  # type: ignore[assignment]
@@ -126,6 +129,14 @@ class MigrationOperation:
     @property
     def needs_app_update(self) -> bool:
         return bool(self.apps) and not self.apps_updated
+
+    @property
+    def revision_pins(self) -> dict[str, RevisionPin]:
+        return {
+            revision.name: RevisionPin(kind=revision.target_kind, ref=revision.target_sha)
+            for revision in self.apps
+            if revision.target_sha
+        }
 
     @property
     def resource_keys(self) -> list[str]:
@@ -176,6 +187,7 @@ class MigrationOperation:
     ) -> None:
         site = self.site(name)
         on_step("backup", f"Backing up {name}")
+        self.wait_for_background_jobs("backing_up", [name], on_progress)
         site.backup_status = "backing_up"
         self._save()
         try:
@@ -190,7 +202,7 @@ class MigrationOperation:
                 "output_excerpt": "",
             }
             self._enter_needs_attention("backing_up", name)
-            self._restore_maintenance()
+            self._lift_maintenance()
             raise
         self._save()
         if self.next_backup_site() is None:
@@ -205,13 +217,9 @@ class MigrationOperation:
         """
         on_step("update", "Updating apps")
         filter_set = set(self.apps_filter) if self.apps_filter else None
-        pins = {
-            revision.name: RevisionPin(kind=revision.target_kind, ref=revision.target_sha)
-            for revision in self.apps
-            if revision.target_sha
-        }
+        self.wait_for_background_jobs("updating", [site.name for site in self.sites], on_progress)
         try:
-            self.bench._update_apps(filter_set, on_progress, pins)
+            self.bench._update_apps(filter_set, on_progress, self.revision_pins)
             self.bench._reinstall_apps(filter_set, on_progress)
             self.bench._rebuild_assets(filter_set, on_progress)
             for revision in self.apps:
@@ -238,6 +246,7 @@ class MigrationOperation:
     ) -> None:
         site = self.site(name)
         on_step("migrate", f"Migrating {name}")
+        self.wait_for_background_jobs("migrating", [name], on_progress)
         site.migration_status = "running"
         self._save()
         try:
@@ -258,9 +267,36 @@ class MigrationOperation:
         if self.next_migrate_site() is None:
             self.complete(on_step)
 
-    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None) -> None:
-        """Pause for the user when a chain task stopped without its failure handling. A no-op
-        once the chain moved on."""
+    def wait_for_background_jobs(self, phase: str, names: list[str], on_progress: OnProgress) -> None:
+        """Drain queued and running jobs while maintenance mode pauses the scheduler."""
+        from pilot.managers.processes.local import ProcessManager
+
+        if not names or not ProcessManager.for_bench(self.bench).is_running():
+            return
+        self._restart_web_in_maintenance(on_progress)
+        deadline = time.monotonic() + _JOBS_WAIT_SECONDS
+        for name in names:
+            on_progress(f"Waiting for the background jobs of {name}...")
+            try:
+                while self.bench.site(name).has_pending_background_jobs:
+                    if time.monotonic() >= deadline:
+                        raise BenchError(
+                            f"{name} still has background jobs after {_JOBS_WAIT_SECONDS} seconds."
+                        )
+                    time.sleep(2)
+            except BenchError as error:
+                self._pause_before_step(phase, name, f"{error} The step did not start. Retry later.")
+
+    def _pause_before_step(self, phase: str, name: str, message: str) -> None:
+        self.diagnosis = {"phase": phase, "message": message, "output_excerpt": ""}
+        self._enter_needs_attention(phase, None if phase == "updating" else name)
+        if phase == "backing_up":
+            self._lift_maintenance()
+        raise BenchError(message)
+
+    def fail_stopped_step(self, task_id: str, phase: str, site_name: str | None, reason: str = "") -> None:
+        """Pause an interrupted chain step unless its successor has already taken over."""
+        detail = f": {reason.rstrip('.')}" if reason else ""
         if not self.chain or self.chain[-1]["task_id"] != task_id:
             return
         if self.state == "retrying":
@@ -268,11 +304,14 @@ class MigrationOperation:
             return
         if self.state in _REVERT_PHASES:
             self._fail_revert(
-                BenchError("The recovery task stopped. Restore again to resume from its checkpoint.")
+                BenchError(f"The recovery task stopped{detail}. Restore again to resume from its checkpoint.")
             )
             return
         if self.state not in _CHAIN_PHASES:
             return
+        self._fail_stopped_forward_step(phase, site_name, detail)
+
+    def _fail_stopped_forward_step(self, phase: str, site_name: str | None, detail: str) -> None:
         if self.state != phase or self._is_step_done(phase, site_name):
             # The step finished, but the task stopped before it queued the next task.
             phase, site_name = str(self.state), None
@@ -280,12 +319,12 @@ class MigrationOperation:
             self._fail_site_step(phase, site_name)
         self.diagnosis = {
             "phase": phase,
-            "message": "The task stopped before it finished. Retry it, or revert.",
+            "message": f"The task stopped before it finished{detail}. Retry it, or revert.",
             "output_excerpt": "",
         }
         self._enter_needs_attention(phase, site_name)
         if phase == "backing_up":
-            self._restore_maintenance()
+            self._lift_maintenance()
 
     def _fail_site_step(self, phase: str, site_name: str) -> None:
         site = self.site(site_name)
@@ -314,8 +353,10 @@ class MigrationOperation:
         self._prepare_sites()
         self.diagnosis = None
         self._transition("retrying")
-        if phase == "backing_up" and self.failed_site:
-            self.site(self.failed_site).backup_status = "pending"
+        if phase == "backing_up":
+            # Sites were live after the failure, so every snapshot may be stale.
+            for site in self.sites:
+                site.backup_status = "pending"
         elif phase == "migrating" and self.failed_site:
             self.site(self.failed_site).migration_status = "pending"
         self.failed_site = None
@@ -429,7 +470,7 @@ class MigrationOperation:
             # The reverted apps may declare different processes; the restart then restarts them.
             self.bench.processes.apply()
             self.bench.reload_workers(raises=True)
-            self._restore_maintenance()
+            self._lift_maintenance()
             for site in self.sites:
                 if site.backup_status == "backed_up":
                     self.bench.site(site.name).migration_backup.discard()
@@ -479,6 +520,7 @@ class MigrationOperation:
             if not site.original_config:
                 site.original_config = site_obj.maintenance_settings
             site_obj.set_maintenance_mode(True)
+        self.is_web_restarted_in_maintenance = False
         self._save()
 
     def _restore_maintenance(self) -> None:
@@ -486,14 +528,34 @@ class MigrationOperation:
             if site.original_config:
                 self.bench.site(site.name).set_maintenance_settings(site.original_config)
 
+    def _lift_maintenance(self) -> None:
+        """Restore maintenance settings and refresh web workers."""
+        self._restore_maintenance()
+        self.bench.reload_workers(web_only=True, raises=True)
+
+    def _restart_web_in_maintenance(self, on_progress: OnProgress) -> None:
+        """Refresh Frappe's 60-second site-config cache before changing site data."""
+        if self.is_web_restarted_in_maintenance:
+            return
+        on_progress("Restarting web so it stops serving the sites...")
+        self.bench.reload_workers(web_only=True, raises=True)
+        self.is_web_restarted_in_maintenance = True
+        self._save()
+
     def complete(self, on_step: OnStep = _NO_STEP) -> None:
         if self.state != "migrating" or any(site.migration_status != "success" for site in self.sites):
             raise MigrationStateError("Finish every site migration before completing the update.")
         on_step("restart", "Restarting services")
-        # An updated app may declare different processes; the restart then restarts them.
-        self.bench.processes.apply()
-        self.bench.reload_workers(raises=True)
-        self._restore_maintenance()
+        try:
+            # An updated app may declare different processes; the restart then restarts them.
+            self.bench.processes.apply()
+            self.bench.reload_workers(raises=True)
+            self._lift_maintenance()
+        except Exception as error:
+            message = f"Restarting services failed: {error}. Retry to restart them again."
+            self.diagnosis = {"phase": "migrating", "message": message, "output_excerpt": ""}
+            self._enter_needs_attention("migrating", None)
+            raise
         for site in self.sites:
             if site.backup_status == "backed_up":
                 self.bench.site(site.name).migration_backup.discard()
@@ -547,6 +609,7 @@ class MigrationOperation:
             "chain": self.chain,
             "revert_checkpoints": self.revert_checkpoints,
             "decisions": self.decisions,
+            "is_web_restarted_in_maintenance": self.is_web_restarted_in_maintenance,
         }
 
     @classmethod
@@ -571,6 +634,7 @@ class MigrationOperation:
             chain=data.get("chain", []),
             revert_checkpoints=data.get("revert_checkpoints", {}),
             decisions=data.get("decisions", []),
+            is_web_restarted_in_maintenance=data.get("is_web_restarted_in_maintenance", False),
         )
         operation.bench = bench
         operation.store = store

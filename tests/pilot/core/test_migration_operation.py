@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, call, patch
 
 import pytest
 
@@ -13,6 +13,15 @@ from pilot.core.bench.migration.operation import AppRevision, SiteProgress
 from pilot.core.bench.migration.state import MigrationStateError, get_state, validate_transition
 from pilot.exceptions import BenchError, MigrateError
 from pilot.integrations.marketplace import Marketplace
+
+
+@pytest.fixture(autouse=True)
+def workload(monkeypatch):
+    """A stopped workload runs no job, so the steps skip the background-job wait unless a test starts it."""
+    manager = MagicMock()
+    manager.is_running.return_value = False
+    monkeypatch.setattr("pilot.managers.processes.local.ProcessManager.for_bench", lambda bench: manager)
+    return manager
 
 
 def test_state_transitions() -> None:
@@ -617,6 +626,12 @@ def test_backup_failure_restores_every_sites_original_settings(tmp_path: Path) -
             {"maintenance_mode": 0, "pause_scheduler": scheduler}
         )
 
+    operation.retry()
+    assert operation.next_backup_site() == "one.local"
+    assert all(site.backup_status == "pending" for site in operation.sites)
+    operation.back_up_site("one.local")
+    assert sites["one.local"].migration_backup.create.call_count == 2
+
 
 def test_bypass_patch_rejects_patch_other_than_diagnosed_patch(tmp_path: Path) -> None:
     mock_bench = MagicMock()
@@ -938,8 +953,8 @@ def test_a_task_killed_before_it_queued_the_next_step_pauses_for_a_retry(tmp_pat
     assert (operation.state, operation.failed_site) == ("needs_attention", None)
     operation.retry()
     assert operation.state == "backing_up"
-    assert operation.site("site1.localhost").backup_status == "backed_up"
-    assert operation.next_backup_site() == "site2.localhost"
+    assert operation.site("site1.localhost").backup_status == "pending"
+    assert operation.next_backup_site() == "site1.localhost"
 
 
 def test_a_killed_migration_keeps_what_it_touched_for_the_revert(tmp_path: Path) -> None:
@@ -1022,7 +1037,10 @@ def test_retrying_a_failed_final_restart_does_not_migrate_sites_again(tmp_path, 
     with pytest.raises(BenchError, match="restart failed"):
         operation.complete()
     bench.reload_workers.assert_called_with(raises=True)
+    assert operation.state == "needs_attention"
+    assert "Restarting services failed: restart failed" in operation.diagnosis["message"]
     operation.fail_stopped_step("task-101", "migrating", None)
+    assert "Restarting services failed" in operation.diagnosis["message"]
     operation.retry()
 
     assert operation.state.next_step(operation) == ("complete-migration", {})
@@ -1054,3 +1072,245 @@ def test_an_interruption_in_the_retrying_state_can_be_retried_or_reverted(tmp_pa
     assert operation.can_revert
     operation.retry()
     assert operation.state == "migrating"
+
+
+def _site_with_jobs(pending: list[bool] | Exception) -> MagicMock:
+    site = MagicMock()
+    site.maintenance_settings = {"maintenance_mode": 0, "pause_scheduler": 0}
+    type(site).has_pending_background_jobs = PropertyMock(side_effect=pending)
+    return site
+
+
+def test_a_migration_waits_until_the_site_runs_no_background_job(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs([True, True, False])
+    site.path = tmp_path
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost", with_safeguards=False)
+    operation.state = get_state("migrating")
+
+    with patch("pilot.core.bench.migration.operation.time.sleep") as sleep:
+        operation.migrate_site("site1.localhost")
+
+    assert sleep.call_count == 2
+    site.migrate.assert_called_once_with()
+    assert operation.state == "completed"
+
+
+def test_jobs_that_do_not_finish_pause_before_the_backup(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs(lambda: True)
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-101"):
+        operation.begin()
+
+    clock = iter([0, 100, 301])
+    with (
+        patch("pilot.core.bench.migration.operation.time.monotonic", side_effect=lambda: next(clock)),
+        patch("pilot.core.bench.migration.operation.time.sleep"),
+        pytest.raises(BenchError, match="still has background jobs after 300 seconds"),
+    ):
+        operation.back_up_site("site1.localhost")
+
+    site.migration_backup.create.assert_not_called()
+    assert operation.state == "needs_attention"
+    assert operation.failed_site == "site1.localhost"
+    assert operation.site("site1.localhost").backup_status == "pending"
+    site.set_maintenance_settings.assert_called_with({"maintenance_mode": 0, "pause_scheduler": 0})
+    operation.retry()
+    assert operation.next_backup_site() == "site1.localhost"
+
+
+def test_jobs_that_do_not_finish_pause_before_the_code_changes(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    mock_bench.site.return_value = _site_with_jobs(BenchError("redis is down"))
+    operation = MigrationStore(mock_bench)._create(
+        "update", apps=[AppRevision("frappe", "1111111")], apps_filter=None, sites=["site1.localhost"]
+    )
+    operation.state = get_state("updating")
+
+    with pytest.raises(BenchError, match="redis is down"):
+        operation.update_apps()
+
+    mock_bench._update_apps.assert_not_called()
+    assert operation.state == "needs_attention"
+    assert operation.failed_site is None
+    assert "The step did not start" in operation.diagnosis["message"]
+    operation.retry()
+    assert operation.state == "updating"
+
+
+def test_web_restarts_once_after_maintenance_mode_is_turned_on(tmp_path: Path, workload) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    workload.is_running.return_value = True
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    site = _site_with_jobs(lambda: False)
+    site.path = tmp_path
+    mock_bench.site.return_value = site
+    operation = MigrationStore(mock_bench).create_site_migrate("site1.localhost")
+    with patch("pilot.tasks.migration_backup.MigrationBackupTask.queue", return_value="task-101"):
+        operation.begin()
+    mock_bench.reload_workers.assert_not_called()
+
+    operation.back_up_site("site1.localhost")
+    assert mock_bench.reload_workers.call_args_list == [call(web_only=True, raises=True)]
+    assert operation.is_web_restarted_in_maintenance is True
+
+    mock_bench.reload_workers.reset_mock()
+    operation.migrate_site("site1.localhost")
+    assert mock_bench.reload_workers.call_args_list == [call(raises=True), call(web_only=True, raises=True)]
+
+
+def test_web_restarts_after_maintenance_mode_is_turned_off(tmp_path: Path) -> None:
+    operation, mock_bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("migrating")
+    operation.site("site1.localhost").migration_status = "success"
+    events = []
+    mock_bench.site.return_value.set_maintenance_settings.side_effect = lambda settings: events.append("lift")
+    mock_bench.reload_workers.side_effect = lambda **kwargs: events.append(kwargs)
+
+    operation.complete()
+
+    assert events == [{"raises": True}, "lift", {"web_only": True, "raises": True}]
+
+
+def test_a_failed_web_restart_stops_the_backup(tmp_path: Path, workload) -> None:
+    from pilot.core.bench import Bench
+
+    operation, bench = _backing_up_operation(tmp_path)
+    bench.reload_workers = Bench.reload_workers.__get__(bench)
+    bench.site.return_value = _site_with_jobs(lambda: False)
+    workload.is_running.return_value = True
+    workload.reload_workers.side_effect = BenchError("web restart failed")
+
+    with pytest.raises(BenchError, match="web restart failed"):
+        operation.back_up_site("site1.localhost")
+
+    bench.site.return_value.migration_backup.create.assert_not_called()
+    assert not operation.is_web_restarted_in_maintenance
+
+
+def test_a_failed_web_restart_does_not_complete_the_operation(tmp_path: Path, workload) -> None:
+    from pilot.core.bench import Bench
+
+    operation, bench = _backing_up_operation(tmp_path)
+    operation.state = get_state("migrating")
+    operation.site("site1.localhost").migration_status = "success"
+    bench.reload_workers = Bench.reload_workers.__get__(bench)
+    workload.reload_workers.side_effect = [None, BenchError("web restart failed")]
+
+    with pytest.raises(BenchError, match="web restart failed"):
+        operation.complete()
+
+    assert operation.state == "needs_attention"
+    assert "web restart failed" in operation.diagnosis["message"]
+    bench.site.return_value.migration_backup.discard.assert_not_called()
+
+
+def test_recording_an_action_keeps_what_the_action_already_changed(tmp_path: Path) -> None:
+    """The API read the operation before it queued Retry; the task may have moved it on since."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    stale = store.create_site_migrate("site1.localhost")
+    moved = store.get(stale.id)
+    moved.state = get_state("backing_up")
+    store.save(moved)
+
+    store.record_action(stale.id, "retry", "task-301")
+
+    stored = store.get(stale.id)
+    assert stored.state == "backing_up"
+    assert stored.task_ids == {"retry": "task-301"}
+
+
+def test_a_chain_task_waits_until_its_queuer_has_recorded_it(tmp_path: Path) -> None:
+    """A copy read before the record would drop it when saved, and a failure would then go unnoticed."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    operation = store.create_site_migrate("site1.localhost")
+    reads = []
+
+    def get(operation_id):
+        reads.append(operation_id)
+        if len(reads) == 2:
+            recorded = MigrationStore.get(store, operation_id)
+            recorded.chain.append({"command": "migrate", "task_id": "task-401", "site": "site1.localhost"})
+            store.save(recorded)
+        return MigrationStore.get(store, operation_id)
+
+    with patch.object(store, "get", side_effect=get), patch("pilot.core.bench.migration.store.time.sleep"):
+        loaded = store.get_for_chain_task(operation.id, "task-401", "migrate", {"site": "site1.localhost"})
+
+    assert len(reads) == 2
+    assert loaded.chain[-1]["task_id"] == "task-401"
+
+
+def test_a_chain_task_records_itself_when_its_queuer_stopped_first(tmp_path: Path) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    operation = store.create_site_migrate("site1.localhost")
+    clock = iter([0, 10, 31])
+
+    with (
+        patch("pilot.core.bench.migration.store.time.monotonic", side_effect=lambda: next(clock)),
+        patch("pilot.core.bench.migration.store.time.sleep"),
+    ):
+        store.get_for_chain_task(operation.id, "task-501", "migrate", {"site": "site1.localhost"})
+
+    assert store.get(operation.id).chain == [
+        {"command": "migrate", "task_id": "task-501", "site": "site1.localhost"}
+    ]
+
+
+@pytest.mark.parametrize("suffix", ["", "."])
+def test_a_stopped_step_names_the_error_the_task_printed(tmp_path: Path, suffix: str) -> None:
+    from pilot.internal.tasks.callbacks import _last_task_error
+
+    task_dir = tmp_path / "tasks" / "task-101"
+    task_dir.mkdir(parents=True)
+    (task_dir / "output.log").write_text(
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - STEP backup,1.0 Backing up\n"
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - Error: [Errno 28] No space left on device\n"
+        "<14>1 2026-10-27T04:25:21+00:00 host migration-backup 1 - - Error: 1\n"
+    )
+    reason = _last_task_error({"bench_root": str(tmp_path), "task_id": "task-101"})
+    assert reason == "[Errno 28] No space left on device"
+
+    operation, _mock_bench = _backing_up_operation(tmp_path)
+    operation.fail_stopped_step("task-101", "backing_up", "site1.localhost", reason + suffix)
+    assert operation.diagnosis["message"] == (
+        "The task stopped before it finished: [Errno 28] No space left on device. Retry it, or revert."
+    )
+
+
+def test_a_killed_task_has_no_error_to_name(tmp_path: Path) -> None:
+    from pilot.internal.tasks.callbacks import _last_task_error
+
+    task_dir = tmp_path / "tasks" / "task-101"
+    task_dir.mkdir(parents=True)
+    (task_dir / "output.log").write_text("<14>1 t host migrate 1 - - Executing patch\n")
+    assert _last_task_error({"bench_root": str(tmp_path), "task_id": "task-101"}) == ""

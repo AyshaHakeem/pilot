@@ -236,6 +236,40 @@ def test_enable_scheduler_fails_loudly(tmp_path: Path) -> None:
             raise AssertionError("expected BenchError")
 
 
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "expected"),
+    [
+        (0, "READY for migration: site site1.example.com does not have any background jobs", False),
+        (1, "NOT READY for migration: site site1.example.com has pending background jobs", True),
+    ],
+)
+def test_pending_background_jobs_come_from_ready_for_migration(tmp_path, returncode, stdout, expected) -> None:
+    from pilot.exceptions import CommandError
+
+    bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
+    site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
+
+    error = CommandError(stdout, returncode=returncode) if returncode else None
+    with patch("pilot.core.site.commands.run_command", side_effect=error) as run:
+        assert site.has_pending_background_jobs is expected
+
+    assert run.call_args.args[0][-3:] == ["--site", "site1.example.com", "ready-for-migration"]
+
+
+def test_a_failed_background_job_check_fails_loudly(tmp_path: Path) -> None:
+    from pilot.exceptions import BenchError, CommandError
+
+    bench = Bench(BenchConfig._from_dict(_BASE_DATA), tmp_path)
+    site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), bench)
+    stderr = 'Traceback (most recent call last):\n  File "x.py", line 1\nredis.exceptions.ConnectionError: refused\n'
+
+    with (
+        patch("pilot.core.site.commands.run_command", side_effect=CommandError(stderr)),
+        pytest.raises(BenchError, match=r"example\.com: redis\.exceptions\.ConnectionError: refused$"),
+    ):
+        _ = site.has_pending_background_jobs
+
+
 def test_a_new_site_sends_mail_under_its_first_label_in_title_case(tmp_path: Path) -> None:
     provisioner = _provisioner(tmp_path)
     site = Site(SiteConfig(name="site1.example.com", apps=["frappe"]), provisioner.bench)

@@ -213,9 +213,8 @@ def _queue_action(operation: MigrationOperation, task_type, role: str, **task_ar
         )
     except Exception as error:
         return task_failure(error)
-    operation.task_ids[role] = task_id
-    operation.store.save(operation)
-    return _accepted(operation, task_id)
+    operation.store.record_action(operation.id, role, task_id)
+    return _accepted(operation.store.get(operation.id), task_id)
 
 
 def _load(operation_id: str) -> MigrationOperation | None:

@@ -33,6 +33,7 @@ class ProcessDefinition:
     socket_file: Path | None = None  # removed before each start; a stale one blocks listen()
     listen_address: str | None = None  # systemd holds it, so a restart queues requests instead of refusing them
     restart_on_failure: bool = True
+    stop_main_process_only: bool = False  # it stops its own children; a signal to them too kills their jobs
     pre_run: list[str] = field(default_factory=list)
     post_run: list[str] = field(default_factory=list)
 
@@ -61,6 +62,11 @@ class ProcessDefinition:
             f'{shlex.join(self.post_run)}; exit "$status"'
         )
         return ["sh", "-c", script]
+
+
+def queue_slug(queues: str) -> str:
+    """Commas in queue names break supervisor's programs= list; slug them."""
+    return re.sub(r"[^A-Za-z0-9]+", "_", queues).strip("_") or "default"
 
 
 def check_unique_names(definitions: list[ProcessDefinition]) -> None:
@@ -96,13 +102,11 @@ class ProcessDefinitionBuilder:
             # web, realtime and jobs all live in the one lite process.
             return [self.web_definition(), self.admin_definition()]
         if self.bench.config.production.process_manager == "systemd":
-            all_queues = ",".join(q for group in self.bench.config.workers.groups for q in group.queues)
-            num_workers = sum(group.count for group in self.bench.config.workers.groups)
             return [
                 self.web_definition(),
                 self.socketio_definition(),
                 self.admin_definition(),
-                self.worker_pool_definition(all_queues, num_workers),
+                *self.worker_pool_definitions(),
             ]
         worker_defs = [
             pd
@@ -257,9 +261,22 @@ class ProcessDefinitionBuilder:
             critical=False,
         )
 
-    def worker_pool_definition(self, queues: str, num_workers: int) -> ProcessDefinition:
+    def worker_pool_definitions(self) -> list[ProcessDefinition]:
+        """Combine identical queue groups; keep `worker_pool` for a single pool."""
+        counts: dict[str, int] = {}
+        for group in self.bench.config.workers.groups:
+            queues = ",".join(group.queues)
+            counts[queues] = counts.get(queues, 0) + group.count
+        return [
+            self.worker_pool_definition(
+                "worker_pool" if len(counts) == 1 else f"worker_pool_{queue_slug(queues)}", queues, count
+            )
+            for queues, count in counts.items()
+        ]
+
+    def worker_pool_definition(self, name: str, queues: str, num_workers: int) -> ProcessDefinition:
         return ProcessDefinition(
-            name="worker_pool",
+            name=name,
             argv=[
                 str(self.python),
                 "-m",
@@ -271,15 +288,15 @@ class ProcessDefinitionBuilder:
                 "--queue",
                 queues,
             ],
-            log_file=self.bench.logs_path / "worker_pool.log",
+            log_file=self.bench.logs_path / f"{name}.log",
             env=self.python_env(),
             working_dir=self.bench.sites_path,
+            stop_main_process_only=True,
         )
 
     def worker_definitions(self, queue: str, count: int) -> list[ProcessDefinition]:
         sites = self.bench.sites_path
-        # Commas in queue names break supervisor's programs= list; slug them.
-        slug = re.sub(r"[^A-Za-z0-9]+", "_", queue).strip("_") or "default"
+        slug = queue_slug(queue)
         return [
             ProcessDefinition(
                 name=f"worker_{slug}_{i}",

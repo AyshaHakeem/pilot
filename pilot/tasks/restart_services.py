@@ -14,7 +14,9 @@ class RestartServicesTask(Task):
     operation_id: str
 
     def run(self) -> None:
-        operation = self.bench.migrations.get(self.operation_id)
+        operation = self.bench.migrations.get_for_chain_task(
+            self.operation_id, self.running_task_id, self.command, {}
+        )
         try:
             operation.restart(on_step=self.step)
         except Exception:
