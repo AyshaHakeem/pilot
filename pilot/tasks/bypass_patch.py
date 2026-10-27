@@ -20,6 +20,8 @@ class BypassPatchTask(Task):
     @step("bypass_patch", lambda self: f"Skip patch {self.patch}")
     def bypass(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
+        if self.running_task_id:
+            operation.task_ids["bypass_patch"] = self.running_task_id
         try:
             operation.bypass_patch(self.patch, on_progress=self.report)
         except BenchError as error:

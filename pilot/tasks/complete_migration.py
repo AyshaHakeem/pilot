@@ -12,7 +12,9 @@ class CompleteMigrationTask(Task):
 
     @step("restart", "Restart services and finish migration")
     def run(self) -> None:
-        self.bench.migrations.get(self.operation_id).complete()
+        self.bench.migrations.get_for_chain_task(
+            self.operation_id, self.running_task_id, self.command, {}
+        ).complete()
 
     @on_failure
     @on_cancel

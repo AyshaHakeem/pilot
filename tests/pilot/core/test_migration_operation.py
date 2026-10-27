@@ -1184,3 +1184,67 @@ def test_web_restarts_after_maintenance_mode_is_turned_off(tmp_path: Path) -> No
     operation.complete()
 
     assert events == [{"raises": True}, "lift", {"web_only": True}]
+
+
+def test_recording_an_action_keeps_what_the_action_already_changed(tmp_path: Path) -> None:
+    """The API read the operation before it queued Retry; the task may have moved it on since."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    stale = store.create_site_migrate("site1.localhost")
+    moved = store.get(stale.id)
+    moved.state = get_state("backing_up")
+    store.save(moved)
+
+    store.record_action(stale.id, "retry", "task-301")
+
+    stored = store.get(stale.id)
+    assert stored.state == "backing_up"
+    assert stored.task_ids == {"retry": "task-301"}
+
+
+def test_a_chain_task_waits_until_its_queuer_has_recorded_it(tmp_path: Path) -> None:
+    """A copy read before the record would drop it when saved, and a failure would then go unnoticed."""
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    operation = store.create_site_migrate("site1.localhost")
+    reads = []
+
+    def get(operation_id):
+        reads.append(operation_id)
+        if len(reads) == 2:
+            recorded = MigrationStore.get(store, operation_id)
+            recorded.chain.append({"command": "migrate", "task_id": "task-401", "site": "site1.localhost"})
+            store.save(recorded)
+        return MigrationStore.get(store, operation_id)
+
+    with patch.object(store, "get", side_effect=get), patch("pilot.core.bench.migration.store.time.sleep"):
+        loaded = store.get_for_chain_task(operation.id, "task-401", "migrate", {"site": "site1.localhost"})
+
+    assert len(reads) == 2
+    assert loaded.chain[-1]["task_id"] == "task-401"
+
+
+def test_a_chain_task_records_itself_when_its_queuer_stopped_first(tmp_path: Path) -> None:
+    from pilot.core.bench.migration.store import MigrationStore
+
+    mock_bench = MagicMock()
+    mock_bench.path = tmp_path
+    store = MigrationStore(mock_bench)
+    operation = store.create_site_migrate("site1.localhost")
+    clock = iter([0, 10, 31])
+
+    with (
+        patch("pilot.core.bench.migration.store.time.monotonic", side_effect=lambda: next(clock)),
+        patch("pilot.core.bench.migration.store.time.sleep"),
+    ):
+        store.get_for_chain_task(operation.id, "task-501", "migrate", {"site": "site1.localhost"})
+
+    assert store.get(operation.id).chain == [
+        {"command": "migrate", "task_id": "task-501", "site": "site1.localhost"}
+    ]

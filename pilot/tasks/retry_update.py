@@ -16,6 +16,8 @@ class RetryUpdateTask(Task):
 
     def run(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
+        if self.running_task_id:
+            operation.task_ids["retry"] = self.running_task_id
         try:
             operation.retry()
         except Exception:

@@ -16,6 +16,8 @@ class RevertMigrationTask(Task):
 
     def run(self) -> None:
         operation = self.bench.migrations.get(self.operation_id)
+        if self.running_task_id:
+            operation.task_ids["restore"] = self.running_task_id
         try:
             operation.revert()
         except Exception:

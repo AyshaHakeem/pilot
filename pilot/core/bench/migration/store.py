@@ -2,17 +2,22 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pilot.core.bench.migration.operation import AppRevision, MigrationOperation, SiteProgress
 from pilot.core.bench.migration.state import get_state
 from pilot.exceptions import BenchError, MigrationConflictError, MigrationNotFoundError
-from pilot.internal.atomic_file import atomic_write_private_text
+from pilot.internal.atomic_file import atomic_write_private_text, exclusive_file_lock
 from pilot.utils import make_private_directory
 
 if TYPE_CHECKING:
     from pilot.core.bench import Bench
+
+
+_CHAIN_RECORD_WAIT_SECONDS = 30
 
 
 class MigrationStore:
@@ -73,10 +78,41 @@ class MigrationStore:
 
     def save(self, operation: MigrationOperation) -> None:
         make_private_directory(self.root, parents=True)
-        atomic_write_private_text(
-            self.root / f"{operation.id}.json",
-            json.dumps(operation.to_dict(), indent=2),
-        )
+        with exclusive_file_lock(self._update_lock_key(operation.id)):
+            atomic_write_private_text(
+                self.root / f"{operation.id}.json", json.dumps(operation.to_dict(), indent=2)
+            )
+
+    def record_action(self, operation_id: str, role: str, task_id: str) -> None:
+        """Record a queued action task on the stored operation. The task may already have
+        changed the operation, so a copy read before it was queued must not be saved."""
+        with exclusive_file_lock(self._update_lock_key(operation_id)):
+            operation = self.get(operation_id)
+            operation.task_ids[role] = task_id
+            atomic_write_private_text(
+                self.root / f"{operation_id}.json", json.dumps(operation.to_dict(), indent=2)
+            )
+
+    def _update_lock_key(self, operation_id: str) -> Path:
+        """Lock key for a read-modify-write of an operation; the write itself locks the file path."""
+        return self.root / f"{operation_id}.update"
+
+    def get_for_chain_task(
+        self, operation_id: str, task_id: str, command: str, args: dict
+    ) -> MigrationOperation:
+        """The operation once its chain lists this task. The task that queued it records it
+        right after, and a copy read before that would drop the record when it is saved.
+        If that task stopped first, record this one here."""
+        deadline = time.monotonic() + _CHAIN_RECORD_WAIT_SECONDS
+        while True:
+            operation = self.get(operation_id)
+            if not task_id or any(entry["task_id"] == task_id for entry in operation.chain):
+                return operation
+            if time.monotonic() >= deadline:
+                operation.chain.append({"command": command, "task_id": task_id, **args})
+                self.save(operation)
+                return operation
+            time.sleep(0.2)
 
     def delete(self, operation_id: str) -> None:
         (self.root / f"{operation_id}.json").unlink(missing_ok=True)
