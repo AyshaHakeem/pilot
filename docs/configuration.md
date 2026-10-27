@@ -249,7 +249,9 @@ Settings, Database, Database Configurations exposes `MemoryHigh` and `MemoryMax`
 
 The buffer-pool editor also caps its maximum below the effective MariaDB `MemoryMax`, in addition to the host-based range. The setter reads the hard limit again under the database action lock before writing settings or changing the pool, so a queued resize cannot exceed a newly lowered limit.
 
-On a host with less than 800 MB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
+Pilot also sets `aria-pagecache-buffer-size` to the size of the key buffer and counts it in the budget. MariaDB keeps its on-disk temporary tables in Aria, and its default 128 MB page cache put a 2 GB host's server above its `MemoryHigh` from the start. Above `MemoryHigh` without swap, the kernel can reclaim only the server's code pages, so MariaDB reads them from disk again and again and stops answering. The `size_mariadb_aria_pagecache` patch writes the value into an existing `my.cnf`; it applies when MariaDB next starts.
+
+On a host with less than 800 MB of memory, MariaDB gets a 64 MB buffer pool, an 8 MB key buffer, an 8 MB Aria page cache, and 20 connections, which is enough for one bench with one site. `MemoryHigh` then stays at least a quarter of `MemoryMax` below it.
 
 `mariadb.memory_share` is the share of host memory that Pilot's MariaDB may use, from 0.2 to 0.8 (default 0.5); the benches keep the rest. Settings, Database, Memory split changes it for every bench of the host and re-sizes the running server. Selecting a split clears manual service-limit overrides. When the new limits apply, Pilot saves them in both the main unit and its memory drop-in so they survive a reboot with unchanged RAM. A deferred shrink keeps the previous saved limits until it can apply safely. A larger buffer pool than the running server allows takes effect at the next MariaDB start.
 

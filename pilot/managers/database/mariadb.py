@@ -189,6 +189,7 @@ class MariaDBManager(UserOwnedDBManager):
             "innodb-strict-mode = ON\n"
             "innodb-snapshot-isolation = OFF\n"
             f"key-buffer-size = {sizing.key_buffer_mb}M\n"
+            f"aria-pagecache-buffer-size = {sizing.aria_pagecache_mb}M\n"
             f"max-connections = {sizing.max_connections}\n"
             "slave-connections-needed-for-purge = 0\n"
             "tmp-table-size = 32M\n"
@@ -391,6 +392,17 @@ class MariaDBManager(UserOwnedDBManager):
                 )
                 return False
             time.sleep(1)
+        return True
+
+    def size_aria_pagecache(self) -> bool:
+        """Write the sized Aria page cache into my.cnf. It applies at the next start, because
+        MariaDB cannot resize it live. Returns whether my.cnf changed."""
+        if is_macos() or self.config.existing or not self.my_cnf_path.exists():
+            return False
+        if "aria-pagecache-buffer-size" in self.my_cnf_path.read_text():
+            return False
+        with self.database_action_lock():
+            self._write_config()
         return True
 
     def keep_out_of_swap(self) -> None:

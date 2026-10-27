@@ -342,3 +342,27 @@ def test_successful_manual_apply_does_not_change_boot_baseline_or_swap(memory) -
     config = CommonConfig.read(memory.manager.config_dir.parent / "benches")
     assert config.mariadb.memory_high_mb == 2500
     assert config.mariadb.memory_max_mb == 4000
+
+
+def test_the_sized_memory_includes_the_aria_page_cache() -> None:
+    """MariaDB's own 128M Aria default left a 2 GB host's server over its MemoryHigh at startup."""
+    sizing = calculate_mariadb_memory(1962)
+    assert sizing.aria_pagecache_mb == sizing.key_buffer_mb == 32
+    startup_mb = sizing.innodb_buffer_pool_mb + sizing.key_buffer_mb + sizing.aria_pagecache_mb + 16
+    assert startup_mb + 100 < sizing.memory_high_mb
+
+
+def test_an_existing_server_gets_its_aria_page_cache_sized_once(tmp_path: Path) -> None:
+    manager = MariaDBManager(MariaDBConfig())
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "my.cnf").write_text("[mysqld]\nkey-buffer-size = 32M\n")
+    with (
+        patch.object(type(manager), "state_dir", new_callable=PropertyMock, return_value=tmp_path),
+        patch("pilot.managers.database.mariadb.is_macos", return_value=False),
+        patch.object(manager, "_total_memory_mb", return_value=1962),
+        patch.object(manager, "database_action_lock", return_value=nullcontext()),
+    ):
+        assert manager.size_aria_pagecache() is True
+        assert "aria-pagecache-buffer-size = 32M" in manager.my_cnf_path.read_text()
+        assert manager.size_aria_pagecache() is False

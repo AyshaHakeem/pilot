@@ -25,6 +25,7 @@ _SIZED_OPTIONS = {
     "innodb-buffer-pool-size-auto-min",
     "innodb-log-file-size",
     "key-buffer-size",
+    "aria-pagecache-buffer-size",
     "max-connections",
 }
 
