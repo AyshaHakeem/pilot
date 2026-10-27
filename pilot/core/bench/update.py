@@ -65,7 +65,7 @@ class BenchUpdater:
             try:
                 python_env.install_app(app)
             except CommandError as error:
-                raise MigrateError(f"Failed to install app {app}: {error}") from error
+                raise MigrateError(f"Failed to install app {app.config.name}: {error}") from error
 
     def rebuild_assets(self, apps_filter: set | None, on_progress: Callable[[str], None]) -> None:
         from pilot.managers.environment import PythonEnvManager
