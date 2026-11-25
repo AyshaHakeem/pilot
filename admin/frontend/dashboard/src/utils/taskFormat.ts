@@ -78,7 +78,7 @@ const COMMAND_LABELS: Record<string, string> = {
 export const TASK_TYPES = [
   {
     value: 'sites',
-    icon: 'lucide-globe',
+    icon: 'lucide-pilot-site',
     label: 'Sites',
     commands: [
       'new-site',
@@ -241,7 +241,11 @@ export const redirectRouteOnSuccess = (task: ScopedTask) => {
 
   if (typeof app !== 'string' || !app) return route
 
-  return { ...route, query: { app, action: APP_ACTION_FOR_COMMAND[task.command] } }
+  return {
+    ...route,
+    params: { ...route.params, tab: 'apps' },
+    query: { app, action: APP_ACTION_FOR_COMMAND[task.command] },
+  }
 }
 
 /**
@@ -307,7 +311,7 @@ export const taskInputs = (task: ScopedTask) => {
 
     inputs.push({
       label: count === 1 ? 'Site' : 'Sites',
-      icon: 'lucide-globe',
+      icon: 'lucide-pilot-site',
       value: count === 1 ? String(args.sites[0]) : `${count} sites`,
     })
   }

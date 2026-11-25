@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from pilot.core.bench.migration.store import MigrationStore
     from pilot.core.bench.processes import BenchProcesses
     from pilot.core.bench.site_aliases import SiteAliases
+    from pilot.core.bench.storage import BenchStorage
     from pilot.core.database import Database
     from pilot.core.notification import NotificationStore
     from pilot.core.notification.notifier import Notifier
@@ -169,6 +170,13 @@ class Bench:
         from pilot.core.bench.hostname_aliases import HostnameAliases
 
         return HostnameAliases(self)
+
+    @cached_property
+    def storage(self) -> "BenchStorage":
+        """The bench folder's storage breakdown."""
+        from pilot.core.bench.storage import BenchStorage
+
+        return BenchStorage(self)
 
     @cached_property
     def site_storage(self) -> "SiteStorageCollector":
@@ -720,6 +728,25 @@ class Bench:
         from pilot.core.bench.admin_domain import AdminDomainChange
 
         AdminDomainChange(self, domain, tls).run(on_progress)
+
+    def setup_remote_database(
+        self,
+        host: str,
+        agent_token: str,
+        port: int = 3306,
+        agent_port: int = 7781,
+        admin_user: str = "pilot",
+        on_progress: Callable[[str], None] = lambda message: None,
+        migrate: bool = False,
+        delete_local_data: bool = False,
+    ) -> None:
+        """Move this host's benches to a MariaDB on its own VM that Pilot manages through the Pilot agent.
+        `migrate` copies the sites' databases there first."""
+        from pilot.core.bench.remote_database import RemoteDatabaseSetup
+
+        RemoteDatabaseSetup(
+            self, host, agent_token, port, agent_port, admin_user, migrate, delete_local_data
+        ).run(on_progress)
 
     def setup_central(
         self,

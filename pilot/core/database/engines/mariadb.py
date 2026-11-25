@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import time
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import SupportsFloat
@@ -30,9 +32,10 @@ from pilot.core.database.engines.helpers import (
     validated_process_id,
 )
 from pilot.core.database.engines.mariadb_performance import MariaDBPerformanceReport
+from pilot.core.database.log_file import LogFile
 from pilot.core.database.slow_log import SlowLogFile, SlowQueryReport
 from pilot.core.database.slow_queries import slow_row_key
-from pilot.exceptions import DatabaseError
+from pilot.exceptions import DatabaseConnectError, DatabaseError
 
 # The monitor collects every minute, so a short tail holds everything new.
 SLOW_LOG_COLLECT_BYTES = 2 * 1024 * 1024
@@ -81,24 +84,27 @@ class MariaDB(Database):
         import pymysql
         import pymysql.cursors
 
-        return pymysql.connect(
-            host=self._host,
-            port=self._port,
-            user=self._user,
-            password=self._password,
-            database=self._database or None,
-            unix_socket=self._socket,
-            connect_timeout=self._connect_timeout,
-            cursorclass=pymysql.cursors.DictCursor,
-            # PyMySQL 1.2 negotiates TLS by default; on loopback it only adds ~13 ms per connect.
-            ssl_disabled=is_local_host(self._host, self._socket),
-        )
+        try:
+            return pymysql.connect(
+                host=self._host,
+                port=self._port,
+                user=self._user,
+                password=self._password,
+                database=self._database or None,
+                unix_socket=self._socket,
+                connect_timeout=self._connect_timeout,
+                cursorclass=pymysql.cursors.DictCursor,
+                # PyMySQL 1.2 negotiates TLS by default; on loopback it only adds ~13 ms per connect.
+                ssl_disabled=is_local_host(self._host, self._socket),
+            )
+        except pymysql.err.OperationalError as exc:
+            raise DatabaseConnectError(f"Could not connect to MariaDB: {exc}") from exc
 
     def quote_identifier(self, name: str) -> str:
         """The name quoted as an identifier."""
         return "`{}`".format(name.replace("`", ""))
 
-    def execute(self, query: str, read_only: bool = True) -> QueryResult:
+    def execute(self, query: str, read_only: bool = True, *, params: Sequence = ()) -> QueryResult:
         """Run the query, read-only by default, and return its result."""
         import pymysql
         import pymysql.cursors
@@ -110,7 +116,7 @@ class MariaDB(Database):
             with conn.cursor(pymysql.cursors.Cursor) as cursor:
                 if read_only:
                     cursor.execute("START TRANSACTION READ ONLY")
-                cursor.execute(query)
+                cursor.execute(query, tuple(params) or None)
                 if cursor.description:
                     columns = [d[0] for d in cursor.description]
                     raw = list(cursor.fetchmany(MAX_ROWS + 1))
@@ -192,25 +198,25 @@ class MariaDB(Database):
         variables = self.get_global_variables()
         enabled = variables.get("slow_query_log") == "ON"
         long_query_time = float(variables.get("long_query_time") or 0)
-        path = self.get_slow_log_path()
-        if path is None:
+        log = self.get_slow_log_file()
+        if log is None:
             return SlowQueryReport(log_path=None, enabled=enabled, long_query_time=long_query_time)
-        queries = SlowLogFile(path).get_top_queries(database, limit)
-        return SlowQueryReport(str(path), enabled, long_query_time, queries)
+        queries = SlowLogFile(log).get_top_queries(database, limit)
+        return SlowQueryReport(str(log.path), enabled, long_query_time, queries)
 
     def get_new_slow_queries(self, since: tuple[str, str, int] | None) -> list[dict]:
         """Slow log rows after `since`, from the log file when the server writes one, else mysql.slow_log."""
-        path = self.get_slow_log_path()
-        if path is None:
+        log = self.get_slow_log_file()
+        if log is None:
             return self.scan_slow_queries(since=since)
-        rows = [entry.to_row() for entry in SlowLogFile(path).get_entries(SLOW_LOG_COLLECT_BYTES)]
+        rows = [entry.to_row() for entry in SlowLogFile(log).get_entries(SLOW_LOG_COLLECT_BYTES)]
         return [row for row in rows if since is None or slow_row_key(row) > since]
 
-    def get_slow_log_path(self) -> Path | None:
-        """The slow log file, or None when it is not written to a file here."""
+    def get_slow_log_file(self) -> LogFile | None:
+        """The slow log file, or None when it is not written to a file Pilot can read."""
         if "FILE" not in str(self.get_scalar("SELECT @@log_output")):
             return None
-        return self.get_local_log_path("@@slow_query_log_file")
+        return self.get_log_file("@@slow_query_log_file")
 
     def scan_slow_queries(self, since: tuple[str, str, int] | None = None, limit: int = 5000) -> list[dict]:
         """New mysql.slow_log rows across all schemas, oldest first, for aggregation.
@@ -374,28 +380,37 @@ class MariaDB(Database):
     ) -> DeadlockReport:
         """Deadlocks InnoDB printed to the error log, which must be a file on this host."""
         print_all = str(self.get_scalar("SELECT @@innodb_print_all_deadlocks")) in ("1", "ON")
-        path = self.get_error_log_path()
-        if path is None:
+        log = self.get_error_log_file()
+        if log is None:
             return DeadlockReport(log_path=None, print_all_deadlocks=print_all)
         return DeadlockReport(
-            str(path), print_all, DeadlockLog(path).get_deadlocks(database, limit, since, until)
+            str(log.path), print_all, DeadlockLog(log).get_deadlocks(database, limit, since, until)
         )
 
-    def get_error_log_path(self) -> Path | None:
+    def get_error_log_file(self) -> LogFile | None:
         """None when errors go to stderr (the journal) or the file is out of reach."""
-        return self.get_local_log_path("@@log_error")
+        return self.get_log_file("@@log_error")
 
-    def get_local_log_path(self, variable: str) -> Path | None:
+    def get_log_file(self, variable: str) -> LogFile | None:
         """The readable file a log variable names, on this host only."""
         if not is_local_host(self._host, self._socket):
             return None
+        path = self.get_variable_path(variable)
+        if path is None or not path.is_file() or not os.access(path, os.R_OK):
+            return None
+        return self.open_server_file(path)
+
+    def get_variable_path(self, variable: str) -> Path | None:
+        """The path a file variable names, resolved against the data directory, or None when unset."""
         value = str(self.get_scalar(f"SELECT {variable}") or "")
         if not value:
             return None
         path = Path(value)
-        if not path.is_absolute():
-            path = Path(self.get_data_directory() or ".") / path
-        return path if path.is_file() and os.access(path, os.R_OK) else None
+        return path if path.is_absolute() else Path(str(self.get_scalar("SELECT @@datadir"))) / path
+
+    def open_server_file(self, path: Path) -> LogFile:
+        """A file of the server, on the host it runs on."""
+        return LogFile(path)
 
     def get_time_consuming_queries(
         self, database: str = "", limit: int = 20, offset: int = 0
@@ -475,51 +490,50 @@ class MariaDB(Database):
         return str(self.get_scalar("SELECT @@datadir"))
 
     def get_schema_sizes(self) -> dict[str, int]:
-        """The size of each schema."""
+        """The disk space each schema's InnoDB tablespace files take. InnoDB keeps
+        these sizes itself, so this needs no read access to the 0700 data directory
+        and does not open every table as information_schema.TABLES does."""
         result = self.execute(
-            "SELECT table_schema, COALESCE(SUM(data_length + index_length + data_free), 0) "
-            "FROM information_schema.TABLES GROUP BY table_schema"
+            "SELECT SUBSTRING_INDEX(name, '/', 1), SUM(allocated_size) "
+            "FROM information_schema.INNODB_SYS_TABLESPACES WHERE name LIKE '%/%' GROUP BY 1"
         )
-        return {row[0]: int(row[1]) for row in result.rows if row[0] is not None}
+        return {decode_schema_directory(row[0]): int(row[1] or 0) for row in result.rows}
 
     def get_storage_components(self) -> list[StorageComponent]:
         """The disk use of the binary logs, logs and other server files."""
-        data_dir = Path(self.get_data_directory() or ".")
         return [
             StorageComponent("binlog", "binary log", self.get_binlog_status().size_bytes),
-            StorageComponent("error_log", "error log", self._variable_file_size("@@log_error", data_dir)),
+            StorageComponent("error_log", "error log", self._variable_file_size("@@log_error")),
             StorageComponent(
                 "slow_log",
                 "slow query log",
-                self._variable_file_size("@@slow_query_log_file", data_dir),
+                self._variable_file_size("@@slow_query_log_file"),
             ),
             StorageComponent(
                 "binlog_index",
                 "binary log index",
-                self._variable_file_size("@@log_bin_index", data_dir),
+                self._variable_file_size("@@log_bin_index"),
             ),
         ]
 
-    def _variable_file_size(self, variable: str, data_dir: Path) -> int:
+    def _variable_file_size(self, variable: str) -> int:
         """Size of the file a system variable points at. Unset variables and
         unreadable paths both mean "nothing to count here"."""
-        value = str(self.get_scalar(f"SELECT {variable}") or "")
-        if not value:
-            return 0
-        path = Path(value)
-        if not path.is_absolute():
-            path = data_dir / path
-        try:
-            return path.stat().st_size
-        except OSError:
-            return 0
+        path = self.get_variable_path(variable)
+        return self.open_server_file(path).size_bytes if path else 0
 
     def get_status_value(self, variable: str) -> int:
         """One global status value; raise for an unknown one."""
-        result = self.execute(f"SHOW GLOBAL STATUS LIKE '{variable}'")
+        result = self.execute("SHOW GLOBAL STATUS LIKE %s", params=[variable])
         if not result.rows:
             raise DatabaseError(f"Unknown status variable: {variable}")
         return int(result.rows[0][1])
+
+
+def decode_schema_directory(name: str) -> str:
+    """MariaDB writes characters outside [A-Za-z0-9_] in a schema's file names
+    as @ and four hex digits, so `my-site` lives in `my@002dsite`."""
+    return re.sub(r"@([0-9a-f]{4})", lambda match: chr(int(match[1], 16)), name)
 
 
 def _utc_iso(epoch: SupportsFloat | None) -> str | None:

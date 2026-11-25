@@ -355,8 +355,8 @@ install_node() {
         if [ "$NODE_VERSION" -ge 24 ] 2>/dev/null; then
             return 0
         fi
-        echo "❌ Error: Pilot needs Node.js 24 or later, but found $(node -v)."
-        echo "Please install Node.js 24 or later and retry."
+        echo "❌ Error: Pilot needs Node.js 24 or later, but found $(node -v) at $(command -v node)."
+        echo "Install Node.js 24 or later, or put it first on PATH, and retry."
         exit 1
     fi
     # An unknown distro only gets Node when apt is there to install it.
@@ -406,7 +406,11 @@ install_system_packages() {
     # useradd). A non-root install may skip it only when the complete host stack
     # is already present, such as the second pass after root provisioning.
     if ! is_root; then
-        system_packages_present && return 0
+        if system_packages_present; then
+            # Node is present, so this only rejects one older than 24.
+            install_node
+            return 0
+        fi
         if ! command -v sudo >/dev/null 2>&1; then
             echo "sudo is not installed and you are not root, so base packages cannot"
             echo "be installed. Re-run this installer as root first, then as the bench user:"
@@ -577,7 +581,8 @@ EOF
     chmod 644 /etc/logrotate.d/pilot
 }
 
-# The distro mariadbd AppArmor profile (Ubuntu 26.04) denies ~/pilot; it includes
+# The distro mariadbd AppArmor profile (Ubuntu 26.04) denies ~/pilot and the user
+# manager's notify socket, which the Type=notify unit reports ready on; it includes
 # local/mariadbd, where this keeps one block per bench user. An empty profile
 # (MariaDB's own repo) or no AppArmor skips it.
 install_mariadb_apparmor_override() {
@@ -601,6 +606,7 @@ owner $home/pilot/databases/mariadb/ r,
 owner $home/pilot/databases/mariadb/** rwk,
 owner $home/pilot/system/logs/ r,
 owner $home/pilot/system/logs/** rw,
+owner /run/user/*/systemd/notify w,
 $end
 EOF
     } > "$override.pilot"
@@ -969,7 +975,7 @@ install_for_user() {
 }
 
 # ── run ───────────────────────────────────────────────────────────────────────
-require_supported_release
+require_supported_release /etc/os-release
 install_system_packages
 
 if is_root; then

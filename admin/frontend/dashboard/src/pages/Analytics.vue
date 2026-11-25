@@ -1,20 +1,26 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch, type WritableComputedRef } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ErrorMessage, Select, Skeleton } from 'frappe-ui'
+import { ErrorMessage, Select, Skeleton, toast } from 'frappe-ui'
 import { AreaChart, useChartTokens } from 'frappe-ui/charts'
-import type { AreaChartProps, ChartXAxisOptions, SeriesStyle, TimeGrain } from 'frappe-ui/charts'
+import type {
+  AreaChartProps,
+  ChartXAxisOptions,
+  ReferenceLine,
+  SeriesStyle,
+  TimeGrain,
+} from 'frappe-ui/charts'
 
 import ChartCard from '@/components/common/ChartCard.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
-import StickyToolbar from '@/components/common/StickyToolbar.vue'
 import WafAnalytics from '@/components/common/WafAnalytics.vue'
 import DatabaseInsights from '@/components/dashboard/DatabaseInsights.vue'
 import SiteInsights from '@/components/dashboard/SiteInsights.vue'
+import SystemStats from '@/components/dashboard/SystemStats.vue'
 
 import { apiErrorMessage, hasApiError } from '@/api/client'
 import { monitorApi } from '@/api/monitor'
-import { useIsMobile } from '@/composables/common/useIsMobile'
+import { settingsApi } from '@/api/settings'
 import { useSites } from '@/composables/sites/useSites'
 import { errorMessage } from '@/utils/error'
 import { livePollDelayMs } from '@/utils/livePolling'
@@ -31,8 +37,11 @@ import type {
 
 type MetricPoint = Record<string, number | null | undefined>
 
+type AlertKey = 'cpu_usage_limit' | 'memory_usage_limit' | 'disk_space_limit'
+
 interface AnalyticsChart {
   title: string
+  alert?: AlertKey
   config: AreaChartProps
 }
 
@@ -118,7 +127,7 @@ const isServerScope = computed(() => view.value !== 'site')
 // site has none of its own, so it has to land on System.
 const targetOptions = computed(() => [
   { label: 'Server', value: 'server', icon: 'lucide-server' },
-  ...sites.value.map((site) => ({ label: site.name, value: site.name, icon: 'lucide-globe' })),
+  ...sites.value.map((site) => ({ label: site.name, value: site.name, icon: 'lucide-pilot-site' })),
 ])
 const target = computed({
   get: () => (view.value === 'site' ? activeSite.value : 'server'),
@@ -126,10 +135,13 @@ const target = computed({
     value === 'server' ? setView(isServerScope.value ? view.value : 'system') : selectSite(value),
 })
 
+const metricIcons: Record<string, string> = { system: 'lucide-gauge', database: 'lucide-database' }
+
 // Server-level metrics only; a site has one chart set and needs no picker.
 const metricOptions = VIEWS.filter((v) => v.key !== 'site').map((v) => ({
   label: v.label,
   value: v.key,
+  icon: metricIcons[v.key],
 }))
 const metric = computed({ get: () => view.value, set: (value) => setView(value) })
 
@@ -174,7 +186,6 @@ const selectWindow = (key: string) => {
 
 // Site view
 const { sites, loading: sitesLoading, load: loadSites } = useSites()
-const isMobile = useIsMobile()
 const activeSite = ref(typeof route.query.site === 'string' ? route.query.site : '')
 
 // Persist view + window + site so a reload restores the same chart.
@@ -199,6 +210,13 @@ watch(
   { immediate: true },
 )
 
+const limits = ref<Record<AlertKey, number>>({
+  cpu_usage_limit: 0,
+  memory_usage_limit: 0,
+  disk_space_limit: 0,
+})
+const cpuCount = ref<number | null>(null)
+
 // Live mode state
 const stats = ref<SystemMetrics | null>(null)
 const statsError = ref('')
@@ -220,6 +238,8 @@ const application = ref<ApplicationMetricsHistory>({
   cpu: [],
   memory: [],
 })
+// A remote MariaDB server's VM; null for a local server.
+const databaseServer = ref<SystemMetricsHistory | null>(null)
 const historyLoading = ref(false)
 const historyError = ref('')
 const historyNow = ref(Date.now())
@@ -303,6 +323,7 @@ const refreshAppData = async () => {
     const d = await monitorApi.history('30m')
     if (!hasApiError(d) && d.application) {
       application.value = d.application
+      databaseServer.value = d.database_server
     }
   } catch {}
 }
@@ -322,6 +343,7 @@ const seedLiveHistory = async () => {
     if (d.application) {
       application.value = d.application
     }
+    databaseServer.value = d.database_server
   } catch {}
 }
 
@@ -335,6 +357,7 @@ const loadHistory = async (window: string) => {
     historyNow.value = d.now ?? Date.now()
     system.value = d.system
     application.value = d.application
+    databaseServer.value = d.database_server
   } catch (caught) {
     historyError.value = errorMessage(caught, 'Failed to load analytics.')
   } finally {
@@ -346,27 +369,6 @@ const loadHistory = async (window: string) => {
 
 const liveStats = computed(() => (!isHistorical.value ? stats.value : null))
 
-const liveMeters = computed(() => {
-  const s = liveStats.value
-  if (!s) return []
-  return [
-    {
-      label: 'CPU',
-      percent: s.cpu_percent,
-      value: `${s.cpu_percent.toFixed(1)}% of ${s.cpu_count} ${s.cpu_count === 1 ? 'vCPU' : 'vCPUs'}`,
-    },
-    {
-      label: 'Memory',
-      percent: s.memory_percent,
-      value: `${formatBytes(s.memory_used)} of ${formatBytes(s.memory_total)}`,
-    },
-    {
-      label: 'Storage',
-      percent: s.disk_percent,
-      value: `${formatBytes(s.disk_used)} of ${formatBytes(s.disk_total)}`,
-    },
-  ]
-})
 const systemEmpty = computed(
   () => isHistorical.value && !historyLoading.value && !system.value.points.length,
 )
@@ -411,10 +413,13 @@ const { tokens } = useChartTokens(ref())
 
 const lineSeries = (slot: number): SeriesStyle => ({
   color: tokens.value.categorical[slot - 1],
-  smooth: true,
   showDataPoints: false,
-  echartOptions: { lineStyle: { width: 1.5 }, areaStyle: { opacity: 0.25 } },
 })
+
+const alertLine = (limit: number, value = limit): ReferenceLine[] =>
+  limit
+    ? [{ value, label: `Alert at ${limit}%`, dashed: true, color: tokens.value.categorical[6] }]
+    : []
 
 const styleFor = (names: string[], colorAt: (name: string, index: number) => number) =>
   Object.fromEntries(
@@ -446,10 +451,15 @@ const normalizeAppData = (
 
 // Chart configs
 
-const cpuChartConfig = computed<AnalyticsChart>(() => ({
+const cpuChart = (
+  points: MetricPoint[],
+  xAxis: ChartXAxisOptions,
+  hasAlerts: boolean,
+): AnalyticsChart => ({
   title: 'CPU',
+  alert: hasAlerts ? 'cpu_usage_limit' : undefined,
   config: {
-    data: currentPoints.value.map((p) => ({
+    data: points.map((p) => ({
       time: p.time,
       'Busy User': p['Busy User'] ?? 0,
       'Busy System': p['Busy System'] ?? 0,
@@ -457,25 +467,25 @@ const cpuChartConfig = computed<AnalyticsChart>(() => ({
       'Busy IRQ': p['Busy IRQ'] ?? 0,
       'Busy Other': p['Busy Other'] ?? 0,
     })),
-    xAxis: currentXAxis.value,
+    xAxis,
     yAxis: { min: 0, max: 100, echartOptions: { name: '%', splitLine: GRID } },
     x: 'time',
     y: CPU_SERIES,
-    stacked: true,
+    referenceLines: hasAlerts ? alertLine(limits.value.cpu_usage_limit) : [],
     seriesConfig: styleFor(CPU_SERIES, (name) => CPU_COLORS[name]),
   },
-}))
+})
 
-const loadChartConfig = computed<AnalyticsChart>(() => ({
+const loadChart = (points: MetricPoint[], xAxis: ChartXAxisOptions): AnalyticsChart => ({
   title: 'Load Average',
   config: {
-    data: currentPoints.value.map((p) => ({
+    data: points.map((p) => ({
       time: p.time,
       'Load Average 1': p.Load1 ?? 0,
       'Load Average 5': p.Load5 ?? 0,
       'Load Average 15': p.Load15 ?? 0,
     })),
-    xAxis: currentXAxis.value,
+    xAxis,
     yAxis: { min: 0, echartOptions: { name: '', splitLine: GRID } },
     x: 'time',
     y: ['Load Average 1', 'Load Average 5', 'Load Average 15'],
@@ -485,10 +495,18 @@ const loadChartConfig = computed<AnalyticsChart>(() => ({
       'Load Average 15': lineSeries(9),
     },
   },
-}))
+})
 
-const memChartConfig = computed<AnalyticsChart>(() => {
-  const data = scaleFields(currentPoints.value, MEMORY_SERIES, 1024 ** 3)
+const memoryTotal = computed(() =>
+  isHistorical.value ? system.value.memory_total_bytes : (stats.value?.memory_total ?? null),
+)
+
+const memoryChart = (
+  points: MetricPoint[],
+  xAxis: ChartXAxisOptions,
+  hasAlerts: boolean,
+): AnalyticsChart => {
+  const data = scaleFields(points, MEMORY_SERIES, 1024 ** 3)
   const peak = data.reduce(
     (max, p) =>
       Math.max(
@@ -497,23 +515,28 @@ const memChartConfig = computed<AnalyticsChart>(() => {
       ),
     0,
   )
+  // Only the app server's total is known; another server's axis follows its peak.
+  const total = hasAlerts ? (memoryTotal.value ?? 0) / 1024 ** 3 : 0
+  const limit = limits.value.memory_usage_limit
+
   return {
     title: 'Memory',
+    alert: hasAlerts ? 'memory_usage_limit' : undefined,
     config: {
       data,
-      xAxis: currentXAxis.value,
+      xAxis,
       yAxis: {
         min: 0,
-        max: peak > 0 ? peak * 1.1 : undefined,
+        max: total || (peak > 0 ? peak * 1.1 : undefined),
         echartOptions: { name: 'GB', splitLine: GRID },
       },
       x: 'time',
       y: MEMORY_SERIES,
-      stacked: true,
+      referenceLines: total ? alertLine(limit, (total * limit) / 100) : [],
       seriesConfig: styleFor(MEMORY_SERIES, (name) => MEMORY_COLORS[name]),
     },
   }
-})
+}
 
 const diskInfo = computed(() =>
   isHistorical.value
@@ -523,41 +546,69 @@ const diskInfo = computed(() =>
       : null,
 )
 
-const diskChartConfig = computed<AnalyticsChart>(() => ({
+const diskChart = (
+  points: MetricPoint[],
+  xAxis: ChartXAxisOptions,
+  hasAlerts: boolean,
+): AnalyticsChart => ({
   title: 'Disk',
+  alert: hasAlerts ? 'disk_space_limit' : undefined,
   config: {
-    data: currentPoints.value,
-    xAxis: currentXAxis.value,
+    data: points,
+    xAxis,
     yAxis: { min: 0, max: 100, echartOptions: { name: '%', splitLine: GRID } },
     x: 'time',
     y: DISK_SERIES,
+    referenceLines: hasAlerts ? alertLine(limits.value.disk_space_limit) : [],
     seriesConfig: { [DISK_SERIES]: lineSeries(PALETTE[0]) },
   },
-}))
+})
 
-const networkChartConfig = computed<AnalyticsChart>(() => ({
+const networkChart = (points: MetricPoint[], xAxis: ChartXAxisOptions): AnalyticsChart => ({
   title: 'Network',
   config: {
-    data: scaleFields(currentPoints.value, NETWORK_SERIES, 1024 ** 2),
-    xAxis: currentXAxis.value,
+    data: scaleFields(points, NETWORK_SERIES, 1024 ** 2),
+    xAxis,
     yAxis: { min: 0, echartOptions: { name: 'MB/s', splitLine: GRID } },
     x: 'time',
     y: NETWORK_SERIES,
     seriesConfig: styleFor(NETWORK_SERIES, (_, i) => PALETTE[i]),
   },
-}))
+})
 
-const diskIoChartConfig = computed<AnalyticsChart>(() => ({
+const diskIoChart = (points: MetricPoint[], xAxis: ChartXAxisOptions): AnalyticsChart => ({
   title: 'Disk I/O',
   config: {
-    data: scaleFields(currentPoints.value, DISK_IO_SERIES, 1024 ** 2),
-    xAxis: currentXAxis.value,
+    data: scaleFields(points, DISK_IO_SERIES, 1024 ** 2),
+    xAxis,
     yAxis: { min: 0, echartOptions: { name: 'MB/s', splitLine: GRID } },
     x: 'time',
     y: DISK_IO_SERIES,
     seriesConfig: styleFor(DISK_IO_SERIES, (_, i) => PALETTE[i]),
   },
-}))
+})
+
+// CPU, load, memory, disk, network and disk I/O of one host, in the order the page shows them.
+// Alerts are the app server's: only its charts carry the limits and their lines.
+const hostCharts = (
+  points: MetricPoint[],
+  xAxis: ChartXAxisOptions,
+  hasDisk: boolean,
+  hasAlerts = false,
+) => [
+  cpuChart(points, xAxis, hasAlerts),
+  loadChart(points, xAxis),
+  memoryChart(points, xAxis, hasAlerts),
+  ...(hasDisk ? [diskChart(points, xAxis, hasAlerts)] : []),
+  networkChart(points, xAxis),
+  diskIoChart(points, xAxis),
+]
+
+const withChartTimes = (charts: AnalyticsChart[]) =>
+  charts.map((chart) => ({
+    ...chart,
+    config: { ...chart.config, data: withDateTime(chart.config.data ?? []) },
+  }))
 
 const appWindowData = computed(() => {
   const data = application.value
@@ -602,27 +653,28 @@ const appMemConfig = computed<AnalyticsChart>(() => ({
 
 // Combine all charts for template rendering
 const charts = computed(() =>
-  [
-    cpuChartConfig.value,
-    loadChartConfig.value,
-    memChartConfig.value,
-    ...(diskInfo.value ? [diskChartConfig.value] : []),
-    networkChartConfig.value,
-    diskIoChartConfig.value,
+  withChartTimes([
+    ...hostCharts(currentPoints.value, currentXAxis.value, Boolean(diskInfo.value), true),
     ...(appWindowData.value.cpu.length ? [appCpuConfig.value, appMemConfig.value] : []),
-  ].map((chart) => ({
-    ...chart,
-    config: { ...chart.config, data: withDateTime(chart.config.data ?? []) },
-  })),
+  ]),
 )
 
-// Formatting
-
-const formatBytes = (bytes: number) => {
-  if (bytes < 1024 ** 2) return (bytes / 1024).toFixed(0) + ' KB'
-  if (bytes < 1024 ** 3) return (bytes / 1024 ** 2).toFixed(1) + ' MB'
-  return (bytes / 1024 ** 3).toFixed(1) + ' GB'
-}
+// Live mode keeps the last 30 minutes, as the app server's charts do.
+const databaseServerPoints = computed<MetricPoint[]>(() => {
+  const points = databaseServer.value?.points ?? []
+  if (isHistorical.value) return points
+  const cutoff = liveNow.value - LIVE_WINDOW_MS
+  return points.filter((p) => (p.time ?? 0) >= cutoff)
+})
+const databaseServerCharts = computed(() =>
+  withChartTimes(
+    hostCharts(
+      databaseServerPoints.value,
+      currentXAxis.value,
+      Boolean(databaseServer.value?.storage?.disk),
+    ),
+  ),
+)
 
 // Lifecycle
 
@@ -639,7 +691,47 @@ const scheduleStats = () => {
   }, delay)
 }
 
+const saveLimit = async (key: AlertKey, value: number) => {
+  const previous = limits.value[key]
+
+  limits.value = { ...limits.value, [key]: value }
+
+  try {
+    await settingsApi.update({ resource_limits: { [key]: value } })
+  } catch (caught) {
+    limits.value = { ...limits.value, [key]: previous }
+
+    toast.error(errorMessage(caught, 'Could not change the alert.'))
+  }
+}
+
+const alertOptions = (key: AlertKey) =>
+  [...new Set([70, 80, 90, 95, limits.value[key]])]
+    .filter(Boolean)
+    .sort((left, right) => left - right)
+    .map((value) => ({ label: `Alert at ${value}%`, value: String(value) }))
+    .concat({ label: 'Alert off', value: '0' })
+
+const alertModels = Object.fromEntries(
+  (['cpu_usage_limit', 'memory_usage_limit', 'disk_space_limit'] as const).map((key) => [
+    key,
+    computed({
+      get: () => String(limits.value[key]),
+      set: (value: string) => saveLimit(key, Number(value)),
+    }),
+  ]),
+) as Record<AlertKey, WritableComputedRef<string>>
+
 onMounted(async () => {
+  settingsApi
+    .get()
+    .then((settings) => (limits.value = { ...limits.value, ...settings.resource_limits }))
+    .catch(() => null)
+  monitorApi
+    .systemInfo()
+    .then((info) => (cpuCount.value = info.cpu_count))
+    .catch(() => null)
+
   if (view.value === 'system') {
     if (isHistorical.value) loadHistory(activeWindow.value)
     else {
@@ -654,82 +746,77 @@ onUnmounted(() => clearTimeout(statsTimer))
 </script>
 
 <template>
-  <div class="px-4 pb-4">
-    <StickyToolbar class="flex items-center gap-2">
-      <Select
-        v-model="target"
-        :options="targetOptions"
-        :size="isMobile ? 'md' : 'sm'"
-        side="bottom"
-        align="start"
-        placeholder="Select site"
-        class="flex-1 sm:flex-none min-w-0 sm:max-w-[250px]"
-      />
+  <Teleport defer to="#header-actions">
+    <Select
+      v-model="target"
+      :options="targetOptions"
+      size="sm"
+      side="bottom"
+      align="start"
+      placeholder="Select site"
+      class="min-w-0 max-w-[250px]"
+    />
 
-      <Select
-        v-if="isServerScope"
-        v-model="metric"
-        :options="metricOptions"
-        :size="isMobile ? 'md' : 'sm'"
-        side="bottom"
-        align="start"
-      />
+    <Select
+      v-if="isServerScope"
+      v-model="metric"
+      :options="metricOptions"
+      size="sm"
+      side="bottom"
+      align="start"
+    />
 
-      <Select
-        v-model="windowModel"
-        :options="windowOptions"
-        :size="isMobile ? 'md' : 'sm'"
-        side="bottom"
-        align="start"
-      >
-        <template #prefix>
-          <span
-            v-if="!isHistorical"
-            class="bg-surface-green-8 rounded-full size-1.5 animate-pulse"
-          />
-        </template>
-      </Select>
-    </StickyToolbar>
+    <Select v-model="windowModel" :options="windowOptions" size="sm" side="bottom" align="start">
+      <template #prefix>
+        <span v-if="!isHistorical" class="bg-surface-green-8 rounded-full size-1.5 animate-pulse" />
+        <span v-else class="size-4 text-ink-gray-5 lucide-clock" />
+      </template>
+    </Select>
+  </Teleport>
 
+  <div class="p-4">
     <DatabaseInsights v-if="view === 'database'" :window="historyWindow" />
 
     <template v-else-if="view === 'site'">
       <SiteInsights v-if="activeSite" :site-name="activeSite" :window="historyWindow" />
       <EmptyState
         v-else-if="!sitesLoading"
-        icon="lucide-globe"
+        icon="lucide-pilot-site"
         title="No sites on this bench yet"
         description="Create a site to start collecting metrics for it."
       />
     </template>
 
     <template v-else>
-      <ErrorMessage v-if="!isHistorical && !liveStats && statsError" :message="statsError" class="mb-4" />
-      <Skeleton v-else-if="!isHistorical && !liveStats" class="mb-4 rounded-6 h-[88px]" />
+      <ErrorMessage
+        v-if="!isHistorical && !liveStats && statsError"
+        :message="statsError"
+        class="mb-4"
+      />
 
-      <!-- Live stats bar: CPU / Memory / Storage -->
       <div
-        v-else-if="liveStats"
-        class="flex sm:flex-row flex-col bg-surface-white mb-4 border rounded-6 border-outline-gray-2 divide-outline-gray-2 sm:divide-x overflow-hidden"
+        v-else-if="!showCharts && (!isHistorical || historyLoading)"
+        class="gap-4 grid lg:grid-cols-3 mb-4"
       >
         <div
-          v-for="meter in liveMeters"
-          :key="meter.label"
-          class="flex-1 px-4 sm:px-5 py-3 sm:py-4 border-t first:border-t-0 sm:border-t-0 border-outline-gray-2"
+          v-for="i in 3"
+          :key="i"
+          class="flex flex-col gap-3 bg-surface-gray-0 p-4 border border-outline-gray-1.5 rounded-5"
         >
-          <div class="flex justify-between items-baseline gap-2 mb-2">
-            <span class="text-ink-gray-6 text-base">{{ meter.label }}</span>
-            <span class="text-ink-gray-6 text-base shrink-0">{{ meter.value }}</span>
-          </div>
-
-          <div class="bg-surface-gray-2 rounded-full h-1 overflow-hidden">
-            <div
-              class="bg-surface-gray-9 rounded-full h-full"
-              :style="{ width: Math.min(meter.percent, 100) + '%' }"
-            />
-          </div>
+          <Skeleton class="rounded-4 w-24 h-4" />
+          <Skeleton class="rounded-full h-1.5" />
+          <Skeleton class="rounded-4 w-40 h-3.5" />
         </div>
       </div>
+
+      <SystemStats
+        v-else-if="showCharts"
+        :points="currentPoints"
+        :cpu-count="cpuCount"
+        :memory-total="memoryTotal"
+        :disk="diskInfo ?? null"
+        :disk-limit="limits.disk_space_limit"
+      />
 
       <!-- Historical empty states -->
       <template v-if="isHistorical && !historyLoading">
@@ -742,9 +829,26 @@ onUnmounted(() => clearTimeout(statsTimer))
         />
       </template>
 
+      <h2 v-if="databaseServer" class="mb-3 text-base-semibold text-ink-gray-8">App server</h2>
       <div class="gap-4 grid md:grid-cols-2">
         <template v-if="showCharts">
           <ChartCard v-for="chart in charts" :key="chart.title" :title="chart.title">
+            <template v-if="chart.alert" #actions>
+              <Select
+                v-model="alertModels[chart.alert].value"
+                :options="alertOptions(chart.alert)"
+                variant="ghost"
+                size="xs"
+                side="bottom"
+                align="end"
+                class="-my-1 -mr-1.5"
+              >
+                <template #prefix>
+                  <span class="size-3.5 text-ink-gray-5 lucide-bell" />
+                </template>
+              </Select>
+            </template>
+
             <AreaChart v-bind="chart.config" class="min-h-[300px]" />
           </ChartCard>
         </template>
@@ -753,6 +857,24 @@ onUnmounted(() => clearTimeout(statsTimer))
           <Skeleton v-for="i in 6" :key="i" class="rounded-6 h-[340px]" />
         </template>
       </div>
+
+      <section v-if="databaseServer && !historyError" class="mt-6">
+        <h2 class="mb-3 text-base-semibold text-ink-gray-8">Database server</h2>
+        <div v-if="historyLoading" class="gap-4 grid md:grid-cols-2">
+          <Skeleton v-for="i in 6" :key="i" class="rounded-6 h-[340px]" />
+        </div>
+        <EmptyState
+          v-else-if="!databaseServerPoints.length"
+          icon="lucide-database"
+          :title="`No database server metrics for the last ${isHistorical ? windowLabel : '30 minutes'}`"
+          description="The monitor reads them from the Pilot agent on the database server. Check that the agent is running and reachable."
+        />
+        <div v-else class="gap-4 grid md:grid-cols-2">
+          <ChartCard v-for="chart in databaseServerCharts" :key="chart.title" :title="chart.title">
+            <AreaChart v-bind="chart.config" class="min-h-[300px]" />
+          </ChartCard>
+        </div>
+      </section>
 
       <!-- WAF analytics (only renders when the WAF has logged activity) -->
       <WafAnalytics :window="activeWindow" />

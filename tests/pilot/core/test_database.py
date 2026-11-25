@@ -257,13 +257,14 @@ def test_postgres_get_schema_uses_one_connection() -> None:
 def _canned_execute(responses: dict, calls: list | None = None):
     """Fake Database.execute keyed on a substring of the query."""
 
-    def execute(self, query: str, read_only: bool = True) -> "QueryResult":
+    def execute(self, query: str, read_only: bool = True, *, params=()) -> "QueryResult":
         from pilot.core.database import QueryResult
 
         if calls is not None:
             calls.append((query, read_only))
+        text = " ".join([query, *map(str, params)])
         for pattern, (columns, rows) in responses.items():
-            if pattern in query:
+            if pattern in text:
                 return QueryResult(columns=columns, rows=rows, duration_ms=0)
         raise AssertionError(f"Unexpected query: {query}")
 
@@ -461,18 +462,19 @@ def test_mariadb_server_wide_size_breaks_down_by_schema_in_one_scan() -> None:
     assert len([call for call in calls if "information_schema.TABLES" in call[0]]) == 1
 
 
-def test_mariadb_schema_sizes_count_space_a_rebuild_would_reclaim() -> None:
-    """A schema holds its freed pages until it is rebuilt, so the disk cannot
-    hand that space to anything else - it belongs in the schema's size."""
+def test_mariadb_schema_sizes_sum_each_schemas_tablespace_files() -> None:
+    """Allocated file size keeps the freed pages a rebuild would reclaim, and needs
+    no read access to the data directory."""
     db = MariaDB(host="h", port=3306, user="u", password="p", database="")
     calls: list = []
-    responses = {"information_schema.TABLES": ([], [["site_one", 500], [None, 7]])}
+    responses = {"INNODB_SYS_TABLESPACES": ([], [["site_one", 500], ["my@002dsite", 7], ["empty", None]])}
 
     with patch.object(MariaDB, "execute", _canned_execute(responses, calls)):
         sizes = db.get_schema_sizes()
 
-    assert sizes == {"site_one": 500}
-    assert "data_length + index_length + data_free" in calls[0][0]
+    assert sizes == {"site_one": 500, "my-site": 7, "empty": 0}
+    assert "SUM(allocated_size)" in calls[0][0]
+    assert "information_schema.TABLES" not in calls[0][0]
 
 
 def test_postgres_schema_sizes_skip_template_databases() -> None:
@@ -753,10 +755,11 @@ def test_postgres_site_lock_wait_includes_schema_in_relation_name() -> None:
     lock = [1, "relation", "RowExclusiveLock", 16385, "active", None, "UPDATE", "site_one"]
     asked: list[str] = []
 
-    def execute(self, query: str, read_only: bool = True) -> QueryResult:
+    def execute(self, query: str, read_only: bool = True, *, params=()) -> QueryResult:
         if "blocked.granted" in query:
             return QueryResult(columns=[], rows=[lock], duration_ms=0)
         assert "JOIN pg_namespace" in query
+        assert params == [[16385]]
         asked.append(self._database)
         return QueryResult(columns=[], rows=[[16385, "archive", "tabItem"]], duration_ms=0)
 
@@ -1057,3 +1060,12 @@ def test_mariadb_skips_tls_only_on_loopback(host: str, socket: str | None, disab
         engine._connect()
 
     assert connect.call_args.kwargs["ssl_disabled"] is disabled
+
+
+def test_mariadb_reports_a_refused_connection_as_a_connect_error() -> None:
+    from pilot.exceptions import DatabaseConnectError
+
+    db = MariaDB(host="127.0.0.1", port=1, user="u", password="p", database="d", connect_timeout=1)
+
+    with pytest.raises(DatabaseConnectError):
+        db.execute("SELECT 1")
